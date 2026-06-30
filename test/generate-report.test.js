@@ -47,6 +47,15 @@ test("mock report binds trends to EricChan projects and writes markdown/json", a
   assert.ok(result.report.projectImpacts.some((item) => item.project.includes("XiaoChan")));
   assert.ok(result.report.opportunities.some((item) => item.status === "test"));
   assert.ok(result.report.agentDispatchSuggestions.some((item) => item.agent.includes("Codex")));
+  assert.ok(Array.isArray(result.report.dataGaps));
+  assert.ok(result.report.trends.every((item) => !/placeholder/i.test(item.title)));
+  assert.ok(result.report.trends.every((item) => item.sourceIds?.length || item.sourceUrls?.length || item.evidence));
+  assert.ok(result.report.opportunities.every((item) => item.stageFit));
+  assert.ok(result.report.recommendedActions.every((item) => item.stageFit));
+  assert.equal(result.report.qualityChecklist.evidenceBacked, true);
+  assert.equal(result.report.qualityChecklist.stageAppropriate, true);
+  assert.equal(result.report.qualityChecklist.noPlaceholderAsTrend, true);
+  assert.equal(result.report.qualityChecklist.avoidsPrematureBuild, true);
   assert.ok(result.markdown.includes("## 5. 今日机会收件箱"));
   assert.ok(result.markdown.includes("## 7. 推荐智能体派发"));
   assert.ok(fs.existsSync(path.join(rootDir, "reports", "2026-06-30.md")));
@@ -86,19 +95,95 @@ test("report quality validation catches missing strategic substance", () => {
 
   const weakResult = validateReportQuality({
     ...goodReport,
-    trends: [{ title: "Generic AI news" }],
+    trends: [{ title: "Placeholder: Generic AI news" }],
+    dataGaps: undefined,
     opportunities: [],
     recommendedActions: [{ action: "" }],
     qualityChecklist: {
       boundToProjects: false,
       hasExecutableAction: false,
-      avoidsGenericSummary: false
+      avoidsGenericSummary: false,
+      evidenceBacked: false,
+      stageAppropriate: false,
+      noPlaceholderAsTrend: false,
+      avoidsPrematureBuild: false
     }
   });
 
   assert.equal(weakResult.ok, false);
   assert.ok(weakResult.failures.includes("trends has at least one relatedProject"));
+  assert.ok(weakResult.failures.includes("trends do not include Placeholder items"));
+  assert.ok(weakResult.failures.includes("dataGaps exists"));
   assert.ok(weakResult.failures.includes("opportunities exists"));
   assert.ok(weakResult.failures.includes("recommendedActions has at least one executable action"));
   assert.ok(weakResult.failures.includes("qualityChecklist.boundToProjects is true"));
+  assert.ok(weakResult.failures.includes("qualityChecklist.evidenceBacked is true"));
+});
+
+test("strategic quality gate blocks premature now-stage build recommendations", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    opportunities: [
+      {
+        title: "Static OS baseline deployment on Vercel",
+        relatedTrend: "Cloud deployment",
+        relatedProject: "EricChan Strategy OS",
+        priority: "high",
+        status: "build",
+        stageFit: "now"
+      }
+    ],
+    recommendedActions: [
+      {
+        action: "Build Dashboard and start multi-agent execution today",
+        owner: "Codex",
+        urgency: "today",
+        stageFit: "now"
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("premature build/deployment suggestions are not stageFit now"));
+});
+
+test("strategic quality gate blocks deployment-on-vercel wording", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    opportunities: [
+      {
+        title: "Static OS baseline deployment on Vercel",
+        relatedTrend: "Vercel platform update",
+        relatedProject: "EricChan Strategy OS",
+        priority: "high",
+        status: "build",
+        stageFit: "now"
+      }
+    ],
+    recommendedActions: [
+      {
+        action: "Generate and manually review one more live report.",
+        owner: "EricChan",
+        urgency: "today",
+        stageFit: "now"
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("premature build/deployment suggestions are not stageFit now"));
 });

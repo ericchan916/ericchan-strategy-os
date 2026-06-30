@@ -91,6 +91,27 @@ The validator checks that the report has trends, project impacts, opportunities,
 
 The report also stores the result in `qualityValidation` and the Markdown self-review section prints a score such as `12/12`.
 
+## V0.1.2 Strategic Quality Gate
+
+V0.1.1 checked structure: the report had the right fields. That is necessary but not enough. A `12/12` structural score can still produce bad strategy if it recommends building too early, treats placeholders as trends, or lacks evidence.
+
+V0.1.2 adds a strategic quality gate:
+
+- Trends must carry `sourceIds`, `sourceUrls`, `evidence`, and `confidence`.
+- Manual placeholders and unverified inputs go into `dataGaps`, not `trends`.
+- Opportunities and recommended actions must include `stageFit`.
+- The validator blocks premature `stageFit: "now"` recommendations for Dashboard, Vercel deployment, cloud deployment, real multi-agent execution, or push integrations unless an `explicitOverrideReason` is provided.
+- `qualityChecklist` now includes `evidenceBacked`, `stageAppropriate`, `noPlaceholderAsTrend`, and `avoidsPrematureBuild`.
+
+`stageFit` values:
+
+- `now`: fits Stage 0.5 and can be done immediately.
+- `later`: valuable direction, but not for the current stage.
+- `not-yet`: information or dependency is missing.
+- `blocked`: should not be done under current constraints.
+
+`dataGaps` records source gaps such as manual placeholders, failed sources, unverified categories, or missing real data. It is the right place for China AI / OPC placeholders until they are validated.
+
 ## Output Files
 
 Each run writes:
@@ -119,6 +140,8 @@ A real report is accepted for Stage 0.5 only when:
 - `mode` is `live`.
 - `npm run validate:report` returns a full score.
 - At least one trend is connected to a specific EricChan project.
+- Trends are evidence-backed and do not include placeholders.
+- Opportunities and actions use `stageFit` honestly.
 - The opportunity inbox contains at least one `test` or `build` candidate.
 - The next action can be executed without needing a Dashboard.
 - The dispatch section recommends agents but does not call them.
@@ -146,7 +169,7 @@ npm test             # run local verification tests
 
 ## Stage 1 / Stage 2 Ideas
 
-Enter Stage 1 only after several real reports are useful without manual rescue: they should bind trends to projects, produce executable actions, and pass `npm run validate:report`.
+Enter Stage 1 only after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, and pass `npm run validate:report`.
 
 Stage 1 can add a small local Dashboard that reads `data/reports/*.json`, filters opportunities by status, and shows project impact history.
 

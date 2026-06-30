@@ -13,6 +13,8 @@ const AGENTS = [
   "Hermes"
 ];
 
+const PREMATURE_NOW_PATTERN = /vercel.*deploy|deploy.*vercel|unified vercel|dashboard|multi[- ]?agent.*execution|cloud.*deploy|deploy.*cloud|wechat|telegram|微信|推送|云端架构|统一部署/i;
+
 function readText(filePath, fallback = "") {
   try {
     return fs.readFileSync(filePath, "utf8");
@@ -88,6 +90,33 @@ function manualPlaceholderItem(source, date) {
     publishedAt: `${date}T00:00:00+08:00`,
     category: source.category || "manual"
   };
+}
+
+function isManualPlaceholderItem(item) {
+  return item?.url?.startsWith("manual://") || item?.source?.startsWith("manual-") || /manual placeholder/i.test(item?.title || "");
+}
+
+function createDataGaps(rawItems = [], warnings = []) {
+  const manualGaps = rawItems.filter(isManualPlaceholderItem).map((item) => ({
+    category: item.category || "manual",
+    source: item.source,
+    reason: "manual-placeholder",
+    note: item.summary || item.title || "Manual placeholder source needs real validation before becoming a trend."
+  }));
+
+  const warningGaps = warnings.map((warning) => ({
+    category: "source-warning",
+    source: "",
+    reason: "source-warning",
+    note: warning
+  }));
+
+  return [...manualGaps, ...warningGaps];
+}
+
+function evidenceForItem(item) {
+  const summary = item.summary || item.title || "";
+  return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
 }
 
 async function fetchRssSource(source) {
@@ -173,18 +202,25 @@ function writeRawSnapshot(rootDir, date, rawItems, warnings) {
 }
 
 function createMockAnalysis({ date, rawItems, contextText, warnings }) {
-  const items = rawItems.length ? rawItems : mockRawItems(date);
+  const sourceItems = rawItems.length ? rawItems : mockRawItems(date);
+  const items = sourceItems.filter((item) => !isManualPlaceholderItem(item));
+  const dataGaps = createDataGaps(sourceItems, warnings);
   const contextHint = contextText.includes("OPC") ? "OPC" : "EricChan Strategy OS";
 
   return {
     date,
     generatedAt: new Date().toISOString(),
     mode: "mock",
-    sourcesUsed: [...new Set(items.map((item) => item.source))],
+    sourcesUsed: [...new Set(sourceItems.map((item) => item.source))],
     warnings,
+    dataGaps,
     trends: items.slice(0, 5).map((item, index) => ({
       title: item.title,
       summary: item.summary,
+      sourceIds: [item.source].filter(Boolean),
+      sourceUrls: item.url ? [item.url] : [],
+      evidence: evidenceForItem(item),
+      confidence: item.url && item.summary ? "high" : "medium",
       whyItMatters:
         index === 0
           ? "趋势正在把大模型从回答工具推向可规划、可派发、可验证的工作系统。"
@@ -251,49 +287,55 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
         relatedTrend: "Agentic planning and tool use",
         relatedProject: "EricChan·战略OS",
         whyItMatters: "它让日报从信息消费变成项目推进入口。",
-        suggestedExperiment: "连续 3 天生成日报，统计每日报告是否能产生至少 1 个可执行任务。",
-        recommendedAgent: "GPT 5.5 Thinking + Codex",
-        priority: "high",
-        status: "test"
-      },
-      {
-        title: "小Chan Persona 记忆稳定性检查",
+      suggestedExperiment: "连续 3 天生成日报，统计每日报告是否能产生至少 1 个可执行任务。",
+      recommendedAgent: "GPT 5.5 Thinking + Codex",
+      priority: "high",
+      status: "test",
+      stageFit: "now"
+    },
+    {
+      title: "小Chan Persona 记忆稳定性检查",
         relatedTrend: "Long-context model workflows",
         relatedProject: "小Chan AI Persona",
         whyItMatters: "Persona 项目需要避免每次对话都重新解释身份或风格。",
-        suggestedExperiment: "准备 5 个重复问题，比较回答是否保持第一人称、幽默和事实一致。",
-        recommendedAgent: "Codex",
-        priority: "medium",
-        status: "test"
-      },
-      {
-        title: "iPortfolio 信息架构审美升级观察",
+      suggestedExperiment: "准备 5 个重复问题，比较回答是否保持第一人称、幽默和事实一致。",
+      recommendedAgent: "Codex",
+      priority: "medium",
+      status: "test",
+      stageFit: "later"
+    },
+    {
+      title: "iPortfolio 信息架构审美升级观察",
         relatedTrend: "Editable generated design systems",
         relatedProject: "个人传记网站 / iPortfolio",
         whyItMatters: "设计工具可以辅助表达升级，但 Stage 0.5 不应切到 UI 重构。",
-        suggestedExperiment: "只收集参考，不进入本阶段构建。",
-        recommendedAgent: "OpenDesign",
-        priority: "low",
-        status: "watch"
-      }
-    ],
-    recommendedActions: [
-      {
-        action: "先跑通 3 天 mock/真实混合报告，观察建议是否持续绑定具体项目。",
-        owner: "EricChan",
-        urgency: "today"
-      },
-      {
-        action: "把最高优先级 opportunity 手动转成 Obsidian 任务卡。",
-        owner: "Obsidian + Claudian",
-        urgency: "today"
-      },
-      {
-        action: "只在报告质量稳定后再做 Dashboard。",
-        owner: "GPT 5.5 Thinking",
-        urgency: "watch"
-      }
-    ],
+      suggestedExperiment: "只收集参考，不进入本阶段构建。",
+      recommendedAgent: "OpenDesign",
+      priority: "low",
+      status: "watch",
+      stageFit: "later"
+    }
+  ],
+  recommendedActions: [
+    {
+      action: "先跑通 3 天 mock/真实混合报告，观察建议是否持续绑定具体项目。",
+      owner: "EricChan",
+      urgency: "today",
+      stageFit: "now"
+    },
+    {
+      action: "把最高优先级 opportunity 手动转成 Obsidian 任务卡。",
+      owner: "Obsidian + Claudian",
+      urgency: "today",
+      stageFit: "now"
+    },
+    {
+      action: "只在报告质量稳定后再做 Dashboard。",
+      owner: "GPT 5.5 Thinking",
+      urgency: "watch",
+      stageFit: "later"
+    }
+  ],
     agentDispatchSuggestions: [
       {
         agent: "GPT 5.5 Thinking",
@@ -334,6 +376,10 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       boundToProjects: true,
       hasExecutableAction: true,
       avoidsGenericSummary: true,
+      evidenceBacked: true,
+      stageAppropriate: true,
+      noPlaceholderAsTrend: true,
+      avoidsPrematureBuild: true,
       bestSuggestion: "把日报行动项转成智能体派发队列。",
       suggestionToIgnore: "现在就做完整 Dashboard。"
     }
@@ -350,7 +396,7 @@ function extractJson(text) {
   }
 }
 
-async function analyzeWithLlm({ rootDir, date, rawItems, contextText, promptText, warnings, mock }) {
+async function analyzeWithLlm({ rootDir, date, rawItems, dataGaps, contextText, promptText, warnings, mock }) {
   loadEnv(rootDir);
 
   const apiKey = process.env.LLM_API_KEY;
@@ -379,7 +425,7 @@ async function analyzeWithLlm({ rootDir, date, rawItems, contextText, promptText
         },
         {
           role: "user",
-          content: JSON.stringify({ date, ericChanContext: contextText, rawItems, requiredAgents: AGENTS }, null, 2)
+          content: JSON.stringify({ date, ericChanContext: contextText, verifiedRawItems: rawItems, dataGaps, requiredAgents: AGENTS }, null, 2)
         }
       ]
     })
@@ -421,6 +467,9 @@ ${trends
     (item, index) => `### ${index + 1}. ${item.title}
 
 - 趋势是什么：${item.summary}
+- 证据：${item.evidence || ""}
+- 来源：${(item.sourceUrls || []).join(", ") || (item.sourceIds || []).join(", ")}
+- 置信度：${item.confidence || "unknown"}
 - 为什么重要：${item.whyItMatters}
 - 相关项目：${item.relatedProject}
 - 下一步：${item.suggestedNextStep}
@@ -453,13 +502,14 @@ ${opportunities
 - 建议实验：${item.suggestedExperiment}
 - 推荐智能体：${item.recommendedAgent}
 - 优先级：${item.priority}
-- 状态：${item.status}`
+- 状态：${item.status}
+- 阶段适配：${item.stageFit || ""}`
   )
   .join("\n\n")}
 
 ## 6. 推荐下一步行动
 
-${bullet(actions.map((item) => `${item.action} 负责人：${item.owner}；紧急度：${item.urgency}`))}
+${bullet(actions.map((item) => `${item.action} 负责人：${item.owner}；紧急度：${item.urgency}；阶段适配：${item.stageFit || ""}`))}
 
 ## 7. 推荐智能体派发
 
@@ -477,9 +527,17 @@ ${bullet(dispatches.map((item) => `${item.agent}：${item.dispatch}`))}
 - [${checklist.boundToProjects ? "x" : " "}] 今日报告是否绑定到了具体项目？
 - [${checklist.hasExecutableAction ? "x" : " "}] 是否产生了至少一个可执行动作？
 - [${checklist.avoidsGenericSummary ? "x" : " "}] 是否避免了泛泛而谈？
+- [${checklist.evidenceBacked ? "x" : " "}] 是否有证据追踪？
+- [${checklist.stageAppropriate ? "x" : " "}] 是否符合当前阶段？
+- [${checklist.noPlaceholderAsTrend ? "x" : " "}] 是否避免把 placeholder 当趋势？
+- [${checklist.avoidsPrematureBuild ? "x" : " "}] 是否避免过早 build / deployment？
 - 质量评分：${report.qualityValidation ? `${report.qualityValidation.score}/${report.qualityValidation.maxScore}` : "未运行"}
 - 最值得执行：${checklist.bestSuggestion || ""}
 - 应该忽略：${checklist.suggestionToIgnore || ""}
+
+## Data Gaps
+
+${bullet((report.dataGaps || []).map((item) => `${item.reason || "gap"}：${item.source || item.category || ""} ${item.note || ""}`))}
 
 ## Sources Used
 
@@ -490,6 +548,12 @@ ${report.warnings?.length ? `## Warnings\n\n${bullet(report.warnings)}` : ""}
 }
 
 function validateReportQuality(report) {
+  const trendHasEvidence = (item) =>
+    item?.sourceIds?.length || item?.sourceUrls?.length || (typeof item?.evidence === "string" && item.evidence.trim());
+  const validStageFit = (item) => ["now", "later", "not-yet", "blocked"].includes(item?.stageFit);
+  const textOf = (item) => [item?.title, item?.action, item?.suggestedExperiment, item?.whyItMatters].filter(Boolean).join(" ");
+  const isPrematureNow = (item) => item?.stageFit === "now" && PREMATURE_NOW_PATTERN.test(textOf(item)) && !item.explicitOverrideReason;
+
   const checks = [
     ["trends exists", () => Array.isArray(report.trends) && report.trends.length > 0],
     ["projectImpacts exists", () => Array.isArray(report.projectImpacts) && report.projectImpacts.length > 0],
@@ -504,6 +568,9 @@ function validateReportQuality(report) {
       "trends has at least one relatedProject",
       () => (report.trends || []).some((item) => typeof item.relatedProject === "string" && item.relatedProject.trim())
     ],
+    ["each trend has evidence", () => (report.trends || []).every(trendHasEvidence)],
+    ["trends do not include Placeholder items", () => (report.trends || []).every((item) => !/placeholder/i.test(item.title || ""))],
+    ["dataGaps exists", () => Array.isArray(report.dataGaps)],
     [
       "opportunities has at least one relatedProject",
       () =>
@@ -511,13 +578,31 @@ function validateReportQuality(report) {
           (item) => typeof item.relatedProject === "string" && item.relatedProject.trim()
         )
     ],
+    ["opportunities include stageFit", () => (report.opportunities || []).every(validStageFit)],
     [
       "recommendedActions has at least one executable action",
       () => (report.recommendedActions || []).some((item) => typeof item.action === "string" && item.action.trim())
     ],
+    ["recommendedActions include stageFit", () => (report.recommendedActions || []).every(validStageFit)],
+    [
+      "high priority build opportunities are not blocked",
+      () =>
+        (report.opportunities || []).every(
+          (item) => !(item.priority === "high" && item.status === "build" && ["not-yet", "blocked"].includes(item.stageFit))
+        )
+    ],
+    ["today actions are stageFit now", () => (report.recommendedActions || []).every((item) => item.urgency !== "today" || item.stageFit === "now")],
+    [
+      "premature build/deployment suggestions are not stageFit now",
+      () => [...(report.opportunities || []), ...(report.recommendedActions || [])].every((item) => !isPrematureNow(item))
+    ],
     ["qualityChecklist.boundToProjects is true", () => report.qualityChecklist?.boundToProjects === true],
     ["qualityChecklist.hasExecutableAction is true", () => report.qualityChecklist?.hasExecutableAction === true],
-    ["qualityChecklist.avoidsGenericSummary is true", () => report.qualityChecklist?.avoidsGenericSummary === true]
+    ["qualityChecklist.avoidsGenericSummary is true", () => report.qualityChecklist?.avoidsGenericSummary === true],
+    ["qualityChecklist.evidenceBacked is true", () => report.qualityChecklist?.evidenceBacked === true],
+    ["qualityChecklist.stageAppropriate is true", () => report.qualityChecklist?.stageAppropriate === true],
+    ["qualityChecklist.noPlaceholderAsTrend is true", () => report.qualityChecklist?.noPlaceholderAsTrend === true],
+    ["qualityChecklist.avoidsPrematureBuild is true", () => report.qualityChecklist?.avoidsPrematureBuild === true]
   ].map(([name, check]) => ({ name, pass: Boolean(check()) }));
 
   const failures = checks.filter((item) => !item.pass).map((item) => item.name);
@@ -535,16 +620,20 @@ async function generateReport({ rootDir = process.cwd(), mock = false, date = ge
   const contextText = readText(path.join(rootDir, "context", "context.md"));
   const promptText = readText(path.join(rootDir, "prompts", "analysis-prompt.md"));
   const rawItems = await collectRawItems({ rootDir, date, mock, warnings });
+  const dataGaps = createDataGaps(rawItems, warnings);
+  const verifiedRawItems = rawItems.filter((item) => !isManualPlaceholderItem(item));
 
   writeRawSnapshot(rootDir, date, rawItems, warnings);
 
   let report;
   try {
-    report = await analyzeWithLlm({ rootDir, date, rawItems, contextText, promptText, warnings, mock });
+    report = await analyzeWithLlm({ rootDir, date, rawItems: verifiedRawItems, dataGaps, contextText, promptText, warnings, mock });
   } catch (error) {
     warnings.push(`${error.message}; fallback mock analysis mode used.`);
     report = createMockAnalysis({ date, rawItems, contextText, warnings });
   }
+
+  if (!Array.isArray(report.dataGaps)) report.dataGaps = dataGaps;
 
   report.qualityValidation = validateReportQuality(report);
 
