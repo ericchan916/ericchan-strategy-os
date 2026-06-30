@@ -6,6 +6,7 @@
   "scripts": {
     "report": "node scripts/generate-report.js",
     "report:mock": "node scripts/generate-report.js --mock",
+    "validate:report": "node scripts/validate-report.js",
     "clean": "node scripts/generate-report.js --clean",
     "test": "node --test"
   },

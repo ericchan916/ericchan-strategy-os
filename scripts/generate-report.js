@@ -477,6 +477,7 @@ ${bullet(dispatches.map((item) => `${item.agent}：${item.dispatch}`))}
 - [${checklist.boundToProjects ? "x" : " "}] 今日报告是否绑定到了具体项目？
 - [${checklist.hasExecutableAction ? "x" : " "}] 是否产生了至少一个可执行动作？
 - [${checklist.avoidsGenericSummary ? "x" : " "}] 是否避免了泛泛而谈？
+- 质量评分：${report.qualityValidation ? `${report.qualityValidation.score}/${report.qualityValidation.maxScore}` : "未运行"}
 - 最值得执行：${checklist.bestSuggestion || ""}
 - 应该忽略：${checklist.suggestionToIgnore || ""}
 
@@ -486,6 +487,47 @@ ${bullet((report.sourcesUsed || []).map(String))}
 
 ${report.warnings?.length ? `## Warnings\n\n${bullet(report.warnings)}` : ""}
 `;
+}
+
+function validateReportQuality(report) {
+  const checks = [
+    ["trends exists", () => Array.isArray(report.trends) && report.trends.length > 0],
+    ["projectImpacts exists", () => Array.isArray(report.projectImpacts) && report.projectImpacts.length > 0],
+    ["opportunities exists", () => Array.isArray(report.opportunities) && report.opportunities.length > 0],
+    ["recommendedActions exists", () => Array.isArray(report.recommendedActions) && report.recommendedActions.length > 0],
+    [
+      "agentDispatchSuggestions exists",
+      () => Array.isArray(report.agentDispatchSuggestions) && report.agentDispatchSuggestions.length > 0
+    ],
+    ["obsidianExport exists", () => Boolean(report.obsidianExport)],
+    [
+      "trends has at least one relatedProject",
+      () => (report.trends || []).some((item) => typeof item.relatedProject === "string" && item.relatedProject.trim())
+    ],
+    [
+      "opportunities has at least one relatedProject",
+      () =>
+        (report.opportunities || []).some(
+          (item) => typeof item.relatedProject === "string" && item.relatedProject.trim()
+        )
+    ],
+    [
+      "recommendedActions has at least one executable action",
+      () => (report.recommendedActions || []).some((item) => typeof item.action === "string" && item.action.trim())
+    ],
+    ["qualityChecklist.boundToProjects is true", () => report.qualityChecklist?.boundToProjects === true],
+    ["qualityChecklist.hasExecutableAction is true", () => report.qualityChecklist?.hasExecutableAction === true],
+    ["qualityChecklist.avoidsGenericSummary is true", () => report.qualityChecklist?.avoidsGenericSummary === true]
+  ].map(([name, check]) => ({ name, pass: Boolean(check()) }));
+
+  const failures = checks.filter((item) => !item.pass).map((item) => item.name);
+  return {
+    ok: failures.length === 0,
+    score: checks.length - failures.length,
+    maxScore: checks.length,
+    checks,
+    failures
+  };
 }
 
 async function generateReport({ rootDir = process.cwd(), mock = false, date = getDateString() } = {}) {
@@ -503,6 +545,8 @@ async function generateReport({ rootDir = process.cwd(), mock = false, date = ge
     warnings.push(`${error.message}; fallback mock analysis mode used.`);
     report = createMockAnalysis({ date, rawItems, contextText, warnings });
   }
+
+  report.qualityValidation = validateReportQuality(report);
 
   const markdown = renderMarkdown(report);
   const reportsDir = path.join(rootDir, "reports");
@@ -552,10 +596,12 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  main()
+    .then(() => process.exit(process.exitCode || 0))
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
 }
 
 module.exports = {
@@ -563,5 +609,6 @@ module.exports = {
   createMockAnalysis,
   generateReport,
   getDateString,
-  renderMarkdown
+  renderMarkdown,
+  validateReportQuality
 };

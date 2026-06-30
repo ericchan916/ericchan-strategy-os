@@ -7,7 +7,8 @@ const test = require("node:test");
 const {
   generateReport,
   renderMarkdown,
-  createMockAnalysis
+  createMockAnalysis,
+  validateReportQuality
 } = require("../scripts/generate-report");
 
 test("mock report binds trends to EricChan projects and writes markdown/json", async () => {
@@ -69,4 +70,35 @@ test("markdown includes required strategy sections", () => {
     "## 7. 推荐智能体派发",
     "## 8. 建议进入 Obsidian 的内容"
   ].forEach((section) => assert.ok(markdown.includes(section), section));
+});
+
+test("report quality validation catches missing strategic substance", () => {
+  const goodReport = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+  const goodResult = validateReportQuality(goodReport);
+
+  assert.equal(goodResult.ok, true);
+  assert.equal(goodResult.score, goodResult.checks.length);
+
+  const weakResult = validateReportQuality({
+    ...goodReport,
+    trends: [{ title: "Generic AI news" }],
+    opportunities: [],
+    recommendedActions: [{ action: "" }],
+    qualityChecklist: {
+      boundToProjects: false,
+      hasExecutableAction: false,
+      avoidsGenericSummary: false
+    }
+  });
+
+  assert.equal(weakResult.ok, false);
+  assert.ok(weakResult.failures.includes("trends has at least one relatedProject"));
+  assert.ok(weakResult.failures.includes("opportunities exists"));
+  assert.ok(weakResult.failures.includes("recommendedActions has at least one executable action"));
+  assert.ok(weakResult.failures.includes("qualityChecklist.boundToProjects is true"));
 });

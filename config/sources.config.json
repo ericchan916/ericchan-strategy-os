@@ -14,11 +14,11 @@
       "id": "anthropic-news",
       "name": "Anthropic News",
       "category": "frontier-models",
-      "type": "rss",
-      "url": "https://www.anthropic.com/news/rss.xml",
+      "type": "webpage",
+      "url": "https://www.anthropic.com/news",
       "enabled": true,
       "priority": 2,
-      "notes": "Model and safety updates. Skip if unreachable."
+      "notes": "Official News page. Anthropic does not currently expose a stable official RSS feed here."
     },
     {
       "id": "github-blog-ai",
@@ -31,13 +31,33 @@
       "notes": "AI coding and developer tooling signals."
     },
     {
+      "id": "huggingface-blog",
+      "name": "Hugging Face Blog",
+      "category": "open-source",
+      "type": "rss",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "enabled": true,
+      "priority": 4,
+      "notes": "Open-source model, dataset, and tooling signals."
+    },
+    {
+      "id": "vercel-changelog",
+      "name": "Vercel Changelog",
+      "category": "ai-coding",
+      "type": "rss",
+      "url": "https://vercel.com/changelog/rss",
+      "enabled": true,
+      "priority": 5,
+      "notes": "Frontend, deployment, AI SDK, and developer workflow changes."
+    },
+    {
       "id": "manual-china-ai",
       "name": "Manual China AI Watch",
       "category": "china-ai",
       "type": "manual-placeholder",
       "url": "",
       "enabled": true,
-      "priority": 4,
+      "priority": 6,
       "notes": "Placeholder for WorkBuddy + DeepSeek validated Chinese AI ecosystem notes."
     },
     {
@@ -47,7 +67,7 @@
       "type": "manual-placeholder",
       "url": "",
       "enabled": true,
-      "priority": 5,
+      "priority": 7,
       "notes": "Placeholder for OPC and indie project opportunity notes."
     }
   ]
