@@ -1,0 +1,54 @@
+{
+  "sources": [
+    {
+      "id": "openai-blog",
+      "name": "OpenAI Blog",
+      "category": "frontier-models",
+      "type": "rss",
+      "url": "https://openai.com/news/rss.xml",
+      "enabled": true,
+      "priority": 1,
+      "notes": "Frontier model and product updates. Skip if unreachable."
+    },
+    {
+      "id": "anthropic-news",
+      "name": "Anthropic News",
+      "category": "frontier-models",
+      "type": "rss",
+      "url": "https://www.anthropic.com/news/rss.xml",
+      "enabled": true,
+      "priority": 2,
+      "notes": "Model and safety updates. Skip if unreachable."
+    },
+    {
+      "id": "github-blog-ai",
+      "name": "GitHub Blog AI",
+      "category": "ai-coding",
+      "type": "rss",
+      "url": "https://github.blog/feed/",
+      "enabled": true,
+      "priority": 3,
+      "notes": "AI coding and developer tooling signals."
+    },
+    {
+      "id": "manual-china-ai",
+      "name": "Manual China AI Watch",
+      "category": "china-ai",
+      "type": "manual-placeholder",
+      "url": "",
+      "enabled": true,
+      "priority": 4,
+      "notes": "Placeholder for WorkBuddy + DeepSeek validated Chinese AI ecosystem notes."
+    },
+    {
+      "id": "manual-opc-indie",
+      "name": "Manual OPC Indie Watch",
+      "category": "opc-indie",
+      "type": "manual-placeholder",
+      "url": "",
+      "enabled": true,
+      "priority": 5,
+      "notes": "Placeholder for OPC and indie project opportunity notes."
+    }
+  ]
+}

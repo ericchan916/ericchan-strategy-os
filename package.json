@@ -1,0 +1,19 @@
+{
+  "name": "ericchan-strategy-os",
+  "version": "0.1.0",
+  "description": "Stage 0.5 local daily strategy report generator for EricChan.",
+  "private": true,
+  "scripts": {
+    "report": "node scripts/generate-report.js",
+    "report:mock": "node scripts/generate-report.js --mock",
+    "clean": "node scripts/generate-report.js --clean",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "rss-parser": "^3.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
