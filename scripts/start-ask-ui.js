@@ -108,13 +108,71 @@ function startAskUiServer({ rootDir = process.cwd(), port = DEFAULT_PORT, host =
   });
 }
 
+function startAskUiServers({ rootDir = process.cwd(), port = DEFAULT_PORT, hosts = ["127.0.0.1", "::1"] } = {}) {
+  return new Promise((resolve, reject) => {
+    const servers = [];
+    let pending = hosts.length;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      for (const srv of servers) srv.off("error", reject);
+      resolve({ servers, close: () => closeAskUiServers(servers) });
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      for (const srv of servers) {
+        srv.off("error", reject);
+        try { srv.close(); } catch {}
+      }
+      reject(error);
+    };
+
+    for (const host of hosts) {
+      const server = createAskUiServer({ rootDir }).listen(port, host, () => {
+        pending -= 1;
+        if (pending === 0) finish();
+      });
+      server.once("error", fail);
+      servers.push(server);
+    }
+  });
+}
+
+function closeAskUiServers(servers) {
+  return Promise.all(
+    (servers || []).map(
+      (server) =>
+        new Promise((resolve) => {
+          try {
+            server.close(() => resolve());
+          } catch {
+            resolve();
+          }
+        })
+    )
+  );
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const portArgIndex = args.indexOf("--port");
   const port = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : DEFAULT_PORT;
-  await startAskUiServer({ port });
+  const { servers, close } = await startAskUiServers({ port });
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.once(sig, () => {
+      close().finally(() => process.exit(0));
+    });
+  }
   console.log("本地战略OS界面已启动：");
-  console.log(`http://localhost:${port}`);
+  for (const server of servers) {
+    const addr = server.address();
+    console.log(`- http://${addr.family === "IPv6" ? `[${addr.address}]` : addr.address}:${addr.port}`);
+  }
+  console.log("（同时支持 IPv4 与 IPv6 loopback，不会暴露到局域网。）");
 }
 
 if (require.main === module) {
@@ -126,5 +184,7 @@ if (require.main === module) {
 
 module.exports = {
   createAskUiServer,
-  startAskUiServer
+  startAskUiServer,
+  startAskUiServers,
+  closeAskUiServers
 };
