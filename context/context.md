@@ -152,3 +152,86 @@ Current stage forbids:
 - Directly build WeChat / Telegram push.
 - Automatically read all local files.
 - Modify iPortfolio / XiaoChan / 节律 old projects.
+
+## Strategic OS Core Correction
+
+- Strategy OS is not a legacy project optimizer.
+- iPortfolio / XiaoChan / 节律 App are legacy context materials, not default action targets.
+- Legacy projects should be used to infer EricChan's taste, capabilities, iteration style, project preferences, acceptance standards, and tool-use habits.
+- Strategy OS should prioritize monetizable new project opportunities and current new-project improvements.
+- The default strategic question is not "which old project should be updated?" The default strategic question is "what new opportunity does this trend reveal, does it fit EricChan, can it make money, and can it become a small validated experiment?"
+- If a project is a current new project, Strategy OS may suggest stage-appropriate improvements. If it is a legacy project, Strategy OS should treat it as learning material unless the user explicitly reactivates it or a clear monetizable opportunity emerges.
+
+## Legacy Projects As Learning Materials
+
+### iPortfolio
+
+- Learning purpose: infer EricChan's personal expression, visual taste, content structure, narrative ability, and public positioning style.
+- Do not suggest updating iPortfolio just because an AI, design, portfolio, or Vercel trend appears.
+- Use iPortfolio only when it helps evaluate EricChan-fit for a new opportunity, content asset, trust asset, or personal brand experiment.
+
+### XiaoChan
+
+- Learning purpose: infer EricChan's interest in AI Persona, identity consistency, memory design, humor, and interactive experience.
+- Do not suggest rebuilding XiaoChan just because an Agent, long-context, persona, or model-memory trend appears.
+- Use XiaoChan only as evidence of EricChan's capability and taste in persona design, or as inspiration for a new monetizable persona/product experiment.
+
+### 节律 App
+
+- Learning purpose: infer EricChan's preference for minimal, premium, restrained, life-tool products.
+- Do not suggest expanding 节律 App just because reminder, mobile, habit, calendar, notification, or lifestyle-tool trends appear.
+- Use 节律 App only as a taste and product-scope reference unless the user explicitly reactivates it.
+
+### Historical Versions And Records
+
+- Learning purpose: infer EricChan's iteration style, verification standards, versioning habits, acceptance criteria, and tool workflow.
+- Do not turn old version notes into automatic refactor or deployment tasks.
+- Use historical records to improve opportunity fit, MVP sizing, and stage discipline.
+
+Legacy project guardrails:
+
+- Do not recommend updating iPortfolio because of AI trends.
+- Do not recommend rebuilding XiaoChan because of Agent trends.
+- Do not recommend deploying all old projects because of Vercel or cloud trends.
+- Do not recommend expanding 节律 App because of reminder, life-tool, or mobile trends.
+- If a legacy project has no clear monetization value or new-project inspiration, it must not enter recommendedActions.
+
+## Opportunity First Rule
+
+Every trend must first be classified as one of:
+
+- A. New Project Opportunity
+- B. Current New Project Improvement
+- C. Legacy Project Learning Material
+- D. Watch Only
+- E. Ignore
+
+Default priority:
+
+New Project Opportunity > Current New Project Improvement > Legacy Project Learning Material > Watch Only > Ignore
+
+Implementation mapping:
+
+- `new-project-opportunity`: the trend reveals a possible new product, service, content asset, research product, tool, or monetizable experiment.
+- `current-project-improvement`: the trend can improve Strategy OS or another currently active new project within the current stage.
+- `legacy-learning-material`: the trend is useful only for learning EricChan's taste, capabilities, or preferences from legacy projects.
+- `watch-only`: the trend is interesting but lacks enough evidence, monetization, fit, or timing.
+- `ignore`: the trend is too generic, noisy, irrelevant, or stage-inappropriate.
+
+## Opportunity Scoring
+
+Every opportunity should be scored from 1 to 5 on:
+
+- monetizationPotential: likelihood this can become revenue, paid service, paid content, productized workflow, consulting intake, or commercial leverage.
+- ericChanFit: match with EricChan's taste, ability, execution style, resources, and current strategic direction.
+- mvpSpeed: how quickly a small test can be built or manually simulated.
+- aiLeverage: how much AI meaningfully improves creation, delivery, validation, or scale.
+- opcFit: whether the opportunity supports OPC/indie exploration or one-person-company logic.
+- contentAssetPotential: whether the opportunity can create reusable writing, demos, videos, case studies, trust assets, or Obsidian knowledge.
+- longTermCompounding: whether repeated work builds durable advantage.
+- complexityRisk: how complex, distracting, expensive, or failure-prone it is. Higher means riskier and should not be added to positive scores.
+- currentStageFit: whether this belongs in the current Stage 1A learning loop.
+
+Important scoring rule:
+
+- complexityRisk is a risk score, not a positive score. A high complexityRisk should lower priority or push stageFit to later/not-yet unless there is an explicit override reason.

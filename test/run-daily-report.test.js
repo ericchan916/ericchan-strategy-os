@@ -71,7 +71,7 @@ test("runDailyReport generates report, validates it, and prepares feedback", asy
   const result = await runDailyReport({ rootDir, date: "2026-06-30", mock: true });
 
   assert.equal(result.mode, "mock");
-  assert.equal(result.qualityScore, "29/29");
+  assert.equal(result.qualityScore, `${result.validation.maxScore}/${result.validation.maxScore}`);
   assert.equal(result.validation.ok, true);
   assert.equal(result.feedback.created, true);
   assert.ok(fs.existsSync(result.markdownPath));

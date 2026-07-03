@@ -15,6 +15,37 @@ const AGENTS = [
 
 const PREMATURE_NOW_PATTERN = /vercel.*deploy|deploy.*vercel|unified vercel|dashboard|multi[- ]?agent.*execution|cloud.*deploy|deploy.*cloud|wechat|telegram|微信|推送|云端架构|统一部署/i;
 const FEEDBACK_DECISIONS = new Set(["pending", "accept", "watch", "reject", "done"]);
+const TREND_CLASSIFICATIONS = new Set([
+  "new-project-opportunity",
+  "current-project-improvement",
+  "legacy-learning-material",
+  "watch-only",
+  "ignore"
+]);
+const ACTION_TYPES = new Set([
+  "validate-new-opportunity",
+  "research-market",
+  "create-mvp-spec",
+  "dispatch-codex-mvp",
+  "dispatch-opendesign-prototype",
+  "dispatch-workbuddy-validation",
+  "archive-opportunity",
+  "update-context",
+  "ignore-trend"
+]);
+const OPPORTUNITY_SCORE_KEYS = [
+  "monetizationPotential",
+  "ericChanFit",
+  "mvpSpeed",
+  "aiLeverage",
+  "opcFit",
+  "contentAssetPotential",
+  "longTermCompounding",
+  "complexityRisk",
+  "currentStageFit"
+];
+const LEGACY_ACTION_PATTERN = /update\s+iportfolio|update.*personal (biography )?site|rebuild\s+xiaochan|rebuild.*persona|deploy.*legacy|legacy.*deploy|redesign.*personal website|expand.*节律|add features.*节律|优化.*旧项目|重构.*小chan|更新.*iportfolio|部署.*旧项目|扩展.*节律/i;
+const LEGACY_PROJECT_PATTERN = /iportfolio|personal biography|personal website|xiaochan|小chan|节律/i;
 
 function pendingFeedback() {
   return { decision: "pending", reason: "", followUp: "" };
@@ -131,6 +162,21 @@ function evidenceForItem(item) {
   return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
 }
 
+function opportunityScores(overrides = {}) {
+  return {
+    monetizationPotential: 4,
+    ericChanFit: 5,
+    mvpSpeed: 4,
+    aiLeverage: 4,
+    opcFit: 3,
+    contentAssetPotential: 4,
+    longTermCompounding: 4,
+    complexityRisk: 2,
+    currentStageFit: 4,
+    ...overrides
+  };
+}
+
 async function fetchRssSource(source) {
   const Parser = require("rss-parser");
   const parser = new Parser({ timeout: 10000 });
@@ -230,6 +276,18 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
     trends: items.slice(0, 5).map((item, index) => ({
       title: item.title,
       summary: item.summary,
+      classification:
+        index === 0
+          ? "new-project-opportunity"
+          : index === 1
+            ? "current-project-improvement"
+            : "legacy-learning-material",
+      opportunityReason:
+        index === 0
+          ? "Long-context planning and tool use can become a small paid opportunity discovery workflow for independent operators."
+          : index === 1
+            ? "Local validation loops improve the current Strategy OS report engine and proposal workflow."
+            : "Editable design-system trends help infer EricChan's taste from legacy projects, but they should not trigger old-project redesign.",
       sourceIds: [item.source].filter(Boolean),
       sourceUrls: item.url ? [item.url] : [],
       evidence: evidenceForItem(item),
@@ -266,11 +324,11 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       },
       {
         project: "小Chan AI Persona",
-        relationship: "Agent 和长上下文趋势可转化为人格记忆、语气稳定性和可验证对话实验。"
+        relationship: "作为旧项目学习材料，用来理解 EricChan 对 AI Persona、一致性和互动体验的兴趣，不默认触发重构。"
       },
       {
         project: "个人传记网站 / iPortfolio",
-        relationship: "设计工具变化可用于升级信息架构和作品表达，但不应污染当前战略引擎上下文。"
+        relationship: "作为旧项目学习材料，用来理解 EricChan 的个人表达、视觉偏好和叙事方式，不默认触发 redesign。"
       },
       {
         project: contextHint,
@@ -284,8 +342,8 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
         priority: "high"
       },
       {
-        project: "XiaoChan AI Persona",
-        impact: "可设计一组 persona 回答稳定性评测，验证上下文压缩与记忆策略。",
+        project: "Legacy projects / XiaoChan / iPortfolio / 节律 App",
+        impact: "旧项目只提供能力、审美和迭代偏好样本；除非出现明确新机会或用户指定，不进入行动建议。",
         priority: "medium"
       },
       {
@@ -296,65 +354,108 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
     ],
     opportunities: [
       {
-        title: "把日报行动项转成智能体派发队列",
+        title: "独立创作者 AI 机会发现小报 MVP",
+        opportunityName: "Independent AI opportunity brief MVP",
         relatedTrend: "Agentic planning and tool use",
+        sourceTrend: "Agentic planning and tool use",
         relatedProject: "EricChan·战略OS",
-        whyItMatters: "它让日报从信息消费变成项目推进入口。",
-      suggestedExperiment: "连续 3 天生成日报，统计每日报告是否能产生至少 1 个可执行任务。",
-      recommendedAgent: "GPT 5.5 Thinking + Codex",
-      priority: "high",
-      status: "test",
-      stageFit: "now",
-      humanFeedback: pendingFeedback()
-    },
-    {
-      title: "小Chan Persona 记忆稳定性检查",
+        whyItMatters: "把趋势翻译成可验证、可变现的新项目机会，符合 Strategy OS 的新定位。",
+        suggestedExperiment: "用 3 个垂直人群手动生成机会简报，验证是否有人愿意持续阅读或付费咨询。",
+        monetizationPotential: "medium-high: niche paid brief, consulting intake, or productized research workflow",
+        ericChanFit: "high: uses EricChan's synthesis taste, AI workflow fluency, and restrained product judgment",
+        mvpForm: "Markdown-based weekly opportunity brief plus manual scoring table",
+        firstValidationAction: "Pick one niche audience and produce one paid-style sample brief for human review.",
+        recommendedAgent: "GPT 5.5 Thinking + Codex",
+        enterOpportunityPool: true,
+        needsHumanConfirmation: true,
+        shouldIgnore: false,
+        scores: opportunityScores(),
+        priority: "high",
+        status: "test",
+        stageFit: "now",
+        humanFeedback: pendingFeedback()
+      },
+      {
+        title: "Strategy OS 机会评分质量门增强",
+        opportunityName: "Opportunity scoring quality gate",
         relatedTrend: "Long-context model workflows",
-        relatedProject: "小Chan AI Persona",
-        whyItMatters: "Persona 项目需要避免每次对话都重新解释身份或风格。",
-      suggestedExperiment: "准备 5 个重复问题，比较回答是否保持第一人称、幽默和事实一致。",
-      recommendedAgent: "Codex",
-      priority: "medium",
-      status: "test",
-      stageFit: "later",
-      humanFeedback: pendingFeedback()
-    },
-    {
-      title: "iPortfolio 信息架构审美升级观察",
+        sourceTrend: "Long-context model workflows",
+        relatedProject: "EricChan·战略OS",
+        whyItMatters: "当前新项目需要把人工反馈沉淀成机会判断，而不是旧项目任务。",
+        suggestedExperiment: "对连续 3 份报告统计机会评分是否能过滤低变现、低适配建议。",
+        monetizationPotential: "medium: internal tool first, later productized as opportunity OS template",
+        ericChanFit: "high: strengthens EricChan's strategic review loop",
+        mvpForm: "JSON schema plus validator checks",
+        firstValidationAction: "Run mock and one live report, confirm old-project optimization is blocked.",
+        recommendedAgent: "Codex",
+        enterOpportunityPool: true,
+        needsHumanConfirmation: true,
+        shouldIgnore: false,
+        scores: opportunityScores({ monetizationPotential: 3, opcFit: 2, complexityRisk: 2, currentStageFit: 5 }),
+        priority: "high",
+        status: "test",
+        stageFit: "now",
+        humanFeedback: pendingFeedback()
+      },
+      {
+        title: "旧项目审美样本库观察",
+        opportunityName: "Legacy project taste corpus",
         relatedTrend: "Editable generated design systems",
-        relatedProject: "个人传记网站 / iPortfolio",
-        whyItMatters: "设计工具可以辅助表达升级，但 Stage 0.5 不应切到 UI 重构。",
-      suggestedExperiment: "只收集参考，不进入本阶段构建。",
-      recommendedAgent: "OpenDesign",
-      priority: "low",
-      status: "watch",
-      stageFit: "later",
-      humanFeedback: pendingFeedback()
-    }
-  ],
-  recommendedActions: [
-    {
-      action: "整理最新 live 报告并请求人工反馈，判断哪些建议接受、观察或拒绝。",
-      owner: "EricChan",
-      urgency: "today",
-      stageFit: "now",
-      humanFeedback: pendingFeedback()
-    },
-    {
-      action: "把人工接受的最高优先级 opportunity 手动转成 Obsidian 任务卡。",
-      owner: "Obsidian + Claudian",
-      urgency: "today",
-      stageFit: "now",
-      humanFeedback: pendingFeedback()
-    },
-    {
-      action: "只在报告质量稳定后再做 Dashboard。",
-      owner: "GPT 5.5 Thinking",
-      urgency: "watch",
-      stageFit: "later",
-      humanFeedback: pendingFeedback()
-    }
-  ],
+        sourceTrend: "Editable generated design systems",
+        relatedProject: "Legacy projects as learning materials",
+        whyItMatters: "iPortfolio、XiaoChan、节律 App 可帮助 AI 学习 EricChan 的审美和执行偏好，但不应默认优化旧项目。",
+        suggestedExperiment: "暂不构建，只在人工审查中判断是否值得作为未来机会画像材料。",
+        monetizationPotential: "low: indirect learning asset, not a standalone offer yet",
+        ericChanFit: "medium: useful for taste inference but not an action target",
+        mvpForm: "No MVP yet; watch as learning material",
+        firstValidationAction: "Archive as legacy-learning-material and do not create old-project tasks.",
+        recommendedAgent: "Obsidian + Claudian",
+        enterOpportunityPool: false,
+        needsHumanConfirmation: true,
+        shouldIgnore: false,
+        scores: opportunityScores({
+          monetizationPotential: 2,
+          ericChanFit: 3,
+          mvpSpeed: 2,
+          aiLeverage: 3,
+          opcFit: 1,
+          contentAssetPotential: 3,
+          longTermCompounding: 3,
+          complexityRisk: 3,
+          currentStageFit: 2
+        }),
+        priority: "low",
+        status: "watch",
+        stageFit: "later",
+        humanFeedback: pendingFeedback()
+      }
+    ],
+    recommendedActions: [
+      {
+        action: "Validate the strongest new-project opportunity with one niche audience and one sample paid-style brief.",
+        actionType: "validate-new-opportunity",
+        owner: "EricChan",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: pendingFeedback()
+      },
+      {
+        action: "Create a one-page MVP spec for the opportunity scoring workflow before any build.",
+        actionType: "create-mvp-spec",
+        owner: "Codex",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: pendingFeedback()
+      },
+      {
+        action: "Archive legacy project signals as learning material only; do not turn them into iPortfolio, XiaoChan, or 节律 App tasks.",
+        actionType: "archive-opportunity",
+        owner: "Obsidian + Claudian",
+        urgency: "watch",
+        stageFit: "later",
+        humanFeedback: pendingFeedback()
+      }
+    ],
     agentDispatchSuggestions: [
       {
         agent: "GPT 5.5 Thinking",
@@ -399,8 +500,12 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       stageAppropriate: true,
       noPlaceholderAsTrend: true,
       avoidsPrematureBuild: true,
-      bestSuggestion: "把日报行动项转成智能体派发队列。",
-      suggestionToIgnore: "现在就做完整 Dashboard。"
+      opportunityFirst: true,
+      avoidsLegacyOptimization: true,
+      hasMonetizationAssessment: true,
+      hasMvpValidationPath: true,
+      bestSuggestion: "验证独立创作者 AI 机会发现小报 MVP。",
+      suggestionToIgnore: "因为趋势表面相关就更新 iPortfolio、重构 XiaoChan 或扩展节律 App。"
     }
   };
 }
@@ -493,6 +598,8 @@ ${trends
     (item, index) => `### ${index + 1}. ${item.title}
 
 - 趋势是什么：${item.summary}
+- 分类：${item.classification || ""}
+- 机会理由：${item.opportunityReason || ""}
 - 证据：${item.evidence || ""}
 - 来源：${(item.sourceUrls || []).join(", ") || (item.sourceIds || []).join(", ")}
 - 置信度：${item.confidence || "unknown"}
@@ -522,11 +629,21 @@ ${opportunities
   .map(
     (item) => `### ${item.title}
 
+- 机会名称：${item.opportunityName || ""}
 - 相关趋势：${item.relatedTrend}
+- 来源趋势：${item.sourceTrend || ""}
 - 相关项目：${item.relatedProject}
 - 为什么重要：${item.whyItMatters}
 - 建议实验：${item.suggestedExperiment}
+- 变现潜力：${item.monetizationPotential || ""}
+- EricChan 适配：${item.ericChanFit || ""}
+- MVP 形式：${item.mvpForm || ""}
+- 第一轮验证动作：${item.firstValidationAction || ""}
 - 推荐智能体：${item.recommendedAgent}
+- 进入机会池：${item.enterOpportunityPool ? "是" : "否"}
+- 需要人工确认：${item.needsHumanConfirmation ? "是" : "否"}
+- 应忽略：${item.shouldIgnore ? "是" : "否"}
+- 评分：${item.scores ? Object.entries(item.scores).map(([key, value]) => `${key}=${value}`).join(", ") : ""}
 - 优先级：${item.priority}
 - 状态：${item.status}
 - 阶段适配：${item.stageFit || ""}
@@ -536,7 +653,7 @@ ${opportunities
 
 ## 6. 推荐下一步行动
 
-${bullet(actions.map((item) => `${item.action} 负责人：${item.owner}；紧急度：${item.urgency}；阶段适配：${item.stageFit || ""}；人工反馈：${item.humanFeedback?.decision || ""}`))}
+${bullet(actions.map((item) => `${item.action} 类型：${item.actionType || ""}；负责人：${item.owner}；紧急度：${item.urgency}；阶段适配：${item.stageFit || ""}；人工反馈：${item.humanFeedback?.decision || ""}`))}
 
 ## 7. 推荐智能体派发
 
@@ -558,6 +675,10 @@ ${bullet(dispatches.map((item) => `${item.agent}：${item.dispatch}`))}
 - [${checklist.stageAppropriate ? "x" : " "}] 是否符合当前阶段？
 - [${checklist.noPlaceholderAsTrend ? "x" : " "}] 是否避免把 placeholder 当趋势？
 - [${checklist.avoidsPrematureBuild ? "x" : " "}] 是否避免过早 build / deployment？
+- [${checklist.opportunityFirst ? "x" : " "}] 是否优先发现新机会？
+- [${checklist.avoidsLegacyOptimization ? "x" : " "}] 是否避免默认优化旧项目？
+- [${checklist.hasMonetizationAssessment ? "x" : " "}] 是否评估变现潜力？
+- [${checklist.hasMvpValidationPath ? "x" : " "}] 是否给出 MVP 验证路径？
 - 质量评分：${report.qualityValidation ? `${report.qualityValidation.score}/${report.qualityValidation.maxScore}` : "未运行"}
 - 最值得执行：${checklist.bestSuggestion || ""}
 - 应该忽略：${checklist.suggestionToIgnore || ""}
@@ -578,7 +699,20 @@ function validateReportQuality(report) {
   const trendHasEvidence = (item) =>
     item?.sourceIds?.length || item?.sourceUrls?.length || (typeof item?.evidence === "string" && item.evidence.trim());
   const validStageFit = (item) => ["now", "later", "not-yet", "blocked"].includes(item?.stageFit);
-  const textOf = (item) => [item?.title, item?.action, item?.suggestedExperiment, item?.whyItMatters].filter(Boolean).join(" ");
+  const textOf = (item) =>
+    [
+      item?.title,
+      item?.opportunityName,
+      item?.action,
+      item?.actionType,
+      item?.relatedProject,
+      item?.suggestedExperiment,
+      item?.mvpForm,
+      item?.firstValidationAction,
+      item?.whyItMatters
+    ]
+      .filter(Boolean)
+      .join(" ");
   const isPrematureNow = (item) => item?.stageFit === "now" && PREMATURE_NOW_PATTERN.test(textOf(item)) && !item.explicitOverrideReason;
   const hasPendingFeedback = (item) =>
     item?.humanFeedback?.decision === "pending" &&
@@ -588,6 +722,29 @@ function validateReportQuality(report) {
   const reportGenerationActions = (report.recommendedActions || []).filter((item) =>
     /generate (another |a |one more |new |live )*.*report|再生成.*报告|生成.*报告/i.test(item.action || "")
   ).length;
+  const validClassification = (item) => TREND_CLASSIFICATIONS.has(item?.classification);
+  const hasOpportunityReason = (item) => typeof item?.opportunityReason === "string" && item.opportunityReason.trim();
+  const hasOpportunityFields = (item) =>
+    ["opportunityName", "sourceTrend", "monetizationPotential", "ericChanFit", "mvpForm", "firstValidationAction"].every(
+      (key) => typeof item?.[key] === "string" && item[key].trim()
+    ) &&
+    typeof item.enterOpportunityPool === "boolean" &&
+    typeof item.needsHumanConfirmation === "boolean" &&
+    typeof item.shouldIgnore === "boolean";
+  const validScoreValue = (value) => Number.isInteger(value) && value >= 1 && value <= 5;
+  const hasCompleteScores = (item) => OPPORTUNITY_SCORE_KEYS.every((key) => validScoreValue(item?.scores?.[key]));
+  const hasLegacyOptimizationAction = (item) => LEGACY_ACTION_PATTERN.test(textOf(item));
+  const hasValidActionType = (item) => ACTION_TYPES.has(item?.actionType);
+  const weakOpportunityIsIgnored = (item) =>
+    !(item?.scores?.monetizationPotential <= 2 && item?.scores?.ericChanFit <= 2) ||
+    item.shouldIgnore === true ||
+    ["watch", "ignore"].includes(item.status);
+  const highComplexityIsNotNow = (item) => item?.scores?.complexityRisk < 4 || item.stageFit !== "now" || Boolean(item.explicitOverrideReason);
+  const legacyLearningTexts = (report.trends || [])
+    .filter((item) => item.classification === "legacy-learning-material" && LEGACY_PROJECT_PATTERN.test(textOf(item)))
+    .map((item) => textOf(item));
+  const legacyLearningStaysOutOfActions = (action) =>
+    !legacyLearningTexts.length || !LEGACY_PROJECT_PATTERN.test(textOf(action)) || !hasLegacyOptimizationAction(action);
 
   const checks = [
     ["trends exists", () => Array.isArray(report.trends) && report.trends.length > 0],
@@ -603,6 +760,7 @@ function validateReportQuality(report) {
       "trends has at least one relatedProject",
       () => (report.trends || []).some((item) => typeof item.relatedProject === "string" && item.relatedProject.trim())
     ],
+    ["trends include valid classification", () => (report.trends || []).every((item) => validClassification(item) && hasOpportunityReason(item))],
     ["each trend has evidence", () => (report.trends || []).every(trendHasEvidence)],
     ["trends do not include Placeholder items", () => (report.trends || []).every((item) => !/placeholder/i.test(item.title || ""))],
     ["dataGaps exists", () => Array.isArray(report.dataGaps)],
@@ -614,12 +772,19 @@ function validateReportQuality(report) {
         )
     ],
     ["opportunities include stageFit", () => (report.opportunities || []).every(validStageFit)],
+    ["opportunities include monetization and MVP fields", () => (report.opportunities || []).every(hasOpportunityFields)],
+    ["opportunities include scoring fields", () => (report.opportunities || []).every(hasCompleteScores)],
+    ["low monetization and low fit opportunities are ignored or watched", () => (report.opportunities || []).every(weakOpportunityIsIgnored)],
+    ["high complexity opportunities are not stageFit now", () => (report.opportunities || []).every(highComplexityIsNotNow)],
     ["opportunities include pending humanFeedback", () => (report.opportunities || []).every(hasPendingFeedback)],
     [
       "recommendedActions has at least one executable action",
       () => (report.recommendedActions || []).some((item) => typeof item.action === "string" && item.action.trim())
     ],
     ["recommendedActions include stageFit", () => (report.recommendedActions || []).every(validStageFit)],
+    ["recommendedActions include valid actionType", () => (report.recommendedActions || []).every(hasValidActionType)],
+    ["recommendedActions avoid legacy project optimization", () => (report.recommendedActions || []).every((item) => !hasLegacyOptimizationAction(item))],
+    ["legacy-learning-material trends do not become actions", () => (report.recommendedActions || []).every(legacyLearningStaysOutOfActions)],
     ["recommendedActions start with pending humanFeedback", () => (report.recommendedActions || []).every(hasPendingFeedback)],
     ["humanFeedback decisions are valid", () => [...(report.opportunities || []), ...(report.recommendedActions || [])].every(hasValidFeedback)],
     ["humanFeedbackRequired exists", () => report.humanFeedbackRequired === true],
@@ -645,7 +810,11 @@ function validateReportQuality(report) {
     ["qualityChecklist.evidenceBacked is true", () => report.qualityChecklist?.evidenceBacked === true],
     ["qualityChecklist.stageAppropriate is true", () => report.qualityChecklist?.stageAppropriate === true],
     ["qualityChecklist.noPlaceholderAsTrend is true", () => report.qualityChecklist?.noPlaceholderAsTrend === true],
-    ["qualityChecklist.avoidsPrematureBuild is true", () => report.qualityChecklist?.avoidsPrematureBuild === true]
+    ["qualityChecklist.avoidsPrematureBuild is true", () => report.qualityChecklist?.avoidsPrematureBuild === true],
+    ["qualityChecklist.opportunityFirst is true", () => report.qualityChecklist?.opportunityFirst === true],
+    ["qualityChecklist.avoidsLegacyOptimization is true", () => report.qualityChecklist?.avoidsLegacyOptimization === true],
+    ["qualityChecklist.hasMonetizationAssessment is true", () => report.qualityChecklist?.hasMonetizationAssessment === true],
+    ["qualityChecklist.hasMvpValidationPath is true", () => report.qualityChecklist?.hasMvpValidationPath === true]
   ].map(([name, check]) => ({ name, pass: Boolean(check()) }));
 
   const failures = checks.filter((item) => !item.pass).map((item) => item.name);

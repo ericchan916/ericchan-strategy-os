@@ -1,8 +1,8 @@
 # EricChan Strategy OS
 
-Stage 0.5 is a local daily strategy report generator for EricChan. It reads external AI trend signals, combines them with `context/context.md`, asks an OpenAI-compatible LLM for project-aware analysis, and writes both Markdown and structured JSON.
+Stage 0.5 is a local daily strategy report generator for EricChan. It reads external AI trend signals, combines them with `context/context.md`, asks an OpenAI-compatible LLM for opportunity-aware analysis, and writes both Markdown and structured JSON.
 
-It is not a generic AI news digest. A useful report must connect trends to EricChan projects such as iPortfolio, XiaoChan AI Persona, OPC exploration, EricChan Strategy OS, and the agent/tool chain.
+It is not a generic AI news digest and not a legacy project optimizer. A useful report must identify monetizable new project opportunities, judge EricChan fit, define MVP validation paths, and use legacy projects only as learning material unless the user explicitly reactivates them.
 
 ## Stage 0.5 Goal
 
@@ -256,6 +256,47 @@ The proposal is deliberately not an automatic patch. Review suggestions can cont
 
 Only after proposal approval should the project enter an apply phase.
 
+## V0.1.8 Opportunity Discovery Redirect
+
+V0.1.8 redirects Strategy OS from "which old project should be updated?" to "which new opportunity is worth validating?"
+
+Strategy OS should not default to optimizing iPortfolio, XiaoChan, 节律 App, or other legacy projects. Those projects are learning material:
+
+- iPortfolio teaches EricChan's personal expression, visual taste, content structure, and narrative ability.
+- XiaoChan teaches EricChan's interest in AI Persona, identity consistency, memory, humor, and interaction.
+- 节律 App teaches EricChan's preference for minimal, premium, restrained life-tool products.
+- Historical records teach iteration style, verification standards, acceptance criteria, and tool workflow.
+
+Every trend is now classified first:
+
+- `new-project-opportunity`
+- `current-project-improvement`
+- `legacy-learning-material`
+- `watch-only`
+- `ignore`
+
+Default priority:
+
+`new-project-opportunity` > `current-project-improvement` > `legacy-learning-material` > `watch-only` > `ignore`
+
+Every opportunity now carries opportunity fields and 1-5 scores:
+
+- `monetizationPotential`
+- `ericChanFit`
+- `mvpSpeed`
+- `aiLeverage`
+- `opcFit`
+- `contentAssetPotential`
+- `longTermCompounding`
+- `complexityRisk`
+- `currentStageFit`
+
+`complexityRisk` is a risk score. Higher means harder and riskier; it should not be added like a positive score. A high complexity opportunity cannot be `stageFit: "now"` unless there is an explicit override reason.
+
+The validator now blocks default old-project optimization such as updating iPortfolio, rebuilding XiaoChan, deploying legacy projects, redesigning the personal website, or expanding 节律 App. Legacy trends can be archived as learning material, but they should not become `recommendedActions` unless the user explicitly reactivates that project or the trend reveals a real new monetizable opportunity.
+
+The next structural step should be an Opportunity Pool, not legacy project updates.
+
 ## Output Files
 
 Each run writes:
@@ -276,9 +317,13 @@ Each run writes:
 
 A report is useful only if it passes these checks:
 
-- It binds trends to concrete EricChan projects.
+- It classifies trends before recommending action.
+- It prioritizes monetizable new project opportunities.
+- It uses legacy projects as learning material, not default action targets.
 - It creates at least one executable next action.
 - It includes an opportunity inbox.
+- It gives MVP form and first validation action for opportunities.
+- It includes monetization and EricChan-fit assessment.
 - It recommends agent dispatch without actually calling those agents.
 - It names what should be ignored or watched.
 - It avoids generic "AI news is important" language.
@@ -291,9 +336,12 @@ A real report is accepted for Stage 0.5 only when:
 - `npm run validate:report` returns a full score.
 - At least one trend is connected to a specific EricChan project.
 - Trends are evidence-backed and do not include placeholders.
+- Trends include valid `classification`.
+- Opportunities include monetization, EricChan fit, MVP form, first validation action, and complete scoring.
 - Opportunities and actions use `stageFit` honestly.
-- The opportunity inbox contains at least one `test` or `build` candidate.
-- The next action can be executed without needing a Dashboard.
+- The opportunity inbox contains at least one new-opportunity `test` candidate or current-project improvement.
+- The next action validates a new opportunity, researches a market, creates an MVP spec, archives an opportunity, updates context, or ignores a noisy trend.
+- The report does not recommend updating iPortfolio, rebuilding XiaoChan, deploying old projects, redesigning the personal website, or expanding 节律 App by default.
 - The dispatch section recommends agents but does not call them.
 
 If `mode` is `mock`, treat it as a pipeline check, not a real strategy report.
@@ -327,6 +375,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, and `npm run propose:today`. Run it for 7 days before deciding what needs a Dashboard.
+Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, and `npm run propose:today`. V0.1.8 changes the strategic target to opportunity discovery. Run it for 7 days before deciding what needs an Opportunity Pool structure or Dashboard.
 
-Stage 2 can add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.
+Stage 2 can add an Opportunity Pool, richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.

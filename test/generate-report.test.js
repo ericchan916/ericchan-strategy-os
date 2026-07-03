@@ -11,6 +11,18 @@ const {
   validateReportQuality
 } = require("../scripts/generate-report");
 
+const SCORE_KEYS = [
+  "monetizationPotential",
+  "ericChanFit",
+  "mvpSpeed",
+  "aiLeverage",
+  "opcFit",
+  "contentAssetPotential",
+  "longTermCompounding",
+  "complexityRisk",
+  "currentStageFit"
+];
+
 test("mock report binds trends to EricChan projects and writes markdown/json", async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-"));
 
@@ -50,8 +62,20 @@ test("mock report binds trends to EricChan projects and writes markdown/json", a
   assert.ok(Array.isArray(result.report.dataGaps));
   assert.ok(result.report.trends.every((item) => !/placeholder/i.test(item.title)));
   assert.ok(result.report.trends.every((item) => item.sourceIds?.length || item.sourceUrls?.length || item.evidence));
+  assert.ok(result.report.trends.every((item) => item.classification));
+  assert.ok(result.report.trends.every((item) => item.opportunityReason));
   assert.ok(result.report.opportunities.every((item) => item.stageFit));
+  assert.ok(result.report.opportunities.every((item) => item.opportunityName));
+  assert.ok(result.report.opportunities.every((item) => item.monetizationPotential));
+  assert.ok(result.report.opportunities.every((item) => item.ericChanFit));
+  assert.ok(result.report.opportunities.every((item) => item.mvpForm));
+  assert.ok(result.report.opportunities.every((item) => item.firstValidationAction));
+  assert.ok(result.report.opportunities.every((item) => typeof item.enterOpportunityPool === "boolean"));
+  assert.ok(result.report.opportunities.every((item) => typeof item.needsHumanConfirmation === "boolean"));
+  assert.ok(result.report.opportunities.every((item) => typeof item.shouldIgnore === "boolean"));
+  assert.ok(result.report.opportunities.every((item) => SCORE_KEYS.every((key) => Number.isInteger(item.scores?.[key]))));
   assert.ok(result.report.recommendedActions.every((item) => item.stageFit));
+  assert.ok(result.report.recommendedActions.every((item) => item.actionType));
   assert.equal(result.report.humanFeedbackRequired, true);
   assert.ok(result.report.opportunities.every((item) => item.humanFeedback?.decision === "pending"));
   assert.ok(result.report.recommendedActions.every((item) => item.humanFeedback?.decision === "pending"));
@@ -59,6 +83,10 @@ test("mock report binds trends to EricChan projects and writes markdown/json", a
   assert.equal(result.report.qualityChecklist.stageAppropriate, true);
   assert.equal(result.report.qualityChecklist.noPlaceholderAsTrend, true);
   assert.equal(result.report.qualityChecklist.avoidsPrematureBuild, true);
+  assert.equal(result.report.qualityChecklist.opportunityFirst, true);
+  assert.equal(result.report.qualityChecklist.avoidsLegacyOptimization, true);
+  assert.equal(result.report.qualityChecklist.hasMonetizationAssessment, true);
+  assert.equal(result.report.qualityChecklist.hasMvpValidationPath, true);
   assert.ok(result.markdown.includes("## 5. 今日机会收件箱"));
   assert.ok(result.markdown.includes("## 7. 推荐智能体派发"));
   assert.ok(fs.existsSync(path.join(rootDir, "reports", "2026-06-30.md")));
@@ -100,7 +128,7 @@ test("report quality validation catches missing strategic substance", () => {
     ...goodReport,
     trends: [{ title: "Placeholder: Generic AI news" }],
     dataGaps: undefined,
-    opportunities: [],
+    opportunities: [{}],
     recommendedActions: [{ action: "" }],
     humanFeedbackRequired: undefined,
     qualityChecklist: {
@@ -110,7 +138,11 @@ test("report quality validation catches missing strategic substance", () => {
       evidenceBacked: false,
       stageAppropriate: false,
       noPlaceholderAsTrend: false,
-      avoidsPrematureBuild: false
+      avoidsPrematureBuild: false,
+      opportunityFirst: false,
+      avoidsLegacyOptimization: false,
+      hasMonetizationAssessment: false,
+      hasMvpValidationPath: false
     }
   });
 
@@ -118,11 +150,13 @@ test("report quality validation catches missing strategic substance", () => {
   assert.ok(weakResult.failures.includes("trends has at least one relatedProject"));
   assert.ok(weakResult.failures.includes("trends do not include Placeholder items"));
   assert.ok(weakResult.failures.includes("dataGaps exists"));
-  assert.ok(weakResult.failures.includes("opportunities exists"));
   assert.ok(weakResult.failures.includes("recommendedActions has at least one executable action"));
   assert.ok(weakResult.failures.includes("humanFeedbackRequired exists"));
   assert.ok(weakResult.failures.includes("qualityChecklist.boundToProjects is true"));
   assert.ok(weakResult.failures.includes("qualityChecklist.evidenceBacked is true"));
+  assert.ok(weakResult.failures.includes("trends include valid classification"));
+  assert.ok(weakResult.failures.includes("opportunities include scoring fields"));
+  assert.ok(weakResult.failures.includes("qualityChecklist.opportunityFirst is true"));
 });
 
 test("strategic quality gate blocks premature now-stage build recommendations", () => {
@@ -237,4 +271,110 @@ test("strategic quality gate blocks deployment-on-vercel wording", () => {
 
   assert.equal(result.ok, false);
   assert.ok(result.failures.includes("premature build/deployment suggestions are not stageFit now"));
+});
+
+test("opportunity-first gate blocks legacy project optimization actions", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    trends: report.trends.map((item, index) => ({
+      ...item,
+      classification: index === 0 ? "legacy-learning-material" : item.classification,
+      relatedProject: index === 0 ? "iPortfolio" : item.relatedProject
+    })),
+    recommendedActions: [
+      {
+        action: "Update iPortfolio based on the latest AI design trend.",
+        actionType: "dispatch-codex-mvp",
+        owner: "Codex",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: { decision: "pending", reason: "", followUp: "" }
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("recommendedActions avoid legacy project optimization"));
+  assert.ok(result.failures.includes("legacy-learning-material trends do not become actions"));
+});
+
+test("opportunity-first gate requires valid classifications and complete opportunity scores", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const invalidReport = {
+    ...report,
+    trends: report.trends.map((item, index) => ({
+      ...item,
+      classification: index === 0 ? "old-project-update" : item.classification
+    })),
+    opportunities: report.opportunities.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            monetizationPotential: undefined,
+            ericChanFit: undefined,
+            mvpForm: undefined,
+            firstValidationAction: undefined,
+            scores: { monetizationPotential: 1, ericChanFit: 1 }
+          }
+        : item
+    )
+  };
+
+  const result = validateReportQuality(invalidReport);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("trends include valid classification"));
+  assert.ok(result.failures.includes("opportunities include monetization and MVP fields"));
+  assert.ok(result.failures.includes("opportunities include scoring fields"));
+});
+
+test("opportunity-first gate blocks weak fit opportunities and high-risk now actions", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    opportunities: [
+      {
+        ...report.opportunities[0],
+        monetizationPotential: "low",
+        ericChanFit: "low",
+        shouldIgnore: false,
+        status: "test",
+        stageFit: "now",
+        scores: {
+          monetizationPotential: 2,
+          ericChanFit: 2,
+          mvpSpeed: 3,
+          aiLeverage: 3,
+          opcFit: 2,
+          contentAssetPotential: 2,
+          longTermCompounding: 2,
+          complexityRisk: 4,
+          currentStageFit: 3
+        }
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("low monetization and low fit opportunities are ignored or watched"));
+  assert.ok(result.failures.includes("high complexity opportunities are not stageFit now"));
 });
