@@ -13,6 +13,8 @@
     "review:today": "node scripts/generate-review.js",
     "propose": "node scripts/generate-update-proposal.js",
     "propose:today": "node scripts/generate-update-proposal.js",
+    "command": "node scripts/generate-daily-command.js",
+    "command:today": "node scripts/generate-daily-command.js",
     "opportunities:update": "node scripts/update-opportunity-pool.js",
     "opportunities:list": "node scripts/validate-opportunity-pool.js --list",
     "opportunities:validate": "node scripts/validate-opportunity-pool.js",

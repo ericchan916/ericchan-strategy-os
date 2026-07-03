@@ -489,6 +489,53 @@ Use the pack in three steps:
 
 Validate should not jump directly to MVP spec because a plausible idea can still fail on user urgency, distribution, willingness to pay, or differentiation from generic AI news. The validation pack exists to catch that early, before we spend time writing a more detailed product plan.
 
+## V0.2 Daily Use Mode
+
+V0.2 redirects the project back to personal daily usefulness. The goal is not Dashboard, deployment, productization, or a complex startup incubation pipeline. The goal is a one-page Daily Command that EricChan can actually read each day and use to decide:
+
+- What matters today.
+- Which opportunity deserves attention.
+- What to ignore.
+- What lightweight action to take.
+- Whether a new project should be opened yet.
+- Which agent should be used, only when useful.
+
+Recommended daily flow:
+
+```bash
+npm run daily
+npm run opportunities:update
+npm run command:today
+```
+
+You can also generate a command for a specific date or overwrite intentionally:
+
+```bash
+npm run command -- --date 2026-07-03
+npm run command:today -- --force
+```
+
+Daily Command reads:
+
+- `data/reports/YYYY-MM-DD.json`
+- `data/opportunities/opportunity-pool.json`
+- optional same-day feedback, review, and proposal files when they exist
+
+Daily Command writes:
+
+- `daily-command/YYYY-MM-DD.md`
+- `data/daily-command/YYYY-MM-DD.json`
+
+These files are ignored by Git because they are personal daily strategic outputs.
+
+Daily Command and Opportunity Pool have different jobs:
+
+- The report observes external trend signals.
+- The Opportunity Pool stores durable candidate opportunities and human decisions.
+- Daily Command turns today's report plus the pool into one practical instruction page.
+
+Daily Command should stay small. It caps action suggestions at 3, marks `sourceMode` so mock fallback is visible, and keeps Dashboard, deployment, old-project edits, and premature commercialization out of today's action list.
+
 ## Output Files
 
 Each run writes:
@@ -502,6 +549,7 @@ Each run writes:
 - `opportunities/opportunity-pool.md` and `data/opportunities/opportunity-pool.json` when using `npm run opportunities:update`
 - `opportunities/reviews/YYYY-MM-DD-opportunity-review.md` when using `npm run opportunities:review`
 - `opportunities/validation/YYYY-MM-DD-independent-ai-opportunity-brief-validation.md` when using `npm run opportunities:validation-pack`
+- `daily-command/YYYY-MM-DD.md` and `data/daily-command/YYYY-MM-DD.json` when using `npm run command:today`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
@@ -510,6 +558,7 @@ Each run writes:
 `opportunities/` and `data/opportunities/` store the generated Opportunity Pool and are ignored by Git except for `.gitkeep`.
 `opportunities/reviews/` stores generated opportunity screening packages and is ignored by Git except for `.gitkeep`.
 `opportunities/validation/` stores single-opportunity validation packs and is ignored by Git except for `.gitkeep`.
+`daily-command/` and `data/daily-command/` store personal Daily Command outputs and are ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -565,6 +614,8 @@ npm run review:today # generate today's Daily Review from report + feedback
 npm run review -- --date YYYY-MM-DD # generate review for a specific date
 npm run propose:today # generate today's context/prompt update proposal
 npm run propose -- --date YYYY-MM-DD # generate proposal for a specific date
+npm run command:today # generate today's personal Daily Command
+npm run command -- --date YYYY-MM-DD # generate Daily Command for a specific date
 npm run opportunities:update # import report opportunities into the local Opportunity Pool
 npm run opportunities:update -- --date YYYY-MM-DD # import opportunities for a specific date
 npm run opportunities:validate # validate Opportunity Pool schema and strategy gates

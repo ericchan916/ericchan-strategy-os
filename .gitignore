@@ -6,6 +6,8 @@ npm-debug.log*
 reports/*.md
 data/reports/*.json
 data/raw/*.json
+daily-command/*.md
+data/daily-command/*.json
 feedback/*.md
 reviews/*.md
 data/reviews/*.json
