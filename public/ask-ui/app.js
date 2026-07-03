@@ -48,12 +48,177 @@ function applyQuestionToComposer({ text, input, button, state }) {
   }
 }
 
+// ============== History store (V0.3.4-hotfix) ==============
+//
+// 纯函数 + 可注入 storage 的小型 store。
+// storage 注入是为了能在 Node 测试里跑，且不依赖 window/localStorage。
+
+const HISTORY_KEY = "strategyOsAskHistory";
+const DEFAULT_HISTORY_MAX = 20;
+
+// 生成稳定的 id：用时间戳 + 随机后缀（同题 push 时区分实例）。
+function makeHistoryId(prefix = "h") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// 把 LLM 回包 / 用户提问数据整理成标准结构。
+function normalizeHistoryItem(input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const question = typeof raw.question === "string" ? raw.question : "";
+  const answer = typeof raw.answer === "string" ? raw.answer : "";
+  const source = typeof raw.source === "string" ? raw.source : "local";
+  const warning = raw.warning == null ? null : String(raw.warning);
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : makeHistoryId(),
+    question,
+    answer,
+    source,
+    warning,
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
+  };
+}
+
+// 简单随机 id 生成器（不依赖 crypto.randomUUID，最大兼容浏览器/Node）。
+function cryptoFreeId() {
+  return makeHistoryId();
+}
+
+function toHistoryArray(parsed) {
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((x) => x && typeof x === "object")
+    .map(normalizeHistoryItem);
+}
+
+// 把内部状态词 / 字段做中文化（前端清洗层）。这是 LLM 返回到达前端后的兜底；
+// 服务端 LLM 客户端已先做过一次 sanitize + translate，这里再做一遍防止本地 fallback
+// 或未来新路径泄漏。
+function translateInternalTermsClient(text) {
+  try {
+    // 调用 llm-client.js 的同名函数；动态 require 避免把测试环境耦合。
+    const mod = require("../../scripts/llm-client");
+    if (mod && typeof mod.translateInternalTerms === "function") {
+      return mod.translateInternalTerms(text);
+    }
+  } catch {
+    // ignore：浏览器 / 测试里 require 不到就跑空清洗
+  }
+  // 浏览器里拿不到 require；保留原文由服务端兜底。
+  return typeof text === "string" ? text : "";
+}
+
+function pushHistoryItem(list, item, maxSize = DEFAULT_HISTORY_MAX) {
+  const normalized = normalizeHistoryItem(item);
+  const deduped = list.filter((entry) => entry && entry.question !== normalized.question);
+  deduped.unshift(normalized);
+  return deduped.slice(0, Math.max(1, maxSize));
+}
+
+function removeHistoryItem(list, id) {
+  return list.filter((entry) => entry && entry.id !== id);
+}
+
+function loadHistory(storage, _maxSize) {
+  if (!storage || typeof storage.getItem !== "function") return [];
+  const raw = storage.getItem(HISTORY_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return toHistoryArray(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(storage, list, _maxSize) {
+  if (!storage || typeof storage.setItem !== "function") return;
+  if (!Array.isArray(list) || list.length === 0) {
+    if (typeof storage.removeItem === "function") storage.removeItem(HISTORY_KEY);
+    else storage.setItem(HISTORY_KEY, "[]");
+    return;
+  }
+  storage.setItem(HISTORY_KEY, JSON.stringify(list));
+}
+
+function clearHistory(storage) {
+  if (!storage || typeof storage.removeItem !== "function") return;
+  storage.removeItem(HISTORY_KEY);
+}
+
+// 工厂：可注入 storage；提供给前端用。
+function createHistoryStore({ storage, maxSize = DEFAULT_HISTORY_MAX } = {}) {
+  let list = loadHistory(storage, maxSize);
+  return {
+    list: () => list.slice(),
+    push(item) {
+      list = pushHistoryItem(list, item, maxSize);
+      saveHistory(storage, list, maxSize);
+      return list.slice();
+    },
+    remove(id) {
+      list = removeHistoryItem(list, id);
+      saveHistory(storage, list, maxSize);
+      return list.slice();
+    },
+    clear() {
+      list = [];
+      clearHistory(storage);
+      return list.slice();
+    }
+  };
+}
+
+// ============== Copy / Clipboard helpers (V0.3.4-hotfix) ==============
+
+function buildClipboardPayload({ answer, _question } = {}) {
+  const text = typeof answer === "string" ? answer : "";
+  // 注意：不要返回 HTML，只返回 Markdown 纯文本。
+  return { text, format: "text/markdown" };
+}
+
+async function handleCopyClick({ answer, clipboardImpl } = {}) {
+  const { text } = buildClipboardPayload({ answer });
+  if (!text) {
+    return { ok: false, message: "当前没有可复制的回答。" };
+  }
+  if (typeof clipboardImpl !== "function") {
+    return { ok: false, message: "复制失败，请手动选择文本。" };
+  }
+  try {
+    await clipboardImpl(text);
+    return { ok: true, text, message: "已复制" };
+  } catch (error) {
+    return { ok: false, message: "复制失败，请手动选择文本。" };
+  }
+}
+
+// ============== Loading state helper (V0.3.4-hotfix) ==============
+
+function buildLoadingMarkup() {
+  return `<span class="loading-text">正在生成战略判断……</span><span class="loading-wheel" aria-hidden="true">${WHEEL_SVG}</span>`;
+}
+
+// 简化版 hamster 动画的 SVG：三层同心圆 + 一根说话"指针"，整体克制；
+// 用户提供了参考 CSS / SVG，我们做的是 SVG-only 不依赖外部 CSS 关键帧。
+const WHEEL_SVG = `
+<svg class="loading-wheel-svg" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+  <circle class="loading-wheel-ring" cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-opacity="0.18" stroke-width="3"></circle>
+  <circle class="loading-wheel-arc" cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="55 200" transform="rotate(-90 32 32)"></circle>
+  <circle class="loading-wheel-dot" cx="32" cy="20" r="3" fill="currentColor"></circle>
+</svg>
+`;
+
 // 4) createApp(deps)：把所有 DOM 行为包成可注入的工厂
 //    deps 字段：
 //      document, fetchImpl, setTimeoutImpl, scrollImpl
-//      nodes: { questionInput, askButton, statusText, answerOutput, questionEcho, questionGrid }
-//    返回 { submitAsk, fillQuestion, renderQuestions, getStatus, setStatus, setInFlight,
-//           clearSelectedQuestion, selectQuestionButton, state, mount }
+//      nodes: { questionInput, askButton, statusText, answerOutput, questionEcho, questionGrid,
+//               historyList, historyEmpty, historyClearButton, copyButton, answerLoading }
+//      storage (默认 window.localStorage, 浏览器里)
+//      now (Date.now 替代)
+//      clipboardImpl (默认 navigator.clipboard.writeText)
+//    返回 { submitAsk, fillQuestion, renderQuestions, restoreHistoryItem, clearHistoryNow,
+//           getStatus, setStatus, setInFlight, clearSelectedQuestion, selectQuestionButton,
+//           state, mount, handleCopy }
 function createApp(deps) {
   const documentRef = deps.document || (typeof document !== "undefined" ? document : null);
   const fetchImpl = deps.fetchImpl || (typeof fetch !== "undefined" ? fetch : null);
@@ -65,12 +230,35 @@ function createApp(deps) {
   const answerOutput = nodes.answerOutput;
   const questionEcho = nodes.questionEcho;
   const questionGrid = nodes.questionGrid;
+  const historyList = nodes.historyList;
+  const historyEmpty = nodes.historyEmpty;
+  const historyClearButton = nodes.historyClearButton;
+  const copyButton = nodes.copyButton;
+  const answerLoading = nodes.answerLoading;
+
+  // 找 storage；浏览器用 window.localStorage，测试里可注入。
+  let storage = deps.storage;
+  if (!storage && typeof window !== "undefined" && window.localStorage) {
+    storage = window.localStorage;
+  }
+
+  const clipboardImpl =
+    deps.clipboardImpl ||
+    (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function"
+      ? (text) => navigator.clipboard.writeText(text)
+      : null);
+
+  const now = deps.now || (() => Date.now());
 
   const state = {
     recommendedButtons: [],
     inFlight: false,
-    selectedButton: null
+    selectedButton: null,
+    currentAnswer: "",
+    currentSource: ""
   };
+
+  const historyStore = createHistoryStore({ storage, maxSize: 20 });
 
   function setStatus(message, tone) {
     if (statusText) {
@@ -92,6 +280,16 @@ function createApp(deps) {
     state.inFlight = !!value;
     if (askButton) askButton.disabled = state.inFlight;
     for (const btn of state.recommendedButtons) btn.disabled = state.inFlight;
+    if (answerLoading) {
+      if (state.inFlight) {
+        answerLoading.hidden = false;
+        if (answerOutput) answerOutput.hidden = true;
+      } else {
+        answerLoading.hidden = true;
+        if (answerOutput) answerOutput.hidden = false;
+      }
+    }
+    if (copyButton && state.inFlight) copyButton.disabled = true;
   }
 
   function clearSelectedQuestion() {
@@ -118,6 +316,117 @@ function createApp(deps) {
     });
   }
 
+  function setCurrentAnswer(answer, source) {
+    state.currentAnswer = typeof answer === "string" ? answer : "";
+    state.currentSource = typeof source === "string" ? source : "";
+    if (copyButton) {
+      const hasText = state.currentAnswer.trim().length > 0;
+      copyButton.disabled = !hasText;
+      copyButton.hidden = !hasText;
+      copyButton.removeAttribute("data-state");
+    }
+  }
+
+  function renderHistory() {
+    if (!historyList) return;
+    const items = historyStore.list();
+    historyList.innerHTML = "";
+    if (!documentRef || typeof documentRef.createElement !== "function") return;
+    for (const entry of items) {
+      const li = documentRef.createElement("li");
+      const btn = documentRef.createElement("button");
+      btn.type = "button";
+      btn.className = "history-item";
+      btn.dataset.id = entry.id;
+
+      const q = documentRef.createElement("span");
+      q.className = "history-question";
+      q.textContent = entry.question || "(空问题)";
+
+      const meta = documentRef.createElement("span");
+      meta.className = "history-meta";
+
+      const src = documentRef.createElement("span");
+      src.className = "history-source";
+      const labelMap = {
+        llm: "动态回答",
+        local: "本地回答",
+        "local-fallback": "已回退"
+      };
+      src.dataset.source = entry.source;
+      src.textContent = labelMap[entry.source] || "回答";
+
+      const time = documentRef.createElement("span");
+      time.className = "history-time";
+      time.textContent = formatHistoryTime(entry.createdAt, now());
+
+      meta.appendChild(src);
+      meta.appendChild(time);
+      btn.appendChild(q);
+      btn.appendChild(meta);
+      btn.addEventListener("click", () => {
+        restoreHistoryItem(entry);
+      });
+      li.appendChild(btn);
+      historyList.appendChild(li);
+    }
+    if (historyEmpty) {
+      historyEmpty.hidden = items.length > 0;
+    }
+  }
+
+  function formatHistoryTime(ts, current) {
+    if (typeof ts !== "number") return "";
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return "";
+    const isToday = date.toDateString() === new Date(current).toDateString();
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return isToday ? `${hh}:${mm}` : `${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`;
+  }
+
+  function restoreHistoryItem(entry) {
+    if (!entry) return;
+    // 先填回问题，再把回答恢复上去；不调 fetch。
+    if (input) {
+      input.value = entry.question || "";
+      if (typeof input.focus === "function") input.focus();
+    }
+    if (questionEcho) {
+      questionEcho.hidden = false;
+      questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(entry.question || "")}`;
+    }
+    if (answerOutput) {
+      answerOutput.classList.remove("empty");
+      answerOutput.innerHTML = renderMarkdown(entry.answer || "");
+      scrollImpl(answerOutput);
+    }
+    const warning = entry.warning;
+    setStatus(statusFromSource(entry.source, warning), warning ? "error" : null);
+    setCurrentAnswer(entry.answer || "", entry.source || "local");
+    state.inFlight = false;
+    if (askButton) askButton.disabled = false;
+    for (const btn of state.recommendedButtons) btn.disabled = false;
+  }
+
+  async function handleCopy() {
+    const result = await handleCopyClick({ answer: state.currentAnswer, clipboardImpl });
+    if (copyButton) {
+      if (result.ok) {
+        copyButton.setAttribute("data-state", "copied");
+        copyButton.title = "已复制";
+        setTimeout(() => {
+          if (copyButton) {
+            copyButton.removeAttribute("data-state");
+            copyButton.title = "复制回答";
+          }
+        }, 1800);
+      }
+      setStatus(result.message, result.ok ? null : "error");
+    }
+    return result;
+  }
+
   async function submitAsk() {
     if (state.inFlight) return { submitted: false, reason: "in-flight" };
     const value = input ? String(input.value || "").trim() : "";
@@ -130,11 +439,15 @@ function createApp(deps) {
     if (input) input.value = value;
     setInFlight(true);
     setStatus("正在生成战略判断……");
-    if (answerOutput) answerOutput.classList.remove("empty");
+    if (answerOutput) {
+      answerOutput.classList.remove("empty");
+      answerOutput.hidden = true;
+    }
     if (questionEcho) {
       questionEcho.hidden = false;
       questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(value)}`;
     }
+    setCurrentAnswer("", "");
     try {
       if (!fetchImpl) throw new Error("fetch 不可用。");
       const response = await fetchImpl("/api/ask", {
@@ -146,14 +459,36 @@ function createApp(deps) {
       if (!response || !response.ok) {
         throw new Error((payload && payload.error) || "回答生成失败。");
       }
-      if (answerOutput) answerOutput.innerHTML = renderMarkdown(payload.answer || "");
+      // 前端兜底翻译：服务端 sanitize + translate 之后，再做一遍中文化。
+      const rawAnswer = payload.answer || "";
+      const translatedAnswer = translateInternalTermsClient(rawAnswer);
+      state.currentAnswer = translatedAnswer;
+      if (answerOutput) {
+        answerOutput.innerHTML = renderMarkdown(translatedAnswer);
+        answerOutput.hidden = false;
+      }
       const warning = payload.warning;
-      setStatus(statusFromSource(payload.source, warning), warning ? "error" : null);
+      const source = payload.source || "local";
+      state.currentSource = source;
+      setStatus(statusFromSource(source, warning), warning ? "error" : null);
+      if (copyButton && state.currentAnswer.trim()) {
+        copyButton.disabled = false;
+        copyButton.hidden = false;
+      }
       if (answerOutput) scrollImpl(answerOutput);
-      return { submitted: true, source: payload.source, warning: warning || null };
+      // 写历史
+      historyStore.push({
+        question: value,
+        answer: translatedAnswer,
+        source,
+        warning: warning || null
+      });
+      renderHistory();
+      return { submitted: true, source, warning: warning || null };
     } catch (error) {
       if (answerOutput) {
         answerOutput.textContent = "回答生成失败，请检查终端日志或先运行 npm run today。";
+        answerOutput.hidden = false;
       }
       setStatus((error && error.message) || "回答生成失败。", "error");
       return { submitted: false, reason: (error && error.message) || "unknown" };
@@ -209,18 +544,40 @@ function createApp(deps) {
         submitAsk();
       });
     }
+    if (copyButton) {
+      copyButton.addEventListener("click", handleCopy);
+    }
+    if (historyClearButton) {
+      historyClearButton.addEventListener("click", () => {
+        if (typeof window !== "undefined" && typeof window.confirm === "function") {
+          if (!window.confirm("确定清空最近提问记录吗？")) return;
+        }
+        historyStore.clear();
+        renderHistory();
+      });
+    }
     renderQuestions();
+    renderHistory();
   }
 
   return {
     submitAsk,
     fillQuestion,
     renderQuestions,
+    renderHistory,
+    restoreHistoryItem,
+    clearHistoryNow: () => {
+      historyStore.clear();
+      renderHistory();
+    },
+    handleCopy,
     getStatus: () => (statusText ? statusText.textContent : ""),
     setStatus,
     setInFlight,
+    setCurrentAnswer,
     clearSelectedQuestion,
     selectQuestionButton,
+    historyStore,
     state,
     mount
   };
@@ -310,9 +667,26 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const answerOutput = document.querySelector("#answerOutput");
   const questionEcho = document.querySelector("#questionEcho");
   const questionGrid = document.querySelector("#recommendedQuestions");
+  const historyList = document.querySelector("#historyList");
+  const historyEmpty = document.querySelector("#historyEmpty");
+  const historyClearButton = document.querySelector("#historyClear");
+  const copyButton = document.querySelector("#copyButton");
+  const answerLoading = document.querySelector("#answerLoading");
 
   const app = createApp({
-    nodes: { questionInput, askButton, statusText, answerOutput, questionEcho, questionGrid }
+    nodes: {
+      questionInput,
+      askButton,
+      statusText,
+      answerOutput,
+      questionEcho,
+      questionGrid,
+      historyList,
+      historyEmpty,
+      historyClearButton,
+      copyButton,
+      answerLoading
+    }
   });
   app.mount();
   // 暴露到 window，便于在浏览器 console 调试。
@@ -323,6 +697,18 @@ module.exports = {
   handleComposerKeyDown,
   validateSubmit,
   applyQuestionToComposer,
+  createHistoryStore,
+  normalizeHistoryItem,
+  loadHistory,
+  saveHistory,
+  pushHistoryItem,
+  removeHistoryItem,
+  clearHistory,
+  buildClipboardPayload,
+  handleCopyClick,
+  buildLoadingMarkup,
+  WHEEL_SVG,
+  translateInternalTermsClient,
   createApp,
   renderMarkdown,
   escapeHtml,

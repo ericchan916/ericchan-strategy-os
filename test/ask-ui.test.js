@@ -124,8 +124,15 @@ test("ask UI serves Chinese HTML with recommended questions", async () => {
 
     assert.equal(response.status, 200);
     assert.ok(response.body.includes("EricChan·战略OS"));
-    assert.ok(response.body.includes("主动提问，而不是被动推送"));
+    // V0.3.4-hotfix: 顶部副标题已替换为新文案。
+    const oldSubtitle = response.body.includes("主动提问，而不是被动推送");
+    assert.equal(oldSubtitle, false, "旧副标题不应再出现");
+    const hasNewSubtitle =
+      response.body.includes("把想法压成判断") ||
+      response.body.includes("把混乱的问题，压成今天能做的判断");
+    assert.ok(hasNewSubtitle, "缺少新副标题文案");
     assert.ok(response.body.includes("今天适合做什么？"));
+    assert.ok(response.body.includes("最近提问"), "HTML 应含历史记录区域");
   });
 });
 

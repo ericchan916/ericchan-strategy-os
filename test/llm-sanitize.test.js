@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { sanitizeLlmAnswer } = require("../scripts/llm-client");
+const { sanitizeLlmAnswer, translateInternalTerms } = require("../scripts/llm-client");
 
 test("sanitizeLlmAnswer strips a single-line <think>...</think> block", () => {
   const input = "<think>We need to reason about this</think>\n# 标题\n\n结论：今天不复杂。";
@@ -183,4 +183,128 @@ test("sanitizeLlmAnswer is idempotent", () => {
   const once = sanitizeLlmAnswer(input);
   const twice = sanitizeLlmAnswer(once);
   assert.equal(once, twice);
+});
+
+// ============== translateInternalTerms (V0.3.4-hotfix) ==============
+//
+// 把 LLM 偶发泄漏的内部状态词 / 字段名转成中文。
+// 只对"整词或带空格上下文"做替换；不破坏技术名词白名单。
+
+test("translateInternalTerms: validate → 待验证", () => {
+  assert.equal(translateInternalTerms("当前状态是 validate"), "当前状态是 待验证");
+});
+
+test("translateInternalTerms: accepted → 已确认", () => {
+  assert.equal(translateInternalTerms("状态已 accepted"), "状态已 已确认");
+});
+
+test("translateInternalTerms: watch → 观察中; watching → 继续观察", () => {
+  assert.equal(translateInternalTerms("只剩 watch 项"), "只剩 观察中 项");
+  assert.equal(translateInternalTerms("继续 watching 即可"), "继续 继续观察 即可");
+});
+
+test("translateInternalTerms: rejected → 已拒绝", () => {
+  assert.equal(translateInternalTerms("已被 rejected"), "已被 已拒绝");
+});
+
+test("translateInternalTerms: local-fallback → 本地兜底", () => {
+  assert.equal(translateInternalTerms("走 local-fallback 路径"), "走 本地兜底 路径");
+});
+
+test("translateInternalTerms: source → 来源", () => {
+  assert.equal(translateInternalTerms("source 是 llm"), "来源 是 llm");
+});
+
+test("translateInternalTerms: trigger → 触发条件", () => {
+  assert.equal(translateInternalTerms("trigger 出现"), "触发条件 出现");
+});
+
+test("translateInternalTerms: stageFit → 阶段匹配", () => {
+  assert.equal(translateInternalTerms("stageFit 是 now"), "阶段匹配 是 now");
+});
+
+test("translateInternalTerms: noNewOpportunitiesToday → 今天没有新机会", () => {
+  assert.equal(
+    translateInternalTerms("判定 noNewOpportunitiesToday"),
+    "判定 今天没有新机会"
+  );
+});
+
+test("translateInternalTerms: current-project-improvement → 当前项目改进", () => {
+  assert.equal(
+    translateInternalTerms("归类 current-project-improvement"),
+    "归类 当前项目改进"
+  );
+});
+
+test("translateInternalTerms: new-project-opportunity → 新项目机会", () => {
+  assert.equal(
+    translateInternalTerms("主题 new-project-opportunity"),
+    "主题 新项目机会"
+  );
+});
+
+test("translateInternalTerms: legacy-learning-material → 旧项目学习材料", () => {
+  assert.equal(
+    translateInternalTerms("归为 legacy-learning-material"),
+    "归为 旧项目学习材料"
+  );
+});
+
+test("translateInternalTerms: inbox → 待处理, building → 构建中, archived → 已归档, ignore → 忽略", () => {
+  assert.equal(translateInternalTerms("放 inbox"), "放 待处理");
+  assert.equal(translateInternalTerms("状态 building"), "状态 构建中");
+  assert.equal(translateInternalTerms("已 archived"), "已 已归档");
+  assert.equal(translateInternalTerms("可以 ignore"), "可以 忽略");
+});
+
+test("translateInternalTerms: 保留技术名词白名单 (GPT 5.5 Thinking / Codex / API / MVP / OPC / LLM / WorkBuddy / OpenDesign / MiniMax)", () => {
+  const input = "开工包先交给 GPT 5.5 Thinking，再考虑 Codex、API、MVP、OPC、WorkBuddy、LLM、OpenDesign、MiniMax 的使用。";
+  const out = translateInternalTerms(input);
+  for (const term of [
+    "GPT 5.5 Thinking",
+    "Codex",
+    "API",
+    "MVP",
+    "OPC",
+    "LLM",
+    "WorkBuddy",
+    "OpenDesign",
+    "MiniMax"
+  ]) {
+    assert.ok(out.includes(term), `技术名词 ${term} 应保留`);
+  }
+});
+
+test("translateInternalTerms: 不破坏代码块内容", () => {
+  const input = "```js\nconst status = 'validate';\nconst source = 'llm';\n```\n\n上面代码不翻译。";
+  const out = translateInternalTerms(input);
+  assert.ok(out.includes("const status = 'validate';"));
+  assert.ok(out.includes("const source = 'llm';"));
+  assert.ok(out.includes("上面代码不翻译"));
+});
+
+test("translateInternalTerms: 整词匹配不误伤普通英文词", () => {
+  // validate / accepted / watch 不能误伤其它含子串的英文
+  assert.equal(translateInternalTerms("validateAction"), "validateAction");  // 驼峰里不应被切
+  assert.equal(translateInternalTerms("watcher"), "watcher");                  // watcher 不是 watch
+  assert.equal(translateInternalTerms("acceptance"), "acceptance");            // acceptance 不是 accepted
+  // 但带空格或边界的仍翻译
+  assert.equal(translateInternalTerms("watch the door"), "观察中 the door");
+});
+
+test("translateInternalTerms: 输入为空 / 非字符串不抛异常", () => {
+  assert.equal(translateInternalTerms(""), "");
+  assert.equal(translateInternalTerms(null), "");
+  assert.equal(translateInternalTerms(undefined), "");
+  assert.equal(translateInternalTerms(42), "");
+});
+
+test("translateInternalTerms: 多个状态词同时出现在同一段", () => {
+  const input = "源 source 是 validate；目标 trigger 出现 stageFit 异常。";
+  const out = translateInternalTerms(input);
+  assert.ok(out.includes("来源"));
+  assert.ok(out.includes("待验证"));
+  assert.ok(out.includes("触发条件"));
+  assert.ok(out.includes("阶段匹配"));
 });

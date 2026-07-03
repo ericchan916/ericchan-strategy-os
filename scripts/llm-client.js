@@ -195,6 +195,8 @@ async function callChatCompletion({ config, systemPrompt, userPrompt, fetchImpl 
   }
   // 走清洗：去除模型内部 thinking / reasoning / analysis 等英文推理残留。
   text = sanitizeLlmAnswer(String(text || ""));
+  // 第二层兜底：把模型偶发泄漏的内部英文状态词（validate / accepted / watch 等）再中文化。
+  text = translateInternalTerms(text);
 
   if (!text) {
     throw new LlmError("empty", "LLM 没有返回内容。");
@@ -256,6 +258,111 @@ function sanitizeLlmAnswer(input) {
   return text;
 }
 
+// ============== 内部状态词 / 字段名中文化 (V0.3.4-hotfix) ==============
+//
+// 设计目标：
+// - 把 LLM 偶发泄漏的内部英文状态词（validate / accepted / watch 等）转成中文。
+// - 不破坏技术名词白名单：GPT 5.5 Thinking / Codex / API / MVP / OPC / LLM /
+//   WorkBuddy / OpenDesign / MiniMax。
+// - 不破坏围栏代码块与行内 code。
+// - 整词匹配，避免误伤 validateAction / watcher / acceptance 等普通英文。
+//
+// 之所以是字符串数组而不是单一正则：
+//   - 同一英文可能对应不同中文（watch → 观察中；watching → 继续观察）；
+//   - 用 Map 维护"长串优先"以避免 watching 整词先被 watch 替换成错误的"观察中ing"。
+const INTERNAL_TERMS = [
+  // 长串必须排在前
+  ["noNewOpportunitiesToday", "今天没有新机会"],
+  ["current-project-improvement", "当前项目改进"],
+  ["new-project-opportunity", "新项目机会"],
+  ["legacy-learning-material", "旧项目学习材料"],
+  ["local-fallback", "本地兜底"],
+  ["stageFit", "阶段匹配"],
+  ["accepted", "已确认"],
+  ["validate", "待验证"],
+  ["watching", "继续观察"],
+  ["rejected", "已拒绝"],
+  ["trigger", "触发条件"],
+  ["archived", "已归档"],
+  ["building", "构建中"],
+  ["source", "来源"],
+  ["watch", "观察中"],
+  ["inbox", "待处理"],
+  ["ignore", "忽略"]
+];
+
+// 把一行中安全的"内部状态词命中"全部转成中文。
+// 整词边界：命中词左右必须是"非字母数字下划线 - 或 行首/行尾"。
+// 单数 / 复数 / 简单 -ing 形变（已通过查表覆盖）。
+function translateLine(line) {
+  let out = line;
+  for (const [en, zh] of INTERNAL_TERMS) {
+    if (!out.includes(en)) continue;
+    // 用 \b 在英文侧做边界；en 已是纯字母数字下划线短横组合。
+    const re = new RegExp(`(^|[^A-Za-z0-9_-])${en.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^A-Za-z0-9_-])`, "g");
+    out = out.replace(re, (_match, prefix) => `${prefix}${zh}`);
+  }
+  return out;
+}
+
+// 对整段文本做翻译，但跳过代码围栏（``` ... ```）和行内 code（` ... `）。
+// 围栏：成对 ``` 之间不翻译；未配对时，从首个 ``` 起全部视作代码。
+function translateInternalTermsInMarkdown(text) {
+  if (text === null || text === undefined) return "";
+  const value = String(text);
+  if (!value) return "";
+  const lines = value.split(/\r?\n/);
+  const out = [];
+  let inFence = false;
+  let inInlineCode = false;
+  for (const line of lines) {
+    const fenceMatch = line.match(/^\s*(```|~~~)/);
+    if (fenceMatch) {
+      // 翻转围栏态
+      if (!inFence) {
+        inFence = true;
+      } else {
+        inFence = false;
+      }
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    // 行内 code：用 `` ` `` / `` `` `` / ``` ```` 分段；简单实现：整行若首尾字符是 ` 则视为整行代码（不该出现，但兜底）。
+    // 行级翻译：跳过行内 `...` 段
+    out.push(translateLineWithInlineCode(line));
+  }
+  return out.join("\n");
+}
+
+function translateLineWithInlineCode(line) {
+  if (!line.includes("`")) return translateLine(line);
+  // 把行内 `...` 切出来；中间的普通部分走翻译。
+  const parts = line.split(/(`+[^`\n]*`+)/g);
+  return parts
+    .map((part) => {
+      if (/^`+[^`\n]*`+$/.test(part)) return part; // 行内代码段，不翻译
+      return translateLine(part);
+    })
+    .join("");
+}
+
+// 公共 API：与 sanitizeLlmAnswer 类似，返回 string。
+// 缺字段 / 非字符串：不抛异常，输出 ""。
+function translateInternalTerms(text) {
+  if (text === null || text === undefined) return "";
+  if (typeof text !== "string") return "";
+  if (!text) return "";
+  try {
+    return translateInternalTermsInMarkdown(text);
+  } catch {
+    return text;
+  }
+}
+
 module.exports = {
   DEFAULT_TIMEOUT_MS,
   DEFAULT_BASE_URL,
@@ -263,6 +370,8 @@ module.exports = {
   redactKey,
   normalizeBaseUrl,
   sanitizeLlmAnswer,
+  translateInternalTerms,
+  translateInternalTermsInMarkdown,
   readConfig,
   isConfigured,
   callChatCompletion,
