@@ -3,7 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { askStrategyOs } = require("./ask-strategy-os");
+const { askStrategyOsAsync } = require("./ask-strategy-os");
 
 const DEFAULT_PORT = 5177;
 const ASSET_TYPES = {
@@ -67,11 +67,22 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           sendJson(res, 400, { error: "请输入问题。" });
           return;
         }
-        const result = askStrategyOs({ rootDir, question });
-        sendJson(res, 200, { type: result.type, answer: result.answer });
+        const result = await askStrategyOsAsync({ rootDir, question });
+        const responseBody = {
+          type: result.type,
+          answer: result.answer,
+          source: result.source,
+          llmEnabled: result.llmEnabled
+        };
+        if (result.warning) responseBody.warning = result.warning;
+        sendJson(res, 200, responseBody);
       } catch (error) {
-        console.error(error.message);
-        sendJson(res, 500, { error: "回答生成失败，请检查终端日志或先运行 npm run today。" });
+        const safeMessage = String(error.message || "回答生成失败，请检查终端日志或先运行 npm run today。").replace(
+          /sk-[A-Za-z0-9_-]+/g,
+          "[redacted]"
+        );
+        console.error(safeMessage);
+        sendJson(res, 500, { error: safeMessage });
       }
       return;
     }

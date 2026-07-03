@@ -89,6 +89,14 @@ function setStatus(message, tone) {
   else statusText.removeAttribute("data-tone");
 }
 
+function statusFromSource(source, warning) {
+  if (warning) return warning;
+  if (source === "llm") return "已使用动态战略回答。";
+  if (source === "local") return "已使用本地规则回答。";
+  if (source === "local-fallback") return "LLM 动态回答暂时不可用，已回退到本地规则回答。";
+  return "回答已生成。";
+}
+
 function setInFlight(value) {
   inFlight = value;
   askButton.disabled = value;
@@ -130,7 +138,7 @@ async function ask(question) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "回答生成失败。");
     answerOutput.innerHTML = renderMarkdown(payload.answer);
-    setStatus("回答已生成。");
+    setStatus(statusFromSource(payload.source, payload.warning), payload.warning ? "error" : null);
     answerOutput.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     answerOutput.textContent = "回答生成失败，请检查终端日志或先运行 npm run today。";

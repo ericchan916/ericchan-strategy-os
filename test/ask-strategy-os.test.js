@@ -5,7 +5,8 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { askStrategyOs, classifyQuestion } = require("../scripts/ask-strategy-os");
+const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt } = require("../scripts/ask-strategy-os");
+const llmClient = require("../scripts/llm-client");
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -184,4 +185,142 @@ test("ask mode does not read .env or modify user generated files", () => {
   assert.equal(fs.readFileSync(fixture.reportPath, "utf8"), before.report);
   assert.equal(fs.readFileSync(fixture.poolPath, "utf8"), before.pool);
   assert.equal(fs.readFileSync(fixture.commandPath, "utf8"), before.command);
+});
+
+test("default Ask Mode returns local answer with source=local and llmEnabled=false", async () => {
+  const fixture = createFixture();
+  const result = await askStrategyOsAsync({ rootDir: fixture.rootDir, date: fixture.date, question: "今天适合做什么？" });
+
+  assert.equal(result.source, "local");
+  assert.equal(result.llmEnabled, false);
+  assert.equal(result.warning, null);
+  assert.ok(result.answer.includes("# 今天适合做什么"));
+});
+
+test("STRATEGY_OS_LLM_ENABLED=false keeps local answer and does not call LLM", async () => {
+  const fixture = createFixture();
+  let called = false;
+  const fakeFetch = () => {
+    called = true;
+    throw new Error("should not be called");
+  };
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "今天适合做什么？",
+    env: { ...process.env, STRATEGY_OS_LLM_ENABLED: "false", STRATEGY_OS_LLM_API_KEY: "sk-should-not-be-used", STRATEGY_OS_LLM_MODEL: "x" },
+    deps: { fetch: fakeFetch }
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.source, "local");
+  assert.equal(result.llmEnabled, false);
+});
+
+test("STRATEGY_OS_LLM_ENABLED=true with API failure returns local-fallback + Chinese warning", async () => {
+  const fixture = createFixture();
+  const fakeFetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "今天适合做什么？",
+    env: {
+      ...process.env,
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-mock-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+    },
+    deps: { fetch: fakeFetch }
+  });
+
+  assert.equal(result.source, "local-fallback");
+  assert.equal(result.llmEnabled, true);
+  assert.equal(result.warning, "LLM 动态回答暂时不可用，已回退到本地规则回答。");
+  assert.ok(result.answer.includes("# 今天适合做什么"));
+});
+
+test("STRATEGY_OS_LLM_ENABLED=true with API success returns source=llm", async () => {
+  const fixture = createFixture();
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { content: "# LLM 回答\n\n结论：动态中文判断。" } }]
+    })
+  });
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "今天适合做什么？",
+    env: {
+      ...process.env,
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-mock-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+    },
+    deps: { fetch: fakeFetch }
+  });
+
+  assert.equal(result.source, "llm");
+  assert.equal(result.llmEnabled, true);
+  assert.equal(result.warning, null);
+  assert.ok(result.answer.includes("动态中文判断"));
+});
+
+test("API key is never included in the user prompt", () => {
+  const fixture = createFixture();
+  const result = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date });
+  const prompt = buildLlmUserPrompt({
+    context: result.context,
+    type: "today-action",
+    question: "今天适合做什么？"
+  });
+
+  assert.equal(prompt.includes("sk-"), false);
+  assert.equal(prompt.includes("do-not-read-this"), false);
+  assert.equal(prompt.includes("LLM_API_KEY"), false);
+});
+
+test("llm client readConfig defaults to disabled", () => {
+  const config = llmClient.readConfig({});
+  assert.equal(config.enabled, false);
+  assert.equal(config.apiKey, "");
+  assert.equal(config.timeoutMs, 30000);
+});
+
+test("llm client isConfigured requires enabled + key + model", () => {
+  assert.equal(llmClient.isConfigured({ enabled: true, apiKey: "k", model: "m" }), true);
+  assert.equal(llmClient.isConfigured({ enabled: false, apiKey: "k", model: "m" }), false);
+  assert.equal(llmClient.isConfigured({ enabled: true, apiKey: "", model: "m" }), false);
+  assert.equal(llmClient.isConfigured({ enabled: true, apiKey: "k", model: "" }), false);
+});
+
+test("llm client sanitizes API key from logged errors", async () => {
+  const fixture = createFixture();
+  const captured = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => captured.push(String(msg));
+  try {
+    const fakeFetch = async () => ({ ok: false, status: 401, text: async () => "denied sk-leak-key-1234" });
+    await askStrategyOsAsync({
+      rootDir: fixture.rootDir,
+      date: fixture.date,
+      question: "今天适合做什么？",
+      env: {
+        ...process.env,
+        STRATEGY_OS_LLM_ENABLED: "true",
+        STRATEGY_OS_LLM_API_KEY: "sk-leak-key-1234",
+        STRATEGY_OS_LLM_MODEL: "m",
+        STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+      },
+      deps: { fetch: fakeFetch }
+    });
+  } finally {
+    console.warn = origWarn;
+  }
+
+  const joined = captured.join("\n");
+  assert.equal(joined.includes("sk-leak-key-1234"), false);
 });

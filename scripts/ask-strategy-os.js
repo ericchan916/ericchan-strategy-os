@@ -3,6 +3,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { getDateString } = require("./generate-report");
+const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
+
+const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
+const ASK_MODE_SYSTEM_PROMPT_PATH = path.join(__dirname, "..", "prompts", "ask-mode-system-prompt.md");
+const ASK_MODE_SYSTEM_PROMPT_FALLBACK =
+  "你是 EricChan·战略OS 的战略总控问答模块。请用中文回答：先给结论，再给最多 3 个理由和最多 3 个行动，并明确指出今天不要做什么。不要默认建议更新旧项目；项目开工包必须先交给 GPT 5.5 Thinking 总控判断。";
 
 const DEFAULT_QUESTIONS = [
   "今天适合做什么？",
@@ -401,13 +407,139 @@ function renderAnswer({ context, question }) {
   return renderGeneral(context, question);
 }
 
-function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "" } = {}) {
+function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env } = {}) {
+  // 同步入口：不调用 LLM，始终返回本地规则回答。
+  // 服务端 /api/ask 应改用 askStrategyOsAsync 以启用 LLM 动态回答。
   const context = loadAskContext({ rootDir, date });
   return {
     type: classifyQuestion(question),
     answer: renderAnswer({ context, question }),
+    source: "local",
+    llmEnabled: isConfigured(readConfig(env)),
+    warning: null,
     context
   };
+}
+
+async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, deps = {} } = {}) {
+  const context = loadAskContext({ rootDir, date });
+  const type = classifyQuestion(question);
+  const localAnswer = renderAnswer({ context, question });
+
+  const llmConfig = readConfig(env);
+  const llmEnabled = isConfigured(llmConfig);
+
+  if (!llmEnabled) {
+    return {
+      type,
+      answer: localAnswer,
+      source: "local",
+      llmEnabled: false,
+      warning: null,
+      context
+    };
+  }
+
+  try {
+    const answer = await callChatCompletion({
+      config: llmConfig,
+      systemPrompt: readSystemPrompt(),
+      userPrompt: buildLlmUserPrompt({ context, type, question }),
+      fetchImpl: deps.fetch,
+      abortImpl: deps.AbortController
+    });
+    if (answer) {
+      return {
+        type,
+        answer,
+        source: "llm",
+        llmEnabled: true,
+        warning: null,
+        context
+      };
+    }
+  } catch (error) {
+    logLlmError(error);
+  }
+
+  return {
+    type,
+    answer: localAnswer,
+    source: "local-fallback",
+    llmEnabled: true,
+    warning: LLM_FALLBACK_WARNING,
+    context
+  };
+}
+
+function readSystemPrompt() {
+  return readText(ASK_MODE_SYSTEM_PROMPT_PATH) || ASK_MODE_SYSTEM_PROMPT_FALLBACK;
+}
+
+function trimContext(text, max = 600) {
+  const value = String(text || "").trim();
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…`;
+}
+
+function buildLlmUserPrompt({ context, type, question }) {
+  const lines = [];
+  lines.push(`当前问题类型：${type}`);
+  lines.push(`用户原始问题：${String(question || "").trim() || "（无）"}`);
+  if (context.contextText) {
+    lines.push("");
+    lines.push("【用户上下文 / context.md】");
+    lines.push(trimContext(context.contextText, 600));
+  }
+  if (context.dailyCommandMarkdown) {
+    lines.push("");
+    lines.push("【今天 Daily Command / daily-command/*.md】");
+    lines.push(trimContext(context.dailyCommandMarkdown, 800));
+  } else if (context.dailyCommand) {
+    const top = context.dailyCommand.topOpportunities && context.dailyCommand.topOpportunities[0];
+    const action = context.dailyCommand.recommendedActions && context.dailyCommand.recommendedActions[0];
+    lines.push("");
+    lines.push("【今天 Daily Command 摘要】");
+    lines.push(`- oneLineJudgment: ${trimContext(context.dailyCommand.oneLineJudgment || "", 200)}`);
+    if (top) lines.push(`- topOpportunity: ${top.opportunityName || ""}`);
+    if (action) lines.push(`- firstAction: ${trimContext(action.action || "", 200)}`);
+  }
+  if (Array.isArray(context.opportunityPool && context.opportunityPool.opportunities)) {
+    const items = context.opportunityPool.opportunities
+      .slice(0, 5)
+      .map((item) => `- ${item.opportunityName || item.id || "未命名"}（${item.status || "未知"} / ${item.humanDecision || "pending"}）`)
+      .join("\n");
+    if (items) {
+      lines.push("");
+      lines.push("【当前机会池（最多 5 条）】");
+      lines.push(items);
+    }
+  }
+  if (context.report) {
+    const action = Array.isArray(context.report.recommendedActions) ? context.report.recommendedActions[0] : null;
+    if (action && action.action) {
+      lines.push("");
+      lines.push("【最近 Report 第一建议】");
+      lines.push(trimContext(action.action, 200));
+    }
+  }
+  return lines.join("\n");
+}
+
+async function tryLlmAnswerAsync({ config, context, type, question, deps = {} } = {}) {
+  const fetchImpl = deps.fetch || globalThis.fetch;
+  const abortImpl = deps.AbortController || (typeof AbortController !== "undefined" ? AbortController : null);
+  const systemPrompt = deps.systemPrompt || readSystemPrompt();
+  const userPrompt = buildLlmUserPrompt({ context, type, question });
+  return callChatCompletion({ config, systemPrompt, userPrompt, fetchImpl, abortImpl });
+}
+
+function logLlmError(error) {
+  if (!error) return;
+  const code = error instanceof LlmError ? error.code : "unknown";
+  // 不输出 API Key；只输出 code 与非敏感的 message。
+  const safeMessage = String(error.message || "").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+  console.warn(`[ask-mode] LLM 调用失败（${code}）：${safeMessage}`);
 }
 
 function main() {
@@ -417,17 +549,28 @@ function main() {
   const questionArgs =
     dateArgIndex >= 0 ? args.filter((_, index) => index !== dateArgIndex && index !== dateArgIndex + 1) : args;
   const question = questionArgs.join(" ").trim();
-  const result = askStrategyOs({ rootDir: process.cwd(), date, question });
-  console.log(result.answer.trim());
+  askStrategyOsAsync({ rootDir: process.cwd(), date, question })
+    .then((result) => {
+      if (result.warning) console.warn(result.warning);
+      console.log(result.answer.trim());
+    })
+    .catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
 }
 
 if (require.main === module) main();
 
 module.exports = {
   askStrategyOs,
+  askStrategyOsAsync,
   classifyQuestion,
   listRecommendedQuestions,
   loadAskContext,
   renderKickoffPackage,
-  renderProjectCheckup
+  renderProjectCheckup,
+  readSystemPrompt,
+  buildLlmUserPrompt,
+  LLM_FALLBACK_WARNING
 };

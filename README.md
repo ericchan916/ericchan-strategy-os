@@ -663,6 +663,57 @@ V0.3.2 不新增功能，只精修极简网页主界面的视觉、版式与阅�
 
 V0.3.1-hotfix 的双 loopback 监听（127.0.0.1 与 [::1]）继续保留，本机 IPv4 / IPv6 都能访问，不监听 0.0.0.0 / ::，不会暴露到局域网。
 
+## LLM 动态问答模式
+
+V0.3.3 在 Ask Mode 上引入可选的 LLM 动态回答能力。默认仍然使用本地规则回答，因此本机零配置即可使用。
+
+默认行为：
+
+- `STRATEGY_OS_LLM_ENABLED` 不设置或为 `false`：直接返回本地规则回答，`source="local"`。
+- `STRATEGY_OS_LLM_ENABLED=true` 但 API Key / Model 缺失：视作未启用，依然返回本地规则回答。
+- `STRATEGY_OS_LLM_ENABLED=true` 且 API 调用成功：返回 LLM 动态中文回答，`source="llm"`。
+- `STRATEGY_OS_LLM_ENABLED=true` 但 API 失败或超时：自动回退本地规则回答，`source="local-fallback"`，并在状态区显示中文 warning：
+
+  ```
+  LLM 动态回答暂时不可用，已回退到本地规则回答。
+  ```
+
+配置方法（写入 `.env`，**不要提交 `.env`**）：
+
+```bash
+STRATEGY_OS_LLM_ENABLED=true
+STRATEGY_OS_LLM_BASE_URL=https://api.openai.com/v1
+STRATEGY_OS_LLM_API_KEY=你的密钥
+STRATEGY_OS_LLM_MODEL=gpt-4o-mini
+STRATEGY_OS_LLM_TIMEOUT_MS=30000
+```
+
+关键约束：
+
+- API Key 只在 Node 后端读取，永远不会发送到浏览器，也不会出现在页面、日志或测试输出中。
+- 后端日志会对错误信息中的 `sk-` 形式 Key 做替换，避免泄漏。
+- Ask Mode 仍然不会真实调用 Codex / WorkBuddy / OpenDesign / MiniMax，也不会修改机会池 / Daily Command / 旧项目。
+- 项目开工包在 LLM 回答中仍必须先交给 `GPT 5.5 Thinking` 总控，不会默认变成 Codex 执行提示词。
+- `.env.example` 已给出全部新配置项与默认值 `STRATEGY_OS_LLM_ENABLED=false`。
+
+命令行验证：
+
+```bash
+npm run ask -- "今天适合做什么？"
+```
+
+网页验证：
+
+```bash
+npm run ask:ui
+```
+
+打开 `http://localhost:5177`，查看状态条：
+
+- `source="llm"` → 已使用动态战略回答。
+- `source="local"` → 已使用本地规则回答。
+- `source="local-fallback"` → LLM 动态回答暂时不可用，已回退到本地规则回答。
+
 ## Output Files
 
 Each run writes:
