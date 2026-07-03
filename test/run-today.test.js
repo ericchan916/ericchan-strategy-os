@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -76,23 +78,39 @@ test("runToday passes --force to command generation", async () => {
   assert.equal(forceValue, true);
 });
 
-test("runToday rewrites existing command errors with a force hint", async () => {
-  await assert.rejects(
-    () =>
-      runToday({
-        rootDir: "E:/fake-root",
-        date: "2026-07-03",
-        impl: {
-          runDailyReport: async () => ({ mode: "live", warnings: [] }),
-          updateOpportunityPool: () => ({ imported: 0, updated: 0, skipped: 0 }),
-          validateOpportunityPoolFile: () => ({ ok: true, count: 1, failures: [] }),
-          generateDailyCommand: () => {
-            throw new Error("Daily Command already exists for 2026-07-03. Use --force to overwrite.");
-          }
-        }
-      }),
-    /Daily Command already exists[\s\S]*npm run today -- --force/
+test("runToday treats an existing Daily Command as a preserved no-op", async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-today-"));
+  const date = "2026-07-03";
+  const markdownPath = path.join(rootDir, "daily-command", `${date}.md`);
+  const jsonPath = path.join(rootDir, "data", "daily-command", `${date}.json`);
+  fs.mkdirSync(path.dirname(markdownPath), { recursive: true });
+  fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
+  fs.writeFileSync(markdownPath, "existing command");
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify({ sourceMode: "mock", recommendedActions: [{ action: "Keep it small." }, { action: "Ignore noise." }] }, null, 2)
   );
+
+  const result = await runToday({
+    rootDir,
+    date,
+    impl: {
+      runDailyReport: async () => ({ mode: "live", warnings: [] }),
+      updateOpportunityPool: () => ({ imported: 0, updated: 0, skipped: 0 }),
+      validateOpportunityPoolFile: () => ({ ok: true, count: 1, failures: [] }),
+      generateDailyCommand: () => {
+        throw new Error("Daily Command already exists for 2026-07-03. Use --force to overwrite.");
+      }
+    }
+  });
+
+  assert.equal(result.dailyCommandAlreadyExists, true);
+  assert.equal(result.dailyCommandPreserved, true);
+  assert.equal(result.dailyCommandGenerated, false);
+  assert.equal(result.sourceMode, "mock");
+  assert.equal(result.recommendedActionCount, 2);
+  assert.equal(result.dailyCommandHint, "npm run today -- --force");
+  assert.equal(fs.readFileSync(markdownPath, "utf8"), "existing command");
 });
 
 test("runToday stops when daily generation fails", async () => {

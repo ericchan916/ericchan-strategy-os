@@ -544,6 +544,8 @@ The recommended default is now a single command:
 npm run today
 ```
 
+`npm run today` is idempotent. If today's `daily-command/YYYY-MM-DD.md` already exists, the command keeps it, prints a preserved-file summary, and exits `0`.
+
 That one entry point runs the personal daily chain in order:
 
 - `npm run daily`
@@ -562,6 +564,8 @@ If today's Daily Command already exists and you want to refresh it, run:
 ```bash
 npm run today -- --force
 ```
+
+Windows Task Scheduler should keep using the plain `npm run today` command. That way the scheduled run is a safe no-op when today's command already exists, and only manual reruns use `--force`.
 
 ## Output Files
 

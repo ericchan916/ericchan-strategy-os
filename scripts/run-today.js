@@ -14,6 +14,33 @@ function validateOpportunityPoolFile({ rootDir = process.cwd() } = {}) {
   return validateOpportunityPool(pool);
 }
 
+function readJsonIfExists(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function readExistingDailyCommandState({ rootDir, date }) {
+  const dailyCommandJsonPath = path.join(rootDir, "data", "daily-command", `${date}.json`);
+  const reportJsonPath = path.join(rootDir, "data", "reports", `${date}.json`);
+  const dailyCommand = readJsonIfExists(dailyCommandJsonPath);
+  const report = dailyCommand ? null : readJsonIfExists(reportJsonPath);
+  const sourceMode = dailyCommand?.sourceMode || report?.mode || "unknown";
+  const recommendedActionCount = Array.isArray(dailyCommand?.recommendedActions)
+    ? dailyCommand.recommendedActions.length
+    : Array.isArray(report?.recommendedActions)
+      ? report.recommendedActions.length
+      : 0;
+
+  return {
+    sourceMode,
+    recommendedActionCount,
+    dailyCommandJsonPath
+  };
+}
+
 async function runToday({
   rootDir = process.cwd(),
   date = getDateString(),
@@ -49,7 +76,27 @@ async function runToday({
     commandResult = generateCommand({ rootDir, date, force });
   } catch (error) {
     if (/Daily Command already exists/i.test(error.message)) {
-      throw new Error(`${error.message}\nRun \`npm run today -- --force\` to regenerate today's Daily Command.`);
+      const existing = readExistingDailyCommandState({ rootDir, date });
+      return {
+        date,
+        reportGenerated: true,
+        opportunityPoolUpdated: true,
+        dailyCommandGenerated: false,
+        dailyCommandAlreadyExists: true,
+        dailyCommandPreserved: true,
+        opportunitiesImported: poolUpdate.imported || 0,
+        noNewOpportunitiesToday: (poolUpdate.imported || 0) === 0,
+        sourceMode: existing.sourceMode,
+        recommendedActionCount: existing.recommendedActionCount,
+        dailyCommandPath: path.join(rootDir, "daily-command", `${date}.md`),
+        dailyCommandJsonPath: existing.dailyCommandJsonPath,
+        dailyCommandHint: "npm run today -- --force",
+        mockFallback: existing.sourceMode === "mock",
+        dailyResult,
+        poolUpdate,
+        validation,
+        commandResult: null
+      };
     }
     throw new Error(`Daily Command generation failed: ${error.message}`);
   }
@@ -59,12 +106,15 @@ async function runToday({
     reportGenerated: true,
     opportunityPoolUpdated: true,
     dailyCommandGenerated: true,
+    dailyCommandAlreadyExists: false,
+    dailyCommandPreserved: false,
     opportunitiesImported: poolUpdate.imported || 0,
     noNewOpportunitiesToday: (poolUpdate.imported || 0) === 0,
     sourceMode: commandResult.command.sourceMode,
     recommendedActionCount: commandResult.command.recommendedActions.length,
     dailyCommandPath: commandResult.markdownPath,
     dailyCommandJsonPath: commandResult.jsonPath,
+    dailyCommandHint: "npm run today -- --force",
     mockFallback: commandResult.command.sourceMode === "mock",
     dailyResult,
     poolUpdate,
@@ -80,9 +130,12 @@ function printSummary(result) {
   console.log(`Opportunities imported: ${result.opportunitiesImported}`);
   if (result.noNewOpportunitiesToday) console.log("No new opportunities today: yes");
   console.log(`Daily Command generated: ${result.dailyCommandGenerated ? "yes" : "no"}`);
+  console.log(`Daily Command already exists: ${result.dailyCommandAlreadyExists ? "yes" : "no"}`);
+  console.log(`Preserved existing file: ${result.dailyCommandPreserved ? "yes" : "no"}`);
   console.log(`sourceMode: ${result.sourceMode}`);
   console.log(`Today's action count: ${result.recommendedActionCount}`);
   console.log(`Daily Command: ${result.dailyCommandPath}`);
+  console.log(`Hint: ${result.dailyCommandHint || "npm run today -- --force"}`);
   if (result.mockFallback) {
     console.log("Mock fallback: yes - today's command came from a mock-mode report.");
   }
