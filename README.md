@@ -567,6 +567,45 @@ npm run today -- --force
 
 Windows Task Scheduler should keep using the plain `npm run today` command. That way the scheduled run is a safe no-op when today's command already exists, and only manual reruns use `--force`.
 
+## Ask Mode 主动问答模式
+
+V0.3 把 Strategy OS 的默认使用方式从“等系统推送”调整为“EricChan 主动提问，系统基于当前状态回答”。定时日报仍然有用，但主入口应该更像一个提问窗口：你问今天该做什么、某个项目值不值得做、该交给哪个智能体，系统给出短判断。
+
+运行方式：
+
+```bash
+npm run ask
+npm run ask -- "今天适合做什么？"
+npm run ask -- "我看到一个 ESP32 墨水屏日历项目，帮我体检一下。"
+npm run ask -- "帮我生成这个项目的开工包：ESP32 墨水屏日历项目。"
+```
+
+无问题运行时会输出推荐问题。这些问题来自 `config/recommended-questions.json`，后续可以直接作为网页按钮文案：
+
+- 今天适合做什么？
+- 当前项目哪个最值得推进？
+- 我现在该不该开新项目？
+- 我看到一个好项目，帮我体检一下。
+- 帮我生成项目开工包。
+- 这件事该交给哪个智能体？
+- 我是不是把事情搞复杂了？
+
+Ask Mode 会读取：
+
+- `context/context.md`
+- `data/reports/YYYY-MM-DD.json`
+- `data/opportunities/opportunity-pool.json`
+- `daily-command/YYYY-MM-DD.md`
+- 同日 feedback / review / proposal，如果存在
+
+如果当天还没有 Daily Command，它会用中文提示先运行 `npm run today`。Ask Mode 不修改机会池、不修改 Daily Command、不调用真实智能体，也不读取 `.env`。
+
+项目体检用于你看到一个好项目时的第一层判断。它会回答这个项目值不值得试、适不适合 EricChan、风险在哪里、最小可验证效果是什么，以及下一步应该进入机会池、继续观察、生成开工包还是忽略。
+
+项目开工包不是 Codex 执行提示词。它默认交给 `GPT 5.5 Thinking` 做战略总控，先判断是否适合当前阶段、是否有内容资产或变现价值、是否进入机会池、是否需要 WorkBuddy 调研、OpenDesign / MiniMax 视觉探索，最后才判断是否需要 Codex 做工程 MVP。
+
+用户可见内容默认中文。文件名、npm scripts、JSON key、技术名词、模型名和项目名可以保留英文，但 Markdown 标题、说明、按钮、提示语和总结应优先中文。
+
 ## Output Files
 
 Each run writes:

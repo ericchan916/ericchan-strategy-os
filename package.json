@@ -9,6 +9,7 @@
     "validate:report": "node scripts/validate-report.js",
     "daily": "node scripts/run-daily-report.js",
     "today": "node scripts/run-today.js",
+    "ask": "node scripts/ask-strategy-os.js",
     "feedback:today": "node scripts/run-daily-report.js --feedback-only",
     "review": "node scripts/generate-review.js",
     "review:today": "node scripts/generate-review.js",
