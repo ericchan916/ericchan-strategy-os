@@ -18,6 +18,7 @@
     "opportunities:validate": "node scripts/validate-opportunity-pool.js",
     "opportunities:review": "node scripts/generate-opportunity-review.js",
     "opportunities:apply-review": "node scripts/apply-opportunity-review.js",
+    "opportunities:validation-pack": "node scripts/generate-opportunity-validation-pack.js",
     "clean": "node scripts/generate-report.js --clean",
     "test": "node --test"
   },

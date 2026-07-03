@@ -445,6 +445,50 @@ npm run opportunities:validate
 npm run opportunities:list
 ```
 
+## V0.1.12 Single Opportunity Validation Pack
+
+V0.1.12 adds a validate-stage package for one opportunity at a time. It still does not generate a full MVP spec. The job here is narrower: turn a `validate / accepted` opportunity into a concrete interview-and-scoring packet so EricChan can decide whether it deserves V0.2.
+
+By default the script targets:
+
+- `Independent AI opportunity brief MVP`
+
+It reads:
+
+- `data/opportunities/opportunity-pool.json`
+
+It writes:
+
+- `opportunities/validation/YYYY-MM-DD-independent-ai-opportunity-brief-validation.md`
+
+Run it with the default target:
+
+```bash
+npm run opportunities:validation-pack
+```
+
+Run it for a specific date or target opportunity:
+
+```bash
+npm run opportunities:validation-pack -- --date 2026-07-03
+npm run opportunities:validation-pack -- --opportunity "Independent AI opportunity brief MVP"
+```
+
+The script only considers opportunities that are both:
+
+- `status=validate`
+- `humanDecision=accepted`
+
+Watch or rejected opportunities are skipped. The current internal watch item, `Opportunity scoring quality gate`, is intentionally not turned into a validation pack.
+
+Use the pack in three steps:
+
+1. Share the sample brief with a few target users.
+2. Ask the interview questions and score the responses.
+3. Compare the results against the pass/fail criteria before deciding whether to enter V0.2.
+
+Validate should not jump directly to MVP spec because a plausible idea can still fail on user urgency, distribution, willingness to pay, or differentiation from generic AI news. The validation pack exists to catch that early, before we spend time writing a more detailed product plan.
+
 ## Output Files
 
 Each run writes:
@@ -457,6 +501,7 @@ Each run writes:
 - `proposals/YYYY-MM-DD-update-proposal.md` when using `npm run propose:today`
 - `opportunities/opportunity-pool.md` and `data/opportunities/opportunity-pool.json` when using `npm run opportunities:update`
 - `opportunities/reviews/YYYY-MM-DD-opportunity-review.md` when using `npm run opportunities:review`
+- `opportunities/validation/YYYY-MM-DD-independent-ai-opportunity-brief-validation.md` when using `npm run opportunities:validation-pack`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
@@ -464,6 +509,7 @@ Each run writes:
 `proposals/` stores generated update proposals and is ignored by Git except for `.gitkeep`.
 `opportunities/` and `data/opportunities/` store the generated Opportunity Pool and are ignored by Git except for `.gitkeep`.
 `opportunities/reviews/` stores generated opportunity screening packages and is ignored by Git except for `.gitkeep`.
+`opportunities/validation/` stores single-opportunity validation packs and is ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -525,6 +571,7 @@ npm run opportunities:validate # validate Opportunity Pool schema and strategy g
 npm run opportunities:list # list Opportunity Pool entries
 npm run opportunities:review # generate a manual Opportunity Pool screening package
 npm run opportunities:apply-review # write filled Human Review decisions back into the Opportunity Pool
+npm run opportunities:validation-pack # generate a validate-stage pack for one accepted opportunity
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
