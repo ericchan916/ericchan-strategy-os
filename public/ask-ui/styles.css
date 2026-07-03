@@ -648,17 +648,27 @@ h2 {
   display: block;
 }
 
-/* ---------------- Loading: 完整 Uiverse 仓鼠跑轮 (V0.3.4-hotfix-2) ---------------- */
+/* ---------------- Loading: 深色卡片 + 完整 Uiverse 仓鼠跑轮 (V0.3.4-hotfix-3) ----------------
+   目标：严格复刻参考图二
+   - 加载容器是独立深色卡片 #1f1f1f，不是页面暖白
+   - .wheel-and-hamster 尺寸 10em × 10em，font-size 16px
+     → 视觉上 160 × 160 px，仓鼠相对轮子比例不再被吞
+   - .wheel 主圈用浅灰实线边 + 中轴径向深色，避免只剩 radial-gradient 模糊圈
+   - .spoke 加强为可见的灰环辐条，按图二效果
+   - 仓鼠位置调整：top: 50% + translate 修正，让 body / 脚贴在轮子下半内沿
+   - 所有 @keyframes 全部沿用 Uiverse 原文
+   ------------------------------------------------------------------ */
 
 .answer-loading {
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 22px 22px 26px;
+  min-height: 220px;
+  padding: 36px 28px 40px;
   border-radius: var(--radius-md);
-  background: var(--panel-strong);
-  border: 1px solid var(--line-soft);
-  color: var(--accent-dark);
+  background: #1f1f1f;
+  border: 1px solid #2c2c2c;
+  color: #f5f1e8;
   margin-bottom: 16px;
 }
 
@@ -670,29 +680,29 @@ h2 {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 18px;
 }
 
 .loading-text {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 13.5px;
-  color: var(--muted);
-  letter-spacing: 0.02em;
+  color: rgba(245, 241, 232, 0.78);
+  letter-spacing: 0.04em;
 }
 
 /* ------------------------------------------------------------------
-   Uiverse by Nawsome — Orange and Tan hamster running in a metal wheel.
-   原版 12em = 168px (1em = 14px)；此处缩到 ~110px 适配 Ask UI 容器。
-   颜色保留：暖橙/米色仓鼠 + 深灰绿滚轮 + 粉色耳朵/鼻子。
-   关键帧全部保留；reduced-motion 下整体停止动画。
+   Uiverse by Nawsome — 复刻参考图二。
+   整体 10em × 10em，font-size 16px（→ 160px × 160px）。
+   仓鼠 body 仍然按 Uiverse em 单位缩放，相对轮子尺寸自动同步放大。
    ------------------------------------------------------------------ */
 
 .wheel-and-hamster {
   --dur: 1s;
   position: relative;
-  width: 7.5em;
-  height: 7.5em;
-  font-size: 14px;
+  width: 10em;
+  height: 10em;
+  font-size: 16px;
 }
 
 .wheel,
@@ -711,23 +721,48 @@ h2 {
   height: 100%;
 }
 
+/* 轮子主圈：图二风格的"清晰可见的浅灰圈"。
+   内圈深灰，外圈浅灰边线 → 视觉上一眼先看到"滚轮"。
+   border 8%-of-em 模拟图二的厚金属圈感。 */
 .wheel {
-  /* 深灰绿滚轮，避免饱和的金属橙抢戏 */
   background:
     radial-gradient(
-      100% 100% at center,
-      hsla(168, 18%, 60%, 0) 47.8%,
-      hsl(168, 22%, 32%) 48%
+      circle at center,
+      #2c2c2c 0%,
+      #2c2c2c 70%,
+      #3a3a3a 100%
     );
+  border: 0.32em solid #b8b8b8;
+  box-sizing: border-box;
   z-index: 2;
 }
 
+/* 中轴 / hub：作为 .wheel 的伪元素，避免引入新节点。
+   直径约 0.7em，浅灰色实心。 */
+.wheel::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.7em;
+  height: 0.7em;
+  margin: -0.35em 0 0 -0.35em;
+  border-radius: 50%;
+  background: #b8b8b8;
+  border: 0.08em solid #6e6e6e;
+  z-index: 3;
+}
+
 .spoke {
+  /* 斜向辐条：参考图二"灰色辐条穿过轮子"。
+     radial-gradient 给出可见灰环而不是空圈。 */
   background:
     radial-gradient(
       100% 100% at center,
-      hsla(168, 18%, 60%, 0) 47.8%,
-      hsl(168, 22%, 40%) 48%
+      rgba(184, 184, 184, 0) 47.8%,
+      rgba(184, 184, 184, 0.85) 48%,
+      rgba(184, 184, 184, 0.85) 49%,
+      rgba(184, 184, 184, 0) 49.5%
     );
   z-index: 1;
   animation: spoke var(--dur) linear infinite;
@@ -736,86 +771,90 @@ h2 {
 .hamster {
   animation: hamster var(--dur) ease-in-out infinite;
   top: 50%;
-  left: calc(50% - 2.5em);
-  width: 5em;
-  height: 3em;
-  transform: rotate(4deg) translate(-0.6em, 1.4em);
+  left: calc(50% - 3.6em);
+  width: 7em;
+  height: 4.2em;
+  /* 让仓鼠身体贴近轮子下半内沿，不再"掉下去"。
+     原版 translate(-0.6em, 1.4em) 在 7.5em + 14px 容器里把仓鼠挤出；
+     复刻图二：translate 横向稍微缩小，纵向让 body 落在 50% 偏下。 */
+  transform: rotate(4deg) translate(-0.7em, 1.6em);
   transform-origin: 50% 0;
-  z-index: 1;
+  z-index: 4;
 }
 
 .hamster__head {
   animation: hamsterHead var(--dur) ease-in-out infinite;
-  background: #ffd9b3;
+  background: #ffe1bf;
   border-radius: 40% 40% 30% 30%;
-  width: 1.5em;
-  height: 1.55em;
-  top: 1em;
-  left: 0.6em;
+  width: 2em;
+  height: 2.05em;
+  top: 1.4em;
+  left: 0.85em;
   position: absolute;
 }
 
 .hamster__ear {
   animation: hamsterEar var(--dur) ease-in-out infinite;
-  background: #f7b9a2;
+  background: #ffc1a8;
   border-radius: 50%;
-  width: 0.55em;
-  height: 0.55em;
-  top: 0.45em;
-  left: 1.05em;
+  width: 0.75em;
+  height: 0.75em;
+  top: 0.6em;
+  left: 1.45em;
   position: absolute;
 }
 
 .hamster__eye {
   animation: hamsterEye var(--dur) linear infinite;
-  background: #1a2120;
+  background: #1a1a1a;
   border-radius: 50%;
-  width: 0.3em;
-  height: 0.3em;
-  top: 0.95em;
-  left: 0.7em;
+  width: 0.4em;
+  height: 0.4em;
+  top: 1.3em;
+  left: 0.95em;
   position: absolute;
 }
 
 .hamster__nose {
-  background: #d97a78;
+  background: #e58a85;
   border-radius: 50% 50% 70% 70%;
-  width: 0.25em;
-  height: 0.18em;
-  top: 1.45em;
-  left: 1.4em;
+  width: 0.32em;
+  height: 0.22em;
+  top: 1.95em;
+  left: 1.95em;
   position: absolute;
 }
 
 .hamster__body {
+  /* 暖橙身体：保留卡通橙但比纯 Uiverse 略降饱和，更与深色卡片协调。 */
   background:
     linear-gradient(
       180deg,
-      hsl(28, 100%, 78%) 0%,
-      hsl(28, 100%, 72%) 30%,
-      hsl(28, 100%, 62%) 60%,
-      hsl(28, 100%, 50%) 100%
+      hsl(28, 95%, 80%) 0%,
+      hsl(28, 95%, 74%) 30%,
+      hsl(28, 90%, 64%) 60%,
+      hsl(28, 85%, 50%) 100%
     );
   border-radius: 50% 30% 30% 50% / 60% 40% 60% 40%;
-  width: 1.8em;
-  height: 1.6em;
-  top: 1.4em;
-  left: 0.5em;
+  width: 2.5em;
+  height: 2.2em;
+  top: 1.9em;
+  left: 0.7em;
   position: absolute;
   animation: hamsterBody var(--dur) ease-in-out infinite;
 }
 
 .hamster__limb--fr,
 .hamster__limb--fl {
-  background: hsl(28, 100%, 78%);
-  border-radius: 0.6em 0.6em 0.4em 0.4em;
-  width: 0.45em;
-  height: 0.7em;
-  top: 2em;
-  left: 0.65em;
+  background: hsl(28, 95%, 80%);
+  border-radius: 0.7em 0.7em 0.5em 0.5em;
+  width: 0.6em;
+  height: 0.95em;
+  top: 2.7em;
+  left: 0.9em;
   position: absolute;
   transform-origin: 50% 0%;
-  z-index: 1;
+  z-index: 5;
 }
 
 .hamster__limb--fr { animation: hamsterFRLimb var(--dur) linear infinite; }
@@ -823,32 +862,34 @@ h2 {
 
 .hamster__limb--br,
 .hamster__limb--bl {
-  background: hsl(28, 100%, 60%);
-  border-radius: 0.6em 0.6em 0.4em 0.4em;
-  width: 0.45em;
-  height: 0.7em;
-  top: 2em;
-  left: 1.2em;
+  background: hsl(28, 90%, 60%);
+  border-radius: 0.7em 0.7em 0.5em 0.5em;
+  width: 0.6em;
+  height: 0.95em;
+  top: 2.7em;
+  left: 1.65em;
   position: absolute;
   transform-origin: 50% 0%;
+  z-index: 5;
 }
 
 .hamster__limb--br { animation: hamsterBRLimb var(--dur) linear infinite; }
 .hamster__limb--bl { animation: hamsterBLLimb var(--dur) linear infinite; }
 
 .hamster__tail {
-  background: hsl(28, 100%, 50%);
-  border-radius: 0.3em;
-  width: 0.2em;
-  height: 0.4em;
-  top: 2em;
-  left: 0.2em;
+  background: hsl(28, 85%, 55%);
+  border-radius: 0.35em;
+  width: 0.3em;
+  height: 0.55em;
+  top: 2.7em;
+  left: 0.25em;
   position: absolute;
   transform-origin: 50% 30%;
   animation: hamsterTail var(--dur) linear infinite;
+  z-index: 4;
 }
 
-/* ---------------- Keyframes（Uiverse 原文，适配 Ask UI） ---------------- */
+/* ---------------- Keyframes（Uiverse 原文） ---------------- */
 
 @keyframes hamster {
   from, 25%, 36%, 50%, to {

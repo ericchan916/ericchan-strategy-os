@@ -715,15 +715,18 @@ V0.3.4 调整了 Ask UI 的键盘与点击习惯；V0.3.4-hotfix 进一步加入
 - 点击历史项：填入问题、恢复回答、恢复来源与状态，**不**自动重新请求。
 - 左下角有”清空”按钮，触发 `window.confirm(“确定清空最近提问记录吗？”)`。
 
-**Loading 动画（V0.3.4-hotfix-2 完整仓鼠跑轮）**：
+**Loading 动画（V0.3.4-hotfix-3 严格复刻图二）**：
 
-- 提问后显示”正在生成战略判断……”和一个**完整 Uiverse 仓鼠跑轮动画**（来自 Uiverse by Nawsome —— `wheel-and-hamster`）。
-- 完整 class 名单保留：`wheel-and-hamster` → `wheel` / `hamster` / `hamster__body` / `hamster__head` / `hamster__ear` / `hamster__eye` / `hamster__nose` / `hamster__limb--{fr,fl,br,bl}` / `hamster__tail` / `spoke` 全部都在；不再是抽象 SVG 圆环。
-- 完整 Uiverse 关键帧全部启用：`@keyframes hamster` / `hamsterHead` / `hamsterEye` / `hamsterEar` / `hamsterBody` / `hamsterFRLimb` / `hamsterFLLimb` / `hamsterBRLimb` / `hamsterBLLimb` / `hamsterTail` / `spoke`。
-- 颜色：深墨绿滚轮 / 暖橙 - 米色仓鼠身体 / 粉色耳朵鼻子 —— 保留卡通感，但配色克制、不过饱、不抢戏。
-- 整体尺寸：约 7.5em（≈110px），不撑大页面、不抢戏。
+- 当前 loading 动画的目标已从”抽象适配版”调整为”**更接近图二的严格复刻版**”。
+- 提问后显示一个深色卡片（约 `#1f1f1f`），上面一行中文”正在生成战略判断……”，下面居中放置完整 Uiverse 仓鼠跑轮（来自 Uiverse by Nawsome —— `wheel-and-hamster`）。
+- 加载区是独立深色卡片背景，**不会扩散到整页**，loading 结束后整块隐藏、恢复正常回答区。
+- 整体尺寸：10em × 10em（`font-size: 16px`，约 160 × 160 px）。
+- 轮圈：浅灰（`#b8b8b8`）实线边框 + 暗灰中部 + 浅灰中轴点 —— 一眼先看到”滚轮”。
+- 斜向辐条：可视的灰环 spoke。
+- 仓鼠：身体横向占轮子内部更大比例，位置贴在轮子下半内沿，看起来像在”踩轮子跑”，不再掉到底边被裁切。
+- 完整 class 名单 `wheel-and-hamster` → `wheel` / `hamster` / `hamster__body` / `hamster__head` / `hamster__ear` / `hamster__eye` / `hamster__nose` / `hamster__limb--{fr,fl,br,bl}` / `hamster__tail` / `spoke` 全部保留；完整 `@keyframes hamster` / `hamsterHead` / `hamsterEye` / `hamsterEar` / `hamsterBody` / `hamsterFRLimb` / `hamsterFLLimb` / `hamsterBRLimb` / `hamsterBLLimb` / `hamsterTail` / `spoke` 全部启用。
 - 完成 / 出错 / 回退时动画隐藏。
-- 用户设置 `prefers-reduced-motion: reduce` 时，所有动画停用，仓鼠和滚轮停留在静态首帧 —— 仍然能看出仓鼠与滚轮。无障碍合规。
+- 用户设置 `prefers-reduced-motion: reduce` 时，所有动画停用，仓鼠和滚轮停留在静态首帧 —— 仍然像图二静态版（深色卡片 + 浅灰轮子 + 卡通仓鼠）。无障碍合规。
 
 **Ask Mode 自适应回答（V0.3.4-hotfix-2）**：
 

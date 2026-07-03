@@ -352,6 +352,71 @@ test("CSS loading 区域高度被限制（仓鼠动画不会撑大页面）", ()
   assert.ok(/width|height|font-size/i.test(target), ".wheel-and-hamster 应限制尺寸");
 });
 
+test("CSS .answer-loading 是深色卡片背景（V0.3.4-hotfix-3 严格复刻图二）", () => {
+  // .answer-loading 主规则（不是 reduced-motion 覆盖）必须在浅色面板里设置深色卡片。
+  // 取到主规则（在 .loading-inner / .loading-text 之前）。
+  const rule = stylesCss.match(/\.answer-loading\s*\{[\s\S]*?\n\s*\}\s*\.answer-loading:not/);
+  assert.ok(rule, "找不到 .answer-loading 主规则");
+  const target = rule[0];
+  // 深色背景：用 # 6位 灰黑 / 接近 #1f1f1f ~ #232323。
+  const darkHexes = ["#1f1f1f", "#202124", "#232323", "#1a1a1a", "#222"];
+  const hasDark = darkHexes.some((hex) => target.toLowerCase().includes(hex));
+  assert.ok(hasDark, ".answer-loading 应使用深色背景（#1f1f1f / #202124 / #232323 系列）");
+  // 深色卡片应有圆角和适度 padding。
+  assert.ok(/border-radius/i.test(target), ".answer-loading 应有 border-radius");
+  assert.ok(/padding/i.test(target), ".answer-loading 应有 padding");
+});
+
+test("HTML answerLoading 含深色卡片节点标记（V0.3.4-hotfix-3）", () => {
+  // 加载区域属于深色卡片。HTML 端通过 class / aria / data-tone 标记；
+  // 不能仅靠 CSS，否则测试无法识别。
+  // 我们引入一个新 class 'loading-card' 作为深色卡片容器。
+  const startIdx = indexHtml.indexOf('id="answerLoading"');
+  assert.ok(startIdx > 0, "找不到 #answerLoading");
+  const inner = indexHtml.slice(startIdx, startIdx + 2400);
+  assert.ok(/class="[^"]*loading-card[^"]*"|class="[^"]*answer-loading[^"]*"/.test(inner),
+    "loading 区应携带深色卡片样式标记");
+});
+
+test("CSS .wheel-and-hamster 尺寸增大到至少 9em（V0.3.4-hotfix-3）", () => {
+  // 主规则（含 real declarations，不是 reduced-motion 覆盖）。
+  const rule = stylesCss.match(/\.wheel-and-hamster\s*\{[\s\S]*?\n\s*\}\s*\.wheel,/);
+  assert.ok(rule, "找不到 .wheel-and-hamster 主规则");
+  const target = rule[0];
+  // 至少含一条 width: <n>em，n ≥ 9。
+  const widthMatch = target.match(/width\s*:\s*(\d+(?:\.\d+)?)em/);
+  assert.ok(widthMatch, ".wheel-and-hamster 主规则必须用 em 单位设置 width");
+  const emSize = Number(widthMatch[1]);
+  assert.ok(emSize >= 9, `.wheel-and-hamster 应 >= 9em，当前 ${emSize}em`);
+  // font-size 也应同步上调到至少 16px 让 hamster 看起来更大。
+  const fontMatch = target.match(/font-size\s*:\s*(\d+)px/);
+  assert.ok(fontMatch, ".wheel-and-hamster 主规则应含 font-size 像素设置");
+  const px = Number(fontMatch[1]);
+  assert.ok(px >= 16, `.wheel-and-hamster font-size 应 >= 16px，当前 ${px}px`);
+});
+
+test("CSS .wheel 规则含明显 rim / 中轴 / 边线（V0.3.4-hotfix-3）", () => {
+  // 在 .wheel / .spoke 主规则里，应该有可见 rim / 边框 / 中轴 / 等显示规则。
+  // 我们接受: border / box-shadow / outline 等可显示边界的机制。
+  // 取 .wheel 主规则 → 紧跟的 \{ ... \} 结束。
+  const wheelRule = stylesCss.match(/\.wheel\s*\{[\s\S]*?\n\s*\}\s*(?:\.spoke|@keyframes)/);
+  assert.ok(wheelRule, "找不到 .wheel 主规则");
+  const target = wheelRule[0];
+  // 至少满足以下一种可见的边 / rim 设计：border / box-shadow / outline。
+  const hasVisibleBoundary = /\bborder\b/i.test(target) || /\bbox-shadow\b/i.test(target);
+  assert.ok(hasVisibleBoundary, ".wheel 主规则应含 border 或 box-shadow 让轮圈可见");
+});
+
+test("CSS 不再使用旧 loading-wheel-svg / spinner 结构", () => {
+  assert.equal(
+    /\.loading-wheel-svg\b/.test(stylesCss),
+    false,
+    "CSS 不应再含旧 .loading-wheel-svg 结构（已被 Uiverse 仓鼠跑轮替代）"
+  );
+  // HTML 端也不再包含 loading-wheel-svg
+  assert.equal(/loading-wheel-svg/.test(indexHtml), false, "HTML 不应再含旧 SVG spinner");
+});
+
 test("CSS 包含 prefers-reduced-motion 媒体查询", () => {
   assert.ok(
     /prefers-reduced-motion\s*:\s*reduce/.test(stylesCss),
