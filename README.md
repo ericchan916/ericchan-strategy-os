@@ -362,6 +362,41 @@ Validation checks that the pool schema is legal, ids are unique, scores have all
 
 Use `opportunity-pool.md` for manual review. Move only human-approved opportunities toward `validate`, `mvp-spec`, or `building`.
 
+## V0.1.10 Opportunity Review Package
+
+V0.1.10 adds a manual screening package for the Opportunity Pool. It does not create MVP specs and does not change opportunity `status` or `humanDecision`. Its job is to put every pool item into a review-friendly Markdown file so EricChan can decide what should move to `validate`, stay in `watch`, or be rejected.
+
+Run:
+
+```bash
+npm run opportunities:review
+```
+
+Run for a specific date or intentionally overwrite an existing package:
+
+```bash
+npm run opportunities:review -- --date 2026-06-30
+npm run opportunities:review -- --force
+```
+
+The script reads:
+
+- `data/opportunities/opportunity-pool.json`
+
+It writes:
+
+- `opportunities/reviews/YYYY-MM-DD-opportunity-review.md`
+
+The generated review package is ignored by Git because it is a user judgment artifact.
+
+Do not move directly from Opportunity Pool to MVP spec. First screen each opportunity:
+
+- Move to `validate` only when it is a real new project opportunity or a clearly useful current new-project improvement, has credible monetization or trust-asset potential, fits EricChan, has a small first validation action, and has manageable complexity.
+- Keep as `watch` when the idea is promising but evidence, timing, target customer, or EricChan fit is still unclear.
+- Mark as `rejected` when it is old-project optimization, weak monetization, weak EricChan fit, too complex for the current stage, or lacks a concrete validation path.
+
+After filling the Human Review section, manually update `opportunity-pool.md` / `opportunity-pool.json` or ask Codex to apply the approved status and human-decision changes.
+
 ## Output Files
 
 Each run writes:
@@ -373,12 +408,14 @@ Each run writes:
 - `reviews/YYYY-MM-DD-review.md` and `data/reviews/YYYY-MM-DD-review.json` when using `npm run review:today`
 - `proposals/YYYY-MM-DD-update-proposal.md` when using `npm run propose:today`
 - `opportunities/opportunity-pool.md` and `data/opportunities/opportunity-pool.json` when using `npm run opportunities:update`
+- `opportunities/reviews/YYYY-MM-DD-opportunity-review.md` when using `npm run opportunities:review`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
 `reviews/` and `data/reviews/` store generated review artifacts and are ignored by Git except for `.gitkeep`.
 `proposals/` stores generated update proposals and is ignored by Git except for `.gitkeep`.
 `opportunities/` and `data/opportunities/` store the generated Opportunity Pool and are ignored by Git except for `.gitkeep`.
+`opportunities/reviews/` stores generated opportunity screening packages and is ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -438,6 +475,7 @@ npm run opportunities:update # import report opportunities into the local Opport
 npm run opportunities:update -- --date YYYY-MM-DD # import opportunities for a specific date
 npm run opportunities:validate # validate Opportunity Pool schema and strategy gates
 npm run opportunities:list # list Opportunity Pool entries
+npm run opportunities:review # generate a manual Opportunity Pool screening package
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
@@ -446,6 +484,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, `npm run propose:today`, and `npm run opportunities:update`. V0.1.9 adds the Opportunity Pool so the next work should be manual opportunity screening before any Dashboard.
+Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, `npm run propose:today`, `npm run opportunities:update`, and `npm run opportunities:review`. V0.1.10 adds manual opportunity screening so the next work should be filling review decisions before any Dashboard or MVP spec automation.
 
 Stage 2 can expand the Opportunity Pool, add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.

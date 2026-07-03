@@ -11,4 +11,5 @@ reviews/*.md
 data/reviews/*.json
 proposals/*.md
 opportunities/*.md
+opportunities/reviews/*.md
 data/opportunities/*.json
