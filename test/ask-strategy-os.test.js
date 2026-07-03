@@ -7,6 +7,8 @@ const test = require("node:test");
 
 const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt } = require("../scripts/ask-strategy-os");
 const llmClient = require("../scripts/llm-client");
+const loadEnv = require("../scripts/load-env");
+const http = require("node:http");
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -323,4 +325,137 @@ test("llm client sanitizes API key from logged errors", async () => {
 
   const joined = captured.join("\n");
   assert.equal(joined.includes("sk-leak-key-1234"), false);
+});
+
+test("load-env reads .env into a clean env without leaking keys", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-load-env-"));
+  fs.writeFileSync(
+    path.join(rootDir, ".env"),
+    [
+      "STRATEGY_OS_LLM_ENABLED=true",
+      'STRATEGY_OS_LLM_API_KEY="sk-only-in-file"',
+      "STRATEGY_OS_LLM_MODEL=m-from-file",
+      "STRATEGY_OS_LLM_BASE_URL=https://from-file.example/v1",
+      "STRATEGY_OS_LLM_TIMEOUT_MS=12345",
+      "UNRELATED_PASSWORD=hunter2"
+    ].join("\n")
+  );
+  const freshEnv = {};
+  loadEnv.loadDotenv({ rootDir, env: freshEnv, silent: true });
+
+  assert.equal(freshEnv.STRATEGY_OS_LLM_ENABLED, "true");
+  assert.equal(freshEnv.STRATEGY_OS_LLM_API_KEY, "sk-only-in-file");
+  assert.equal(freshEnv.STRATEGY_OS_LLM_MODEL, "m-from-file");
+  assert.equal(freshEnv.STRATEGY_OS_LLM_BASE_URL, "https://from-file.example/v1");
+  assert.equal(freshEnv.STRATEGY_OS_LLM_TIMEOUT_MS, "12345");
+  // 白名单外的变量不应被注入。
+  assert.equal(freshEnv.UNRELATED_PASSWORD, undefined);
+});
+
+test("load-env never overrides existing shell env", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-load-env-"));
+  fs.writeFileSync(
+    path.join(rootDir, ".env"),
+    [
+      "STRATEGY_OS_LLM_API_KEY=sk-from-file",
+      "STRATEGY_OS_LLM_MODEL=m-from-file"
+    ].join("\n")
+  );
+  const shellEnv = { STRATEGY_OS_LLM_API_KEY: "sk-from-shell" };
+  loadEnv.loadDotenv({ rootDir, env: shellEnv, silent: true });
+
+  assert.equal(shellEnv.STRATEGY_OS_LLM_API_KEY, "sk-from-shell");
+  assert.equal(shellEnv.STRATEGY_OS_LLM_MODEL, "m-from-file");
+});
+
+test("load-env is a no-op when .env is missing or unparseable", () => {
+  const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-load-env-"));
+  const env1 = {};
+  const result1 = loadEnv.loadDotenv({ rootDir: missingRoot, env: env1, silent: true });
+  assert.equal(result1.loaded, false);
+  assert.equal(result1.reason, "missing");
+  assert.equal(env1.STRATEGY_OS_LLM_API_KEY, undefined);
+});
+
+test("askStrategyOsAsync reads STRATEGY_OS_LLM_* from custom env and falls back on failure", async () => {
+  const fixture = createFixture();
+  const fakeFetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "今天适合做什么？",
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-mock-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1",
+      STRATEGY_OS_LLM_TIMEOUT_MS: "1000"
+    },
+    deps: { fetch: fakeFetch }
+  });
+
+  assert.equal(result.source, "local-fallback");
+  assert.equal(result.llmEnabled, true);
+  assert.equal(result.warning, "LLM 动态回答暂时不可用，已回退到本地规则回答。");
+});
+
+test("start-ask-ui /api/ask never echoes the API key back", async () => {
+  const fixture = createFixture();
+  delete require.cache[require.resolve("../scripts/start-ask-ui")];
+  delete require.cache[require.resolve("../scripts/ask-strategy-os")];
+  delete require.cache[require.resolve("../scripts/llm-client")];
+  delete require.cache[require.resolve("../scripts/load-env")];
+  const { startAskUiServers, closeAskUiServers } = require("../scripts/start-ask-ui");
+  const { servers } = await startAskUiServers({ rootDir: fixture.rootDir, port: 0, hosts: ["127.0.0.1"] });
+  const port = servers[0].address().port;
+  const oldEnv = process.env.STRATEGY_OS_LLM_ENABLED;
+  const oldBase = process.env.STRATEGY_OS_LLM_BASE_URL;
+  const oldKey = process.env.STRATEGY_OS_LLM_API_KEY;
+  const oldModel = process.env.STRATEGY_OS_LLM_MODEL;
+  process.env.STRATEGY_OS_LLM_ENABLED = "true";
+  process.env.STRATEGY_OS_LLM_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.STRATEGY_OS_LLM_API_KEY = "sk-server-leak";
+  process.env.STRATEGY_OS_LLM_MODEL = "m";
+  try {
+    const body = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({ question: "今天适合做什么？" });
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          method: "POST",
+          path: "/api/ask",
+          headers: { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(data) }
+        },
+        (res) => {
+          let chunks = "";
+          res.on("data", (c) => (chunks += c));
+          res.on("end", () => resolve({ status: res.statusCode, body: chunks }));
+        }
+      );
+      req.on("error", reject);
+      req.write(data);
+      req.end();
+    });
+    const payload = JSON.parse(body.body);
+    assert.equal(body.status, 200);
+    assert.equal(payload.llmEnabled, true);
+    assert.equal(payload.source === "local-fallback" || payload.source === "llm", true);
+    if (payload.warning) assert.equal(payload.warning.includes("sk-"), false);
+    assert.equal(JSON.stringify(payload).includes("sk-server-leak"), false);
+  } finally {
+    delete require.cache[require.resolve("../scripts/start-ask-ui")];
+    delete require.cache[require.resolve("../scripts/ask-strategy-os")];
+    delete require.cache[require.resolve("../scripts/llm-client")];
+    delete require.cache[require.resolve("../scripts/load-env")];
+    if (oldEnv === undefined) delete process.env.STRATEGY_OS_LLM_ENABLED;
+    else process.env.STRATEGY_OS_LLM_ENABLED = oldEnv;
+    if (oldBase === undefined) delete process.env.STRATEGY_OS_LLM_BASE_URL;
+    else process.env.STRATEGY_OS_LLM_BASE_URL = oldBase;
+    if (oldKey === undefined) delete process.env.STRATEGY_OS_LLM_API_KEY;
+    else process.env.STRATEGY_OS_LLM_API_KEY = oldKey;
+    if (oldModel === undefined) delete process.env.STRATEGY_OS_LLM_MODEL;
+    else process.env.STRATEGY_OS_LLM_MODEL = oldModel;
+    await closeAskUiServers(servers);
+  }
 });

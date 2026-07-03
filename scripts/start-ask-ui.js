@@ -4,6 +4,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { askStrategyOsAsync } = require("./ask-strategy-os");
+require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const DEFAULT_PORT = 5177;
 const ASSET_TYPES = {

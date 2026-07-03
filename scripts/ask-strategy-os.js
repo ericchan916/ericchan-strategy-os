@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { getDateString } = require("./generate-report");
 const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
+require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
 const ASK_MODE_SYSTEM_PROMPT_PATH = path.join(__dirname, "..", "prompts", "ask-mode-system-prompt.md");
