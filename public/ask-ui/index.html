@@ -14,54 +14,67 @@
         <p class="subtitle">主动提问，而不是被动推送。</p>
         <p class="status-line">
           <span class="status-dot" aria-hidden="true"></span>
-          本地运行 · 中文问答 · 不自动派发智能体
+          本地运行 · 中文问答 · 不自动派发智能体 · 不自动联网搜索
         </p>
       </header>
 
-      <section class="panel questions-panel" aria-labelledby="questions-title">
-        <div class="panel-head">
-          <h2 id="questions-title">推荐问题</h2>
-          <p class="panel-hint">点一下，直接进入战略判断。</p>
-        </div>
-        <div id="recommendedQuestions" class="question-grid" data-questions='__RECOMMENDED_QUESTIONS__'></div>
-      </section>
+      <div class="layout">
+        <aside class="rail" aria-label="推荐问题与说明">
+          <section class="panel questions-panel" aria-labelledby="questions-title">
+            <div class="panel-head">
+              <h2 id="questions-title">推荐问题</h2>
+              <p class="panel-hint">点一下填入问题，你可以再改写后发送。</p>
+            </div>
+            <div id="recommendedQuestions" class="question-grid" data-questions='__RECOMMENDED_QUESTIONS__'></div>
+          </section>
 
-      <section class="panel ask-panel" aria-labelledby="ask-title">
-        <div class="panel-head">
-          <h2 id="ask-title">提问窗口</h2>
-          <p class="panel-hint">Ctrl + Enter 提交。</p>
-        </div>
+          <section class="panel meta-panel" aria-labelledby="meta-title">
+            <h2 id="meta-title" class="visually-hidden">说明</h2>
+            <ul class="meta-list">
+              <li><span class="meta-key">Enter</span><span class="meta-val">发送</span></li>
+              <li><span class="meta-key">Shift + Enter</span><span class="meta-val">换行</span></li>
+              <li><span class="meta-key">范围</span><span class="meta-val">本地 context + LLM</span></li>
+              <li><span class="meta-key">搜索</span><span class="meta-val">当前不自动联网搜索</span></li>
+            </ul>
+          </section>
+        </aside>
+
+        <section class="panel output-panel" aria-labelledby="answer-title">
+          <div class="panel-head">
+            <h2 id="answer-title">战略回答</h2>
+            <p class="panel-hint">基于当前 context / 报告 / 机会池 / Daily Command；当前基于本地上下文与 LLM 回答，不自动联网搜索。</p>
+          </div>
+          <div id="questionEcho" class="question-echo" hidden></div>
+          <article id="answerOutput" class="answer empty" aria-live="polite">
+            点击左侧一个推荐问题，或在下方输入框里写下你的问题。
+          </article>
+        </section>
+      </div>
+    </main>
+
+    <form class="composer" id="composer" autocomplete="off" onsubmit="return false;">
+      <div class="composer-inner">
         <textarea
           id="questionInput"
-          rows="4"
+          rows="1"
           spellcheck="false"
           aria-label="提问输入框"
           placeholder="输入你的问题，例如：我看到一个 ESP32 墨水屏日历项目，帮我体检一下。"
         ></textarea>
-        <div class="actions">
+        <div class="composer-side">
           <button id="askButton" type="button" class="primary-button">提问</button>
           <span id="statusText" class="status-text" role="status" aria-live="polite">等待提问。</span>
         </div>
-      </section>
+      </div>
+      <p class="composer-hint">Enter 发送 · Shift + Enter 换行</p>
+    </form>
 
-      <section class="panel output-panel" aria-labelledby="answer-title">
-        <div class="panel-head">
-          <h2 id="answer-title">战略回答</h2>
-          <p class="panel-hint">基于当前 context / 报告 / 机会池 / Daily Command。</p>
-        </div>
-        <div id="questionEcho" class="question-echo" hidden></div>
-        <article id="answerOutput" class="answer empty" aria-live="polite">
-          点击上方一个推荐问题，或在输入框里写下你的问题。
-        </article>
-      </section>
-
-      <footer class="footer">
-        <p>
-          项目开工包会先交给 <strong>GPT 5.5 Thinking</strong> 总控判断，不会默认直接派发
-          Codex / WorkBuddy / OpenDesign / MiniMax。
-        </p>
-      </footer>
-    </main>
+    <footer class="footer">
+      <p>
+        项目开工包会先交给 <strong>GPT 5.5 Thinking</strong> 总控判断，不会默认直接派发
+        Codex / WorkBuddy / OpenDesign / MiniMax。当前基于本地上下文与 LLM 回答，不自动联网搜索。
+      </p>
+    </footer>
     <script src="/app.js"></script>
   </body>
 </html>
