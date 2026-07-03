@@ -162,6 +162,84 @@ function evidenceForItem(item) {
   return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
 }
 
+function textBlob(item) {
+  return [
+    item?.title,
+    item?.summary,
+    item?.opportunityName,
+    item?.action,
+    item?.actionType,
+    item?.relatedProject,
+    item?.suggestedExperiment,
+    item?.mvpForm,
+    item?.firstValidationAction,
+    item?.whyItMatters
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function addWarning(report, warning) {
+  report.warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  if (!report.warnings.includes(warning)) report.warnings.push(warning);
+}
+
+function inferTrendClassification(trend) {
+  const text = textBlob(trend);
+  if (/mvp|moneti[sz]e|付费|变现|opportunity|机会|new project|新项目|独立开发|one[- ]?person|opc/i.test(text)) {
+    return "new-project-opportunity";
+  }
+  if (/strategy os|daily command|opportunity pool|当前项目|current project|prompt|context|source quality|feedback/i.test(text)) {
+    return "current-project-improvement";
+  }
+  if (LEGACY_PROJECT_PATTERN.test(text)) {
+    return "legacy-learning-material";
+  }
+  if (/noise|ignore|不适配|无关|噪声/i.test(text)) {
+    return "ignore";
+  }
+  return "watch-only";
+}
+
+function opportunityReasonForClassification(classification) {
+  if (classification === "new-project-opportunity") return "This trend may contain a monetizable new-project opening worth lightweight validation.";
+  if (classification === "current-project-improvement") return "This trend can improve the current Strategy OS workflow without turning into a legacy-project task.";
+  if (classification === "legacy-learning-material") return "This trend is useful as learning material for EricChan's taste and capabilities, not as a default action target.";
+  if (classification === "ignore") return "This trend does not currently fit EricChan's stage or opportunity criteria.";
+  return "This trend is worth watching but does not yet justify an action.";
+}
+
+function normalizeReportForDailyUse(report) {
+  report.warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  report.trends = Array.isArray(report.trends) ? report.trends : [];
+  report.opportunities = Array.isArray(report.opportunities) ? report.opportunities : [];
+  report.qualityChecklist = report.qualityChecklist || {};
+
+  report.trends = report.trends.map((trend) => {
+    if (TREND_CLASSIFICATIONS.has(trend?.classification)) {
+      return {
+        ...trend,
+        opportunityReason: trend.opportunityReason || opportunityReasonForClassification(trend.classification)
+      };
+    }
+
+    const classification = inferTrendClassification(trend);
+    addWarning(report, `Trend classification inferred for "${trend?.title || "untitled trend"}" as ${classification}.`);
+    return {
+      ...trend,
+      classification,
+      opportunityReason: trend?.opportunityReason || opportunityReasonForClassification(classification)
+    };
+  });
+
+  if (report.opportunities.length === 0) {
+    report.qualityChecklist.noNewOpportunitiesToday = true;
+    addWarning(report, "noNewOpportunitiesToday");
+  }
+
+  return report;
+}
+
 function opportunityScores(overrides = {}) {
   return {
     monetizationPotential: 4,
@@ -696,23 +774,12 @@ ${report.warnings?.length ? `## Warnings\n\n${bullet(report.warnings)}` : ""}
 }
 
 function validateReportQuality(report) {
+  const opportunities = Array.isArray(report.opportunities) ? report.opportunities : [];
+  const noOpportunityDay = Array.isArray(report.opportunities) && opportunities.length === 0;
   const trendHasEvidence = (item) =>
     item?.sourceIds?.length || item?.sourceUrls?.length || (typeof item?.evidence === "string" && item.evidence.trim());
   const validStageFit = (item) => ["now", "later", "not-yet", "blocked"].includes(item?.stageFit);
-  const textOf = (item) =>
-    [
-      item?.title,
-      item?.opportunityName,
-      item?.action,
-      item?.actionType,
-      item?.relatedProject,
-      item?.suggestedExperiment,
-      item?.mvpForm,
-      item?.firstValidationAction,
-      item?.whyItMatters
-    ]
-      .filter(Boolean)
-      .join(" ");
+  const textOf = textBlob;
   const isPrematureNow = (item) => item?.stageFit === "now" && PREMATURE_NOW_PATTERN.test(textOf(item)) && !item.explicitOverrideReason;
   const hasPendingFeedback = (item) =>
     item?.humanFeedback?.decision === "pending" &&
@@ -749,28 +816,17 @@ function validateReportQuality(report) {
   const checks = [
     ["trends exists", () => Array.isArray(report.trends) && report.trends.length > 0],
     ["projectImpacts exists", () => Array.isArray(report.projectImpacts) && report.projectImpacts.length > 0],
-    ["opportunities exists", () => Array.isArray(report.opportunities) && report.opportunities.length > 0],
+    ["opportunities is an array", () => Array.isArray(report.opportunities)],
     ["recommendedActions exists", () => Array.isArray(report.recommendedActions) && report.recommendedActions.length > 0],
     [
       "agentDispatchSuggestions exists",
       () => Array.isArray(report.agentDispatchSuggestions) && report.agentDispatchSuggestions.length > 0
     ],
     ["obsidianExport exists", () => Boolean(report.obsidianExport)],
-    [
-      "trends has at least one relatedProject",
-      () => (report.trends || []).some((item) => typeof item.relatedProject === "string" && item.relatedProject.trim())
-    ],
     ["trends include valid classification", () => (report.trends || []).every((item) => validClassification(item) && hasOpportunityReason(item))],
     ["each trend has evidence", () => (report.trends || []).every(trendHasEvidence)],
     ["trends do not include Placeholder items", () => (report.trends || []).every((item) => !/placeholder/i.test(item.title || ""))],
     ["dataGaps exists", () => Array.isArray(report.dataGaps)],
-    [
-      "opportunities has at least one relatedProject",
-      () =>
-        (report.opportunities || []).some(
-          (item) => typeof item.relatedProject === "string" && item.relatedProject.trim()
-        )
-    ],
     ["opportunities include stageFit", () => (report.opportunities || []).every(validStageFit)],
     ["opportunities include monetization and MVP fields", () => (report.opportunities || []).every(hasOpportunityFields)],
     ["opportunities include scoring fields", () => (report.opportunities || []).every(hasCompleteScores)],
@@ -813,8 +869,8 @@ function validateReportQuality(report) {
     ["qualityChecklist.avoidsPrematureBuild is true", () => report.qualityChecklist?.avoidsPrematureBuild === true],
     ["qualityChecklist.opportunityFirst is true", () => report.qualityChecklist?.opportunityFirst === true],
     ["qualityChecklist.avoidsLegacyOptimization is true", () => report.qualityChecklist?.avoidsLegacyOptimization === true],
-    ["qualityChecklist.hasMonetizationAssessment is true", () => report.qualityChecklist?.hasMonetizationAssessment === true],
-    ["qualityChecklist.hasMvpValidationPath is true", () => report.qualityChecklist?.hasMvpValidationPath === true]
+    ["qualityChecklist.hasMonetizationAssessment is true", () => noOpportunityDay || report.qualityChecklist?.hasMonetizationAssessment === true],
+    ["qualityChecklist.hasMvpValidationPath is true", () => noOpportunityDay || report.qualityChecklist?.hasMvpValidationPath === true]
   ].map(([name, check]) => ({ name, pass: Boolean(check()) }));
 
   const failures = checks.filter((item) => !item.pass).map((item) => item.name);
@@ -846,6 +902,7 @@ async function generateReport({ rootDir = process.cwd(), mock = false, date = ge
   }
 
   if (!Array.isArray(report.dataGaps)) report.dataGaps = dataGaps;
+  normalizeReportForDailyUse(report);
   applyHumanFeedbackDefaults(report);
 
   report.qualityValidation = validateReportQuality(report);
@@ -912,5 +969,6 @@ module.exports = {
   generateReport,
   getDateString,
   renderMarkdown,
+  normalizeReportForDailyUse,
   validateReportQuality
 };

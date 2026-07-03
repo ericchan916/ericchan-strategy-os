@@ -8,6 +8,7 @@ const {
   generateReport,
   renderMarkdown,
   createMockAnalysis,
+  normalizeReportForDailyUse,
   validateReportQuality
 } = require("../scripts/generate-report");
 
@@ -147,7 +148,6 @@ test("report quality validation catches missing strategic substance", () => {
   });
 
   assert.equal(weakResult.ok, false);
-  assert.ok(weakResult.failures.includes("trends has at least one relatedProject"));
   assert.ok(weakResult.failures.includes("trends do not include Placeholder items"));
   assert.ok(weakResult.failures.includes("dataGaps exists"));
   assert.ok(weakResult.failures.includes("recommendedActions has at least one executable action"));
@@ -157,6 +157,78 @@ test("report quality validation catches missing strategic substance", () => {
   assert.ok(weakResult.failures.includes("trends include valid classification"));
   assert.ok(weakResult.failures.includes("opportunities include scoring fields"));
   assert.ok(weakResult.failures.includes("qualityChecklist.opportunityFirst is true"));
+});
+
+test("opportunities can be empty without failing the daily-use quality gate", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality(
+    normalizeReportForDailyUse({
+      ...report,
+      opportunities: [],
+      qualityChecklist: {
+        ...report.qualityChecklist,
+        hasMonetizationAssessment: false,
+        hasMvpValidationPath: false
+      }
+    })
+  );
+
+  assert.equal(result.ok, true);
+});
+
+test("opportunities no longer require relatedProject after opportunity-first schema", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    trends: report.trends.map(({ relatedProject, ...item }) => item),
+    opportunities: report.opportunities.map(({ relatedProject, ...item }) => item)
+  });
+
+  assert.equal(result.ok, true);
+});
+
+test("normalization infers missing or invalid trend classification", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const normalized = normalizeReportForDailyUse({
+    ...report,
+    trends: [
+      {
+        title: "Solo builder paid AI opportunity",
+        summary: "A new MVP opportunity with monetization potential.",
+        evidence: "A new MVP opportunity with monetization potential."
+      },
+      {
+        title: "Update iPortfolio visual language",
+        summary: "Useful only as legacy project learning material.",
+        evidence: "Useful only as legacy project learning material.",
+        classification: "old-project-update"
+      }
+    ]
+  });
+
+  assert.equal(normalized.trends[0].classification, "new-project-opportunity");
+  assert.equal(normalized.trends[1].classification, "legacy-learning-material");
+  assert.ok(normalized.trends.every((item) => item.opportunityReason));
+  assert.ok(normalized.warnings.some((item) => item.includes("Trend classification inferred")));
+  assert.equal(validateReportQuality(normalized).ok, true);
 });
 
 test("strategic quality gate blocks premature now-stage build recommendations", () => {

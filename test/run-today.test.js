@@ -46,6 +46,8 @@ test("runToday executes daily flow in order and returns a clear summary", async 
   assert.equal(result.sourceMode, "mock");
   assert.equal(result.recommendedActionCount, 3);
   assert.equal(result.mockFallback, true);
+  assert.equal(result.opportunitiesImported, 0);
+  assert.equal(result.noNewOpportunitiesToday, true);
   assert.equal(result.dailyCommandPath, "E:/fake-root/daily-command/2026-07-03.md");
 });
 

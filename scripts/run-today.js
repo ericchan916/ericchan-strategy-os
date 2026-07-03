@@ -59,6 +59,8 @@ async function runToday({
     reportGenerated: true,
     opportunityPoolUpdated: true,
     dailyCommandGenerated: true,
+    opportunitiesImported: poolUpdate.imported || 0,
+    noNewOpportunitiesToday: (poolUpdate.imported || 0) === 0,
     sourceMode: commandResult.command.sourceMode,
     recommendedActionCount: commandResult.command.recommendedActions.length,
     dailyCommandPath: commandResult.markdownPath,
@@ -75,6 +77,8 @@ function printSummary(result) {
   console.log("Today summary");
   console.log(`Report generated: ${result.reportGenerated ? "yes" : "no"}`);
   console.log(`Opportunity pool updated: ${result.opportunityPoolUpdated ? "yes" : "no"}`);
+  console.log(`Opportunities imported: ${result.opportunitiesImported}`);
+  if (result.noNewOpportunitiesToday) console.log("No new opportunities today: yes");
   console.log(`Daily Command generated: ${result.dailyCommandGenerated ? "yes" : "no"}`);
   console.log(`sourceMode: ${result.sourceMode}`);
   console.log(`Today's action count: ${result.recommendedActionCount}`);

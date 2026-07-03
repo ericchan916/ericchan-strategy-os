@@ -156,3 +156,22 @@ test("generateDailyCommand does not overwrite existing files unless forced", () 
   generateDailyCommand({ rootDir: fixture.rootDir, date: fixture.date, force: true });
   assert.notEqual(fs.readFileSync(markdownPath, "utf8"), "existing command");
 });
+
+test("generateDailyCommand handles a no-new-opportunity day", () => {
+  const fixture = createFixture();
+  const reportPath = path.join(fixture.rootDir, "data", "reports", `${fixture.date}.json`);
+  const poolPath = path.join(fixture.rootDir, "data", "opportunities", "opportunity-pool.json");
+  const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+
+  fs.writeFileSync(reportPath, JSON.stringify({ ...report, opportunities: [], recommendedActions: [] }, null, 2));
+  fs.writeFileSync(poolPath, JSON.stringify({ version: 1, opportunities: [] }, null, 2));
+
+  const result = generateDailyCommand({ rootDir: fixture.rootDir, date: fixture.date });
+  const json = JSON.parse(fs.readFileSync(result.jsonPath, "utf8"));
+  const markdown = fs.readFileSync(result.markdownPath, "utf8");
+
+  assert.equal(json.topOpportunities.length, 0);
+  assert.ok(json.recommendedActions.length <= 3);
+  assert.equal(json.newProjectDecision.decision, "no");
+  assert.ok(markdown.includes("没有足够强的新机会"));
+});
