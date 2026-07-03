@@ -536,6 +536,33 @@ Daily Command and Opportunity Pool have different jobs:
 
 Daily Command should stay small. It caps action suggestions at 3, marks `sourceMode` so mock fallback is visible, and keeps Dashboard, deployment, old-project edits, and premature commercialization out of today's action list.
 
+## Daily Use
+
+The recommended default is now a single command:
+
+```bash
+npm run today
+```
+
+That one entry point runs the personal daily chain in order:
+
+- `npm run daily`
+- `npm run opportunities:update`
+- `npm run opportunities:validate`
+- `npm run command:today`
+
+After it finishes, open:
+
+- `daily-command/YYYY-MM-DD.md`
+
+The older step-by-step commands still work and are useful for debugging or partial reruns, but the normal path is `npm run today`.
+
+If today's Daily Command already exists and you want to refresh it, run:
+
+```bash
+npm run today -- --force
+```
+
 ## Output Files
 
 Each run writes:
@@ -616,6 +643,7 @@ npm run propose:today # generate today's context/prompt update proposal
 npm run propose -- --date YYYY-MM-DD # generate proposal for a specific date
 npm run command:today # generate today's personal Daily Command
 npm run command -- --date YYYY-MM-DD # generate Daily Command for a specific date
+npm run today # run the full personal daily flow and point to today's Daily Command
 npm run opportunities:update # import report opportunities into the local Opportunity Pool
 npm run opportunities:update -- --date YYYY-MM-DD # import opportunities for a specific date
 npm run opportunities:validate # validate Opportunity Pool schema and strategy gates
