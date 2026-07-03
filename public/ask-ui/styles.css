@@ -322,6 +322,23 @@ h2 {
   gap: 14px;
 }
 
+.search-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.search-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
 .primary-button {
   border: 1px solid var(--accent-dark);
   border-radius: 999px;

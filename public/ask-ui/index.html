@@ -107,6 +107,10 @@
           placeholder="输入你的问题，例如：我看到一个 ESP32 墨水屏日历项目，帮我体检一下。"
         ></textarea>
         <div class="composer-side">
+          <label class="search-toggle" title="只为本次提问补充外部搜索结果">
+            <input id="webSearchToggle" type="checkbox" />
+            <span>本次联网搜索</span>
+          </label>
           <button id="askButton" type="button" class="primary-button">提问</button>
           <span id="statusText" class="status-text" role="status" aria-live="polite">等待提问。</span>
         </div>

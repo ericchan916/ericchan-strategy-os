@@ -744,9 +744,13 @@ V0.3.4 调整了 Ask UI 的键盘与点击习惯；V0.3.4-hotfix 进一步加入
 
 **联网能力说明**：
 
-当前基于本地上下文与 LLM 回答，**不自动联网搜索**。
+V0.3.5 已接入按需 Web Search，但默认仍然**不自动联网搜索**。只有你在 Ask UI 勾选“本次联网搜索”，或 CLI 使用 `--search`，系统才会把外部搜索结果作为补充上下文交给 Ask Mode。
 
-如果你希望未来接入联网搜索，应该单独做 V0.3.5 Web Search，不和当前 UI 交互修正混在一起。
+- 搜索结果不是结论，最终仍由战略OS结合本地 context / Daily Command / Opportunity Pool 判断。
+- 搜索失败时会 fallback，不影响本地问答。
+- 搜索 API Key 只在 Node 后端读取，不会发送到浏览器。
+- 历史记录只保存 `searchUsed` / `searchWarning` / `searchResultCount` / 来源摘要，不保存 API Key 或原始 provider response。
+- 当前不是爬虫，不做浏览器自动化。
 
 `如果某些模型仍持续输出 reasoning，建议更换模型或在请求参数里关闭 reasoning 输出。`
 
@@ -843,6 +847,48 @@ baseUrl 兼容三种写法（系统会归一化）：
 - `https://host/v1` → `https://host/v1/chat/completions`
 - `https://host/v1/` → `https://host/v1/chat/completions`
 - `https://host/v1/chat/completions` → 不会重复拼接成 `/chat/completions/chat/completions`
+
+## V0.3.5 按需 Web Search
+
+配置项：
+
+```env
+STRATEGY_OS_SEARCH_ENABLED=false
+STRATEGY_OS_SEARCH_PROVIDER=tavily
+STRATEGY_OS_SEARCH_API_KEY=
+STRATEGY_OS_SEARCH_BASE_URL=
+STRATEGY_OS_SEARCH_TIMEOUT_MS=15000
+STRATEGY_OS_SEARCH_MAX_RESULTS=5
+```
+
+使用方式：
+
+```bash
+npm run ask -- --search "最近 Anthropic 有什么新闻？"
+npm run ask:ui
+```
+
+网页里勾选“本次联网搜索”后，`POST /api/ask` 会传入 `useSearch=true`。返回内容会包含安全的 `search` 摘要：是否实际使用、搜索词、结果数量、warning、来源标题 / URL / 域名。不会返回 API Key，也不会返回 provider 原始响应。
+
+搜索失败时，页面会显示中文提示：“联网搜索暂时不可用，已使用本地上下文回答。” Ask Mode 仍会基于本地上下文继续回答。
+
+## 搜索诊断
+
+```bash
+npm run search:check
+```
+
+用于检查：
+
+- enabled
+- provider
+- key 是否存在（只显示 true / false）
+- baseUrl
+- timeout
+- maxResults
+- 测试搜索是否成功
+
+诊断脚本不会输出真实 Key，不会修改任何项目数据。当前内置 provider：`tavily`。
 
 ## LLM 回答清洗（V0.3.3-hotfix-3）
 
@@ -959,8 +1005,10 @@ npm run opportunities:apply-review # write filled Human Review decisions back in
 npm run opportunities:validation-pack # generate a validate-stage pack for one accepted opportunity
 npm run clean        # remove generated report files, keep .gitkeep files
 npm run ask -- "今天适合做什么？"   # CLI Ask Mode（默认本地规则；可配 LLM 动态）
+npm run ask -- --search "最近 Anthropic 有什么新闻？" # 本次按需联网搜索
 npm run ask:ui                       # 本地网页主界面（监听 127.0.0.1:5177 + [::1]:5177）
 npm run llm:check                    # LLM 连接诊断，不修改任何项目数据
+npm run search:check                 # 搜索连接诊断，不输出 API Key
 npm test             # run local verification tests
 ```
 

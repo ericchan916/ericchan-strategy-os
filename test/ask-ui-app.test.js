@@ -168,6 +168,14 @@ test("HTML contains web-search disclaimer in Chinese", () => {
   );
 });
 
+test("HTML contains an unchecked per-question web-search checkbox", () => {
+  const match = indexHtml.match(/<input[^>]+id="webSearchToggle"[^>]*>/);
+  assert.ok(match, "缺少 #webSearchToggle");
+  assert.ok(/type="checkbox"/.test(match[0]), "#webSearchToggle 应是 checkbox");
+  assert.equal(/checked/i.test(match[0]), false, "联网搜索 checkbox 默认不应勾选");
+  assert.ok(indexHtml.includes("本次联网搜索"), "缺少中文搜索开关文案");
+});
+
 test("HTML contains recommended-questions hint that says '点一下填入问题，你可以再改写后发送'", () => {
   assert.ok(indexHtml.includes("点一下填入问题"), "推荐问题提示应改为 '点一下填入问题'");
 });
@@ -204,6 +212,20 @@ test("app.js no longer wires recommended-question button to submitAsk directly",
   // 防御性：旧模式不应再出现。
   const oldPattern = /addEventListener\("click",\s*\(\)\s*=>\s*\{[\s\S]{0,80}ask\(/;
   assert.equal(oldPattern.test(appJsText), false, "发现旧的 'ask(' 触发模式");
+});
+
+test("app.js sends useSearch=true only when the checkbox is enabled", () => {
+  assert.ok(appJsText.includes("webSearchToggle"), "app.js 应读取搜索开关");
+  assert.ok(appJsText.includes("requestBody.useSearch = true"), "勾选搜索时 POST body 应包含 useSearch=true");
+  assert.equal(/JSON\.stringify\(\{\s*question:\s*value,\s*useSearch:\s*true\s*\}\)/.test(appJsText), false,
+    "不应无条件发送 useSearch=true");
+});
+
+test("app.js history saves search status but not raw search response", () => {
+  assert.ok(appJsText.includes("searchUsed"), "历史记录应保存 searchUsed");
+  assert.ok(appJsText.includes("searchWarning"), "历史记录应保存 searchWarning");
+  assert.ok(appJsText.includes("searchResultCount"), "历史记录应保存 searchResultCount");
+  assert.equal(appJsText.includes("rawResponse"), false, "历史记录不应保存 rawResponse");
 });
 
 // ============== V0.3.4-hotfix 静态内容 / HTML / CSS 断言 ==============
@@ -480,8 +502,30 @@ test("normalizeHistoryItem: 把任意对象转成标准结构", () => {
   assert.equal(item.question, "今天适合做什么？");
   assert.equal(item.answer, "# 结论\n\n结论：今天轻量。");
   assert.equal(item.source, "llm");
+  assert.equal(item.searchUsed, false);
+  assert.equal(item.searchWarning, null);
+  assert.equal(item.searchResultCount, 0);
   assert.ok(typeof item.id === "string" && item.id.length > 0);
   assert.equal(typeof item.createdAt, "number");
+});
+
+test("normalizeHistoryItem: preserves safe search summary fields only", () => {
+  const item = normalizeHistoryItem({
+    question: "查一下新闻",
+    answer: "回答",
+    source: "llm",
+    searchUsed: true,
+    searchWarning: null,
+    searchResultCount: 2,
+    searchSources: [
+      { title: "A", url: "https://example.com/a", source: "example.com", raw: "sk-raw" }
+    ]
+  });
+
+  assert.equal(item.searchUsed, true);
+  assert.equal(item.searchResultCount, 2);
+  assert.deepEqual(item.searchSources, [{ title: "A", url: "https://example.com/a", source: "example.com" }]);
+  assert.equal(JSON.stringify(item).includes("sk-raw"), false);
 });
 
 test("normalizeHistoryItem: createdAt 缺失时回填当前时间", () => {
@@ -624,6 +668,7 @@ test("buildClipboardPayload: 返回 answer 字段，不是 HTML", () => {
   });
   assert.equal(payload.text, "# 标题\n\n结论：今天轻量。");
   assert.equal(payload.html, undefined);
+  assert.equal(JSON.stringify(payload).includes("searchSources"), false);
 });
 
 test("buildClipboardPayload: 空 answer 返回空文本而不是空对象", () => {

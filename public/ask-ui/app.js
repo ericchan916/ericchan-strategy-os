@@ -68,12 +68,28 @@ function normalizeHistoryItem(input) {
   const answer = typeof raw.answer === "string" ? raw.answer : "";
   const source = typeof raw.source === "string" ? raw.source : "local";
   const warning = raw.warning == null ? null : String(raw.warning);
+  const searchUsed = raw.searchUsed === true;
+  const searchWarning = raw.searchWarning == null ? null : String(raw.searchWarning);
+  const searchResultCount = Number.isFinite(Number(raw.searchResultCount)) ? Number(raw.searchResultCount) : 0;
+  const searchSources = Array.isArray(raw.searchSources)
+    ? raw.searchSources
+        .slice(0, 5)
+        .map((item) => ({
+          title: typeof item.title === "string" ? item.title : "",
+          url: typeof item.url === "string" ? item.url : "",
+          source: typeof item.source === "string" ? item.source : ""
+        }))
+    : [];
   return {
     id: typeof raw.id === "string" && raw.id ? raw.id : makeHistoryId(),
     question,
     answer,
     source,
     warning,
+    searchUsed,
+    searchWarning,
+    searchResultCount,
+    searchSources,
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
   };
 }
@@ -235,6 +251,7 @@ function createApp(deps) {
   const historyClearButton = nodes.historyClearButton;
   const copyButton = nodes.copyButton;
   const answerLoading = nodes.answerLoading;
+  const webSearchToggle = nodes.webSearchToggle;
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
   let storage = deps.storage;
@@ -268,7 +285,10 @@ function createApp(deps) {
     }
   }
 
-  function statusFromSource(source, warning) {
+  function statusFromSource(source, warning, search) {
+    if (search && search.warning) return search.warning;
+    if (search && search.used && source === "llm") return "已使用动态战略回答，并参考外部搜索结果。";
+    if (search && search.used) return "已参考外部搜索结果，并使用本地上下文回答。";
     if (warning) return warning;
     if (source === "llm") return "已使用动态战略回答。";
     if (source === "local") return "已使用本地规则回答。";
@@ -355,12 +375,18 @@ function createApp(deps) {
       };
       src.dataset.source = entry.source;
       src.textContent = labelMap[entry.source] || "回答";
+      const searchBadge = documentRef.createElement("span");
+      searchBadge.className = "history-source";
+      searchBadge.dataset.source = entry.searchWarning ? "local-fallback" : "llm";
+      searchBadge.textContent = entry.searchWarning ? "搜索失败" : "已搜索";
+      searchBadge.hidden = !(entry.searchUsed || entry.searchWarning);
 
       const time = documentRef.createElement("span");
       time.className = "history-time";
       time.textContent = formatHistoryTime(entry.createdAt, now());
 
       meta.appendChild(src);
+      meta.appendChild(searchBadge);
       meta.appendChild(time);
       btn.appendChild(q);
       btn.appendChild(meta);
@@ -402,7 +428,12 @@ function createApp(deps) {
       scrollImpl(answerOutput);
     }
     const warning = entry.warning;
-    setStatus(statusFromSource(entry.source, warning), warning ? "error" : null);
+    const search = {
+      used: entry.searchUsed === true,
+      warning: entry.searchWarning || null,
+      resultCount: entry.searchResultCount || 0
+    };
+    setStatus(statusFromSource(entry.source, warning, search), warning || search.warning ? "error" : null);
     setCurrentAnswer(entry.answer || "", entry.source || "local");
     state.inFlight = false;
     if (askButton) askButton.disabled = false;
@@ -437,8 +468,9 @@ function createApp(deps) {
       return { submitted: false, reason: v.message };
     }
     if (input) input.value = value;
+    const useSearch = Boolean(webSearchToggle && webSearchToggle.checked);
     setInFlight(true);
-    setStatus("正在生成战略判断……");
+    setStatus(useSearch ? "正在联网搜索并生成战略判断……" : "正在生成战略判断……");
     if (answerOutput) {
       answerOutput.classList.remove("empty");
       answerOutput.hidden = true;
@@ -450,10 +482,12 @@ function createApp(deps) {
     setCurrentAnswer("", "");
     try {
       if (!fetchImpl) throw new Error("fetch 不可用。");
+      const requestBody = { question: value };
+      if (useSearch) requestBody.useSearch = true;
       const response = await fetchImpl("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: value })
+        body: JSON.stringify(requestBody)
       });
       const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
       if (!response || !response.ok) {
@@ -469,8 +503,9 @@ function createApp(deps) {
       }
       const warning = payload.warning;
       const source = payload.source || "local";
+      const search = payload.search || null;
       state.currentSource = source;
-      setStatus(statusFromSource(source, warning), warning ? "error" : null);
+      setStatus(statusFromSource(source, warning, search), warning || (search && search.warning) ? "error" : null);
       if (copyButton && state.currentAnswer.trim()) {
         copyButton.disabled = false;
         copyButton.hidden = false;
@@ -481,10 +516,14 @@ function createApp(deps) {
         question: value,
         answer: translatedAnswer,
         source,
-        warning: warning || null
+        warning: warning || null,
+        searchUsed: Boolean(search && search.used),
+        searchWarning: search && search.warning ? search.warning : null,
+        searchResultCount: search && Number.isFinite(Number(search.resultCount)) ? Number(search.resultCount) : 0,
+        searchSources: search && Array.isArray(search.sources) ? search.sources.slice(0, 5) : []
       });
       renderHistory();
-      return { submitted: true, source, warning: warning || null };
+      return { submitted: true, source, warning: warning || null, search: search || null };
     } catch (error) {
       if (answerOutput) {
         answerOutput.textContent = "回答生成失败，请检查终端日志或先运行 npm run today。";
@@ -672,6 +711,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const historyClearButton = document.querySelector("#historyClear");
   const copyButton = document.querySelector("#copyButton");
   const answerLoading = document.querySelector("#answerLoading");
+  const webSearchToggle = document.querySelector("#webSearchToggle");
 
   const app = createApp({
     nodes: {
@@ -685,7 +725,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       historyEmpty,
       historyClearButton,
       copyButton,
-      answerLoading
+      answerLoading,
+      webSearchToggle
     }
   });
   app.mount();

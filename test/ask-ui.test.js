@@ -15,6 +15,12 @@ const LLM_TEST_KEYS = [
   "STRATEGY_OS_LLM_BASE_URL",
   "STRATEGY_OS_LLM_MODEL",
   "STRATEGY_OS_LLM_TIMEOUT_MS",
+  "STRATEGY_OS_SEARCH_ENABLED",
+  "STRATEGY_OS_SEARCH_PROVIDER",
+  "STRATEGY_OS_SEARCH_API_KEY",
+  "STRATEGY_OS_SEARCH_BASE_URL",
+  "STRATEGY_OS_SEARCH_TIMEOUT_MS",
+  "STRATEGY_OS_SEARCH_MAX_RESULTS",
   "LLM_API_KEY",
   "LLM_API_BASE_URL",
   "LLM_MODEL"
@@ -151,6 +157,86 @@ test("ask UI API returns a Chinese Ask Mode answer", async () => {
     assert.ok(payload.answer.includes("# 今天适合做什么"));
     assert.ok(payload.answer.includes("今天不要做"));
   });
+});
+
+test("ask UI API returns public search metadata when useSearch=true", async () => {
+  const fixture = createFixture();
+  const oldEnv = {
+    enabled: process.env.STRATEGY_OS_SEARCH_ENABLED,
+    provider: process.env.STRATEGY_OS_SEARCH_PROVIDER,
+    key: process.env.STRATEGY_OS_SEARCH_API_KEY
+  };
+  const oldFetch = globalThis.fetch;
+  process.env.STRATEGY_OS_SEARCH_ENABLED = "true";
+  process.env.STRATEGY_OS_SEARCH_PROVIDER = "tavily";
+  process.env.STRATEGY_OS_SEARCH_API_KEY = "sk-search-ui";
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      results: [{ title: "Anthropic latest", url: "https://example.com/news", content: "short snippet" }]
+    })
+  });
+
+  try {
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: { question: "最近 Anthropic 有什么新闻？", useSearch: true }
+      });
+      const payload = JSON.parse(response.body);
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.search.used, true);
+      assert.equal(payload.search.resultCount, 1);
+      assert.equal(payload.search.sources[0].source, "example.com");
+      assert.equal(JSON.stringify(payload).includes("sk-search-ui"), false);
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldEnv.enabled === undefined) delete process.env.STRATEGY_OS_SEARCH_ENABLED;
+    else process.env.STRATEGY_OS_SEARCH_ENABLED = oldEnv.enabled;
+    if (oldEnv.provider === undefined) delete process.env.STRATEGY_OS_SEARCH_PROVIDER;
+    else process.env.STRATEGY_OS_SEARCH_PROVIDER = oldEnv.provider;
+    if (oldEnv.key === undefined) delete process.env.STRATEGY_OS_SEARCH_API_KEY;
+    else process.env.STRATEGY_OS_SEARCH_API_KEY = oldEnv.key;
+  }
+});
+
+test("ask UI API returns Chinese search warning and keeps answering when search is misconfigured", async () => {
+  const fixture = createFixture();
+  const oldSearchEnv = {
+    enabled: process.env.STRATEGY_OS_SEARCH_ENABLED,
+    provider: process.env.STRATEGY_OS_SEARCH_PROVIDER,
+    key: process.env.STRATEGY_OS_SEARCH_API_KEY
+  };
+  delete process.env.STRATEGY_OS_SEARCH_PROVIDER;
+  delete process.env.STRATEGY_OS_SEARCH_API_KEY;
+  process.env.STRATEGY_OS_SEARCH_ENABLED = "true";
+
+  try {
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: { question: "查一下最近 Anthropic 有什么新闻？", useSearch: true }
+      });
+      const payload = JSON.parse(response.body);
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.search.used, false);
+      assert.ok(payload.search.warning.includes("联网搜索暂时不可用"));
+      assert.ok(payload.answer.includes("# 战略回答"));
+    });
+  } finally {
+    if (oldSearchEnv.enabled === undefined) delete process.env.STRATEGY_OS_SEARCH_ENABLED;
+    else process.env.STRATEGY_OS_SEARCH_ENABLED = oldSearchEnv.enabled;
+    if (oldSearchEnv.provider === undefined) delete process.env.STRATEGY_OS_SEARCH_PROVIDER;
+    else process.env.STRATEGY_OS_SEARCH_PROVIDER = oldSearchEnv.provider;
+    if (oldSearchEnv.key === undefined) delete process.env.STRATEGY_OS_SEARCH_API_KEY;
+    else process.env.STRATEGY_OS_SEARCH_API_KEY = oldSearchEnv.key;
+  }
 });
 
 test("ask UI API rejects an empty question in Chinese", async () => {

@@ -18,6 +18,12 @@ const LLM_TEST_KEYS = [
   "STRATEGY_OS_LLM_BASE_URL",
   "STRATEGY_OS_LLM_MODEL",
   "STRATEGY_OS_LLM_TIMEOUT_MS",
+  "STRATEGY_OS_SEARCH_ENABLED",
+  "STRATEGY_OS_SEARCH_PROVIDER",
+  "STRATEGY_OS_SEARCH_API_KEY",
+  "STRATEGY_OS_SEARCH_BASE_URL",
+  "STRATEGY_OS_SEARCH_TIMEOUT_MS",
+  "STRATEGY_OS_SEARCH_MAX_RESULTS",
   "LLM_API_KEY",
   "LLM_API_BASE_URL",
   "LLM_MODEL"
@@ -241,6 +247,80 @@ test("STRATEGY_OS_LLM_ENABLED=false keeps local answer and does not call LLM", a
   assert.equal(result.llmEnabled, false);
 });
 
+test("useSearch=false does not search even when question contains latest-info trigger", async () => {
+  const fixture = createFixture();
+  let called = false;
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "最近 Anthropic 有什么新闻？",
+    useSearch: false,
+    env: { STRATEGY_OS_LLM_ENABLED: "false" },
+    deps: {
+      searchWeb: async () => {
+        called = true;
+        return { query: "x", results: [], warning: null };
+      }
+    }
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.search.used, false);
+  assert.equal(result.source, "local");
+});
+
+test("useSearch=true calls search client and returns public search metadata", async () => {
+  const fixture = createFixture();
+  let called = false;
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "最近 Anthropic 有什么新闻？",
+    useSearch: true,
+    env: { STRATEGY_OS_LLM_ENABLED: "false" },
+    deps: {
+      searchWeb: async ({ query }) => {
+        called = true;
+        return {
+          provider: "tavily",
+          query,
+          warning: null,
+          results: [{ title: "Anthropic news", url: "https://example.com/a", snippet: "news", source: "example.com" }]
+        };
+      }
+    }
+  });
+
+  assert.equal(called, true);
+  assert.equal(result.search.used, true);
+  assert.equal(result.search.resultCount, 1);
+  assert.equal(JSON.stringify(result.search).includes("sk-"), false);
+  assert.ok(result.answer.includes("参考来源"));
+});
+
+test("search failure returns Chinese warning and keeps local fallback answer", async () => {
+  const fixture = createFixture();
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "查一下最近 Anthropic 有什么新闻？",
+    useSearch: true,
+    env: { STRATEGY_OS_LLM_ENABLED: "false" },
+    deps: {
+      searchWeb: async ({ query }) => ({
+        provider: "tavily",
+        query,
+        warning: "联网搜索暂时不可用，已使用本地上下文回答。",
+        results: []
+      })
+    }
+  });
+
+  assert.equal(result.search.used, false);
+  assert.ok(result.search.warning.includes("联网搜索暂时不可用"));
+  assert.ok(result.answer.includes("# 战略回答"));
+});
+
 test("STRATEGY_OS_LLM_ENABLED=true with API failure returns local-fallback + Chinese warning", async () => {
   const fixture = createFixture();
   const fakeFetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
@@ -291,6 +371,53 @@ test("STRATEGY_OS_LLM_ENABLED=true with API success returns source=llm", async (
   assert.equal(result.llmEnabled, true);
   assert.equal(result.warning, null);
   assert.ok(result.answer.includes("动态中文判断"));
+});
+
+test("search results are injected into LLM prompt without API key and with truncated snippets", async () => {
+  const fixture = createFixture();
+  const longSnippet = "外部搜索摘要".repeat(80);
+  let capturedPrompt = "";
+  const fakeFetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    capturedPrompt = body.messages[1].content;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "# LLM 回答\n\n结论：结合本地上下文和外部搜索，今天先观察。" } }]
+      })
+    };
+  };
+
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "最近 Anthropic 有什么新闻？",
+    useSearch: true,
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-llm-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1",
+      STRATEGY_OS_SEARCH_API_KEY: "sk-search-secret"
+    },
+    deps: {
+      fetch: fakeFetch,
+      searchWeb: async ({ query }) => ({
+        provider: "tavily",
+        query,
+        warning: null,
+        results: [{ title: "Anthropic update", url: "https://example.com/news", snippet: longSnippet, source: "example.com" }]
+      })
+    }
+  });
+
+  assert.equal(result.source, "llm");
+  assert.ok(capturedPrompt.includes("【外部搜索结果摘要】"));
+  assert.ok(capturedPrompt.includes("搜索结果只是参考"));
+  assert.equal(capturedPrompt.includes("sk-llm-key"), false);
+  assert.equal(capturedPrompt.includes("sk-search-secret"), false);
+  assert.ok(capturedPrompt.length < longSnippet.length + 3000, "搜索摘要应被截断后注入 prompt");
 });
 
 test("API key is never included in the user prompt", () => {
@@ -359,6 +486,9 @@ test("load-env reads .env into a clean env without leaking keys", () => {
       "STRATEGY_OS_LLM_MODEL=m-from-file",
       "STRATEGY_OS_LLM_BASE_URL=https://from-file.example/v1",
       "STRATEGY_OS_LLM_TIMEOUT_MS=12345",
+      "STRATEGY_OS_SEARCH_ENABLED=true",
+      "STRATEGY_OS_SEARCH_PROVIDER=tavily",
+      "STRATEGY_OS_SEARCH_API_KEY=sk-search-file",
       "UNRELATED_PASSWORD=hunter2"
     ].join("\n")
   );
@@ -370,6 +500,9 @@ test("load-env reads .env into a clean env without leaking keys", () => {
   assert.equal(freshEnv.STRATEGY_OS_LLM_MODEL, "m-from-file");
   assert.equal(freshEnv.STRATEGY_OS_LLM_BASE_URL, "https://from-file.example/v1");
   assert.equal(freshEnv.STRATEGY_OS_LLM_TIMEOUT_MS, "12345");
+  assert.equal(freshEnv.STRATEGY_OS_SEARCH_ENABLED, "true");
+  assert.equal(freshEnv.STRATEGY_OS_SEARCH_PROVIDER, "tavily");
+  assert.equal(freshEnv.STRATEGY_OS_SEARCH_API_KEY, "sk-search-file");
   // 白名单外的变量不应被注入。
   assert.equal(freshEnv.UNRELATED_PASSWORD, undefined);
 });

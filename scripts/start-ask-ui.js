@@ -68,12 +68,13 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           sendJson(res, 400, { error: "请输入问题。" });
           return;
         }
-        const result = await askStrategyOsAsync({ rootDir, question });
+        const result = await askStrategyOsAsync({ rootDir, question, useSearch: payload.useSearch === true });
         const responseBody = {
           type: result.type,
           answer: result.answer,
           source: result.source,
-          llmEnabled: result.llmEnabled
+          llmEnabled: result.llmEnabled,
+          search: result.search
         };
         if (result.warning) responseBody.warning = result.warning;
         sendJson(res, 200, responseBody);

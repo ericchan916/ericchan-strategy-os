@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { getDateString } = require("./generate-report");
 const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
+const { searchWeb, toPublicSearchMeta, shouldUseWebSearch } = require("./search-client");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
@@ -408,6 +409,36 @@ function renderAnswer({ context, question }) {
   return renderGeneral(context, question);
 }
 
+function appendSearchSources(answer, search) {
+  if (!search || search.warning || !Array.isArray(search.results) || !search.results.length) return answer;
+  const lines = search.results.slice(0, 5).map((item, index) => `${index + 1}. ${item.title} — ${item.source || item.url}`);
+  return `${String(answer || "").trim()}
+
+参考来源：
+${lines.join("\n")}
+`;
+}
+
+async function resolveSearch({ question, env, deps = {} }) {
+  const fn = deps.searchWeb || searchWeb;
+  try {
+    return await fn({
+      query: question,
+      env,
+      fetchImpl: deps.searchFetch || deps.fetch,
+      abortImpl: deps.AbortController
+    });
+  } catch {
+    return {
+      provider: "",
+      query: String(question || ""),
+      results: [],
+      warning: "联网搜索暂时不可用，已使用本地上下文回答。",
+      errorCode: "unknown"
+    };
+  }
+}
+
 function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env } = {}) {
   // 同步入口：不调用 LLM，始终返回本地规则回答。
   // 服务端 /api/ask 应改用 askStrategyOsAsync 以启用 LLM 动态回答。
@@ -418,14 +449,18 @@ function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), questi
     source: "local",
     llmEnabled: isConfigured(readConfig(env)),
     warning: null,
+    search: toPublicSearchMeta(null),
     context
   };
 }
 
-async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, deps = {} } = {}) {
+async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, useSearch = false, deps = {} } = {}) {
   const context = loadAskContext({ rootDir, date });
   const type = classifyQuestion(question);
-  const localAnswer = renderAnswer({ context, question });
+  const explicitSearch = useSearch === true;
+  const searchResult = explicitSearch ? await resolveSearch({ question, env, deps }) : null;
+  const searchMeta = toPublicSearchMeta(searchResult);
+  const localAnswer = appendSearchSources(renderAnswer({ context, question }), searchResult);
 
   const llmConfig = readConfig(env);
   const llmEnabled = isConfigured(llmConfig);
@@ -437,6 +472,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
       source: "local",
       llmEnabled: false,
       warning: null,
+      search: searchMeta,
       context
     };
   }
@@ -445,7 +481,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     const answer = await callChatCompletion({
       config: llmConfig,
       systemPrompt: readSystemPrompt(),
-      userPrompt: buildLlmUserPrompt({ context, type, question }),
+      userPrompt: buildLlmUserPrompt({ context, type, question, search: searchResult }),
       fetchImpl: deps.fetch,
       abortImpl: deps.AbortController
     });
@@ -456,6 +492,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
         source: "llm",
         llmEnabled: true,
         warning: null,
+        search: searchMeta,
         context
       };
     }
@@ -469,6 +506,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     source: "local-fallback",
     llmEnabled: true,
     warning: LLM_FALLBACK_WARNING,
+    search: searchMeta,
     context
   };
 }
@@ -483,7 +521,7 @@ function trimContext(text, max = 600) {
   return `${value.slice(0, max)}…`;
 }
 
-function buildLlmUserPrompt({ context, type, question }) {
+function buildLlmUserPrompt({ context, type, question, search = null }) {
   const lines = [];
   lines.push(`当前问题类型：${type}`);
   lines.push(`用户原始问题：${String(question || "").trim() || "（无）"}`);
@@ -524,6 +562,25 @@ function buildLlmUserPrompt({ context, type, question }) {
       lines.push(trimContext(action.action, 200));
     }
   }
+  if (search && Array.isArray(search.results) && search.results.length) {
+    lines.push("");
+    lines.push("【外部搜索结果摘要】");
+    lines.push(`搜索词：${trimContext(search.query || question, 160)}`);
+    for (const item of search.results.slice(0, 5)) {
+      lines.push(`- 标题：${trimContext(item.title, 120)}`);
+      lines.push(`  URL：${trimContext(item.url, 220)}`);
+      lines.push(`  来源：${trimContext(item.source, 80)}`);
+      if (item.snippet) lines.push(`  摘要：${trimContext(item.snippet, 280)}`);
+    }
+    lines.push("");
+    lines.push("【使用外部搜索结果的规则】");
+    lines.push("- 搜索结果只是参考，不等于结论。");
+    lines.push("- 回答必须区分基于本地上下文的判断与基于外部搜索的补充。");
+    lines.push("- 不要编造搜索结果没有的信息；信息不足就说不足以判断。");
+    lines.push("- 涉及最新信息时提醒它可能随时间变化。");
+    lines.push("- 回答必须中文，不输出英文 reasoning。");
+    lines.push("- 末尾最多列 3-5 个关键参考来源，不要堆长链接。");
+  }
   return lines.join("\n");
 }
 
@@ -547,11 +604,14 @@ function main() {
   const args = process.argv.slice(2);
   const dateArgIndex = args.indexOf("--date");
   const date = dateArgIndex >= 0 ? args[dateArgIndex + 1] : getDateString();
+  const useSearch = args.includes("--search");
   const questionArgs =
     dateArgIndex >= 0 ? args.filter((_, index) => index !== dateArgIndex && index !== dateArgIndex + 1) : args;
-  const question = questionArgs.join(" ").trim();
-  askStrategyOsAsync({ rootDir: process.cwd(), date, question })
+  const cleanedQuestionArgs = questionArgs.filter((item) => item !== "--search");
+  const question = cleanedQuestionArgs.join(" ").trim();
+  askStrategyOsAsync({ rootDir: process.cwd(), date, question, useSearch })
     .then((result) => {
+      if (result.search && result.search.warning) console.warn(result.search.warning);
       if (result.warning) console.warn(result.warning);
       console.log(result.answer.trim());
     })
@@ -573,5 +633,6 @@ module.exports = {
   renderProjectCheckup,
   readSystemPrompt,
   buildLlmUserPrompt,
+  shouldUseWebSearch,
   LLM_FALLBACK_WARNING
 };

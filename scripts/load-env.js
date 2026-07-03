@@ -5,12 +5,12 @@
 // - 不输出 .env 内容，不输出 API Key。
 // - shell 环境变量优先，.env 只补缺失项（dotenv 默认 override=false）。
 // - 静默失败：缺 .env 或解析错误都不影响主流程。
-// - 仅补 Ask Mode (STRATEGY_OS_LLM_*) 与 Report (LLM_*) 相关变量，不随意覆盖其他 env。
+// - 仅补 Ask Mode (STRATEGY_OS_LLM_* / STRATEGY_OS_SEARCH_*) 与 Report (LLM_*) 相关变量，不随意覆盖其他 env。
 
 const fs = require("node:fs");
 const path = require("node:path");
 
-const SAFE_KEY_PREFIXES = ["STRATEGY_OS_LLM_", "LLM_"];
+const SAFE_KEY_PREFIXES = ["STRATEGY_OS_LLM_", "STRATEGY_OS_SEARCH_", "LLM_"];
 
 function loadDotenv({ rootDir = process.cwd(), env = process.env, silent = false, logger = console } = {}) {
   const envPath = path.join(rootDir, ".env");
