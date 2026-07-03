@@ -714,6 +714,47 @@ npm run ask:ui
 - `source="local"` → 已使用本地规则回答。
 - `source="local-fallback"` → LLM 动态回答暂时不可用，已回退到本地规则回答。
 
+## LLM 连接诊断
+
+V0.3.3-hotfix-2 把 Ask Mode 失败时的诊断信息做得更清楚，并新增独立诊断脚本：
+
+```bash
+npm run llm:check
+```
+
+脚本只读不写：它读取当前 `STRATEGY_OS_LLM_*` 配置（优先 shell，其次 `.env`），打印安全诊断信息，并发起一次最小 LLM 请求（"只回复：OK"）。整个过程不会修改任何项目数据。
+
+诊断输出包含：
+
+- `enabled`：`true` / `false`
+- `apiKey`：已配置（内容已脱敏）/ 未配置
+- `model`：已配置 / 未配置
+- `baseUrl`：实际生效的 baseUrl
+- `requestUrl`：最终请求 URL（baseUrl + `/chat/completions`）
+- `timeoutMs`：超时时间
+
+诊断结果会按状态分类：
+
+- `success` → LLM 连接成功（响应：…）
+- `disabled` → Ask Mode LLM 未启用
+- `missing-key` / `missing-model` → 配置缺失
+- `unauthorized` (401) → 请检查 API Key
+- `forbidden` (403) → API Key 无权访问
+- `not-found` (404) → 请检查 baseUrl 与模型名（错误信息会附带当前 baseUrl）
+- `rate-limited` (429) → 请求被限流
+- `server-error` (5xx) → LLM 服务暂时不可用
+- `network` → 无法连接到 LLM 服务，请检查 baseUrl、代理或网络
+- `timeout` → LLM 请求超时，请检查接口速度或代理
+- `parse` / `empty` / `no-fetch` → 响应内容异常
+
+`npm run llm:check` 与 `npm run ask` 走同一套错误分类逻辑，所以 `npm run ask:ui` 终端日志里看到的 `[ask-mode] LLM 调用失败（xxx）：…` 行就是 `npm run llm:check` 输出的同款分类。
+
+baseUrl 兼容三种写法（系统会归一化）：
+
+- `https://host/v1` → `https://host/v1/chat/completions`
+- `https://host/v1/` → `https://host/v1/chat/completions`
+- `https://host/v1/chat/completions` → 不会重复拼接成 `/chat/completions/chat/completions`
+
 ## Output Files
 
 Each run writes:
@@ -803,6 +844,9 @@ npm run opportunities:review # generate a manual Opportunity Pool screening pack
 npm run opportunities:apply-review # write filled Human Review decisions back into the Opportunity Pool
 npm run opportunities:validation-pack # generate a validate-stage pack for one accepted opportunity
 npm run clean        # remove generated report files, keep .gitkeep files
+npm run ask -- "今天适合做什么？"   # CLI Ask Mode（默认本地规则；可配 LLM 动态）
+npm run ask:ui                       # 本地网页主界面（监听 127.0.0.1:5177 + [::1]:5177）
+npm run llm:check                    # LLM 连接诊断，不修改任何项目数据
 npm test             # run local verification tests
 ```
 
