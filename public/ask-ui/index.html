@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EricChan·战略OS</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Ask Mode</p>
+        <h1>EricChan·战略OS</h1>
+        <p class="subtitle">主动提问，而不是被动推送</p>
+      </section>
+
+      <section class="panel" aria-labelledby="questions-title">
+        <h2 id="questions-title">推荐问题</h2>
+        <div id="recommendedQuestions" class="question-grid" data-questions='__RECOMMENDED_QUESTIONS__'></div>
+      </section>
+
+      <section class="panel ask-panel" aria-labelledby="ask-title">
+        <h2 id="ask-title">提问窗口</h2>
+        <textarea id="questionInput" placeholder="输入你的问题，例如：我看到一个 ESP32 墨水屏日历项目，帮我体检一下。"></textarea>
+        <div class="actions">
+          <button id="askButton" type="button">提问</button>
+          <span id="statusText" role="status">等待提问。</span>
+        </div>
+      </section>
+
+      <section class="panel output-panel" aria-labelledby="answer-title">
+        <h2 id="answer-title">战略回答</h2>
+        <div id="answerOutput" class="answer empty">点击一个推荐问题，或输入问题后提问。</div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

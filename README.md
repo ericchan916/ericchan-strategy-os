@@ -606,6 +606,38 @@ Ask Mode 会读取：
 
 用户可见内容默认中文。文件名、npm scripts、JSON key、技术名词、模型名和项目名可以保留英文，但 Markdown 标题、说明、按钮、提示语和总结应优先中文。
 
+## 极简网页主界面
+
+V0.3.1 增加一个本地网页入口，把 Ask Mode 变成提问窗口和推荐问题按钮。它不是 Dashboard，不展示复杂图表，不做项目管理，也不会真实派发 Codex / WorkBuddy / OpenDesign / MiniMax。
+
+运行方式：
+
+```bash
+npm run ask:ui
+```
+
+启动后打开：
+
+```text
+http://localhost:5177
+```
+
+页面包含：
+
+- 标题：EricChan·战略OS
+- 副标题：主动提问，而不是被动推送
+- 推荐问题按钮
+- 输入框
+- 提问按钮
+- 状态提示
+- Ask Mode 回答输出区
+
+推荐问题按钮来自 `config/recommended-questions.json`。点击按钮会把问题发给本地 `POST /api/ask`，服务端复用 `scripts/ask-strategy-os.js` 的判断逻辑并返回中文回答。
+
+如果回答失败，页面会提示：“回答生成失败，请检查终端日志或先运行 npm run today。” 如果当天数据不存在，Ask Mode 原有的中文提示会正常显示。
+
+项目开工包仍然先交给 `GPT 5.5 Thinking` 做战略总控。网页不会把“生成开工包”直接变成 Codex 执行，也不会自动修改机会池、日报、Daily Command 或旧项目。
+
 ## Output Files
 
 Each run writes:

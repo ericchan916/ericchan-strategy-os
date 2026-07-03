@@ -1,0 +1,174 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+
+const { getDateString } = require("../scripts/generate-report");
+const { startAskUiServer } = require("../scripts/start-ask-ui");
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+}
+
+function createFixture() {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ask-ui-"));
+  const date = getDateString();
+  fs.mkdirSync(path.join(rootDir, "context"), { recursive: true });
+  fs.mkdirSync(path.join(rootDir, "daily-command"), { recursive: true });
+  fs.writeFileSync(path.join(rootDir, "context", "context.md"), "EricChan 使用中文 Ask Mode 做个人战略判断。");
+  writeJson(path.join(rootDir, "config", "recommended-questions.json"), [
+    "今天适合做什么？",
+    "当前项目哪个最值得推进？",
+    "我现在该不该开新项目？",
+    "我看到一个好项目，帮我体检一下。",
+    "帮我生成项目开工包。",
+    "这件事该交给哪个智能体？",
+    "我是不是把事情搞复杂了？"
+  ]);
+  writeJson(path.join(rootDir, "data", "reports", `${date}.json`), {
+    date,
+    mode: "mock",
+    warnings: [],
+    opportunities: [],
+    recommendedActions: [{ action: "保持今天的动作足够轻。", stageFit: "now" }]
+  });
+  writeJson(path.join(rootDir, "data", "opportunities", "opportunity-pool.json"), {
+    version: 1,
+    opportunities: [
+      {
+        id: "opp-brief",
+        status: "validate",
+        humanDecision: "accepted",
+        opportunityName: "Independent AI opportunity brief MVP"
+      }
+    ]
+  });
+  writeJson(path.join(rootDir, "data", "daily-command", `${date}.json`), {
+    date,
+    sourceMode: "mock",
+    oneLineJudgment: "今天先把最强机会压成一个可验证的小动作。",
+    topOpportunities: [{ opportunityName: "Independent AI opportunity brief MVP" }],
+    recommendedActions: [{ action: "写一段样例 brief", expectedOutput: "一段样例", timebox: "45 min" }]
+  });
+  fs.writeFileSync(path.join(rootDir, "daily-command", `${date}.md`), "# EricChan·战略OS Daily Command\n");
+  fs.writeFileSync(path.join(rootDir, ".env"), "LLM_API_KEY=do-not-read-this\n");
+  return {
+    rootDir,
+    reportPath: path.join(rootDir, "data", "reports", `${date}.json`),
+    poolPath: path.join(rootDir, "data", "opportunities", "opportunity-pool.json"),
+    commandPath: path.join(rootDir, "daily-command", `${date}.md`)
+  };
+}
+
+function request(baseUrl, { method = "GET", path: requestPath = "/", body } = {}) {
+  const url = new URL(requestPath, baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method,
+        headers: body ? { "content-type": "application/json" } : {}
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
+      }
+    );
+    req.on("error", reject);
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+async function withServer(rootDir, fn) {
+  const server = await startAskUiServer({ rootDir, port: 0 });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await fn(baseUrl);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("ask UI serves Chinese HTML with recommended questions", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl);
+
+    assert.equal(response.status, 200);
+    assert.ok(response.body.includes("EricChan·战略OS"));
+    assert.ok(response.body.includes("主动提问，而不是被动推送"));
+    assert.ok(response.body.includes("今天适合做什么？"));
+  });
+});
+
+test("ask UI API returns a Chinese Ask Mode answer", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "POST",
+      path: "/api/ask",
+      body: { question: "今天适合做什么？" }
+    });
+    const payload = JSON.parse(response.body);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.type, "today-action");
+    assert.ok(payload.answer.includes("# 今天适合做什么"));
+    assert.ok(payload.answer.includes("今天不要做"));
+  });
+});
+
+test("ask UI API rejects an empty question in Chinese", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "POST",
+      path: "/api/ask",
+      body: { question: "" }
+    });
+    const payload = JSON.parse(response.body);
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "请输入问题。");
+  });
+});
+
+test("ask UI does not read .env or modify generated strategy files", async () => {
+  const fixture = createFixture();
+  const before = {
+    report: fs.readFileSync(fixture.reportPath, "utf8"),
+    pool: fs.readFileSync(fixture.poolPath, "utf8"),
+    command: fs.readFileSync(fixture.commandPath, "utf8")
+  };
+  const originalRead = fs.readFileSync;
+
+  try {
+    fs.readFileSync = function patchedRead(filePath, ...args) {
+      if (String(filePath).endsWith(".env")) throw new Error(".env should not be read");
+      return originalRead.call(this, filePath, ...args);
+    };
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: { question: "我看到一个好项目，帮我体检一下。" }
+      });
+
+      assert.equal(response.status, 200);
+      assert.ok(JSON.parse(response.body).answer.includes("# 项目体检"));
+    });
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+
+  assert.equal(fs.readFileSync(fixture.reportPath, "utf8"), before.report);
+  assert.equal(fs.readFileSync(fixture.poolPath, "utf8"), before.pool);
+  assert.equal(fs.readFileSync(fixture.commandPath, "utf8"), before.command);
+});
