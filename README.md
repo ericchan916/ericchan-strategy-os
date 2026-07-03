@@ -186,6 +186,43 @@ Windows Task Scheduler can run `npm run daily` once per day. See `scripts/setup-
 
 Stage 1B Dashboard should wait until at least 7 daily runs produce useful feedback patterns, stable quality scores, no placeholder trends, stage-appropriate actions, and clear evidence that a visual review surface would reduce manual review friction.
 
+## V0.1.6 Daily Review
+
+V0.1.6 closes the first learning loop. After a daily report is generated and EricChan fills `feedback/YYYY-MM-DD.md`, the review script reads the report, JSON, and feedback, then produces a Daily Review with context and prompt update suggestions.
+
+Recommended flow:
+
+```bash
+npm run daily
+# Fill feedback/YYYY-MM-DD.md manually.
+npm run review:today
+```
+
+You can review another date:
+
+```bash
+npm run review -- --date 2026-06-30
+```
+
+The review script is rule-based for now. It does not call an LLM, does not read `.env`, and does not modify `context/context.md` or `prompts/analysis-prompt.md`. It only writes review artifacts:
+
+- `reviews/YYYY-MM-DD-review.md`
+- `data/reviews/YYYY-MM-DD-review.json`
+
+If a review already exists, the script refuses to overwrite it. Use `--force` only when you intentionally want to regenerate:
+
+```bash
+npm run review -- --date 2026-06-30 --force
+```
+
+Use the generated review as a manual decision aid:
+
+- Move stable factual/project updates into `context/context.md`.
+- Move recurring report behavior corrections into `prompts/analysis-prompt.md`.
+- Keep rejected suggestions and noise as evidence for what the next report should avoid.
+
+Dashboard is still deferred. The review loop tells us whether the system is learning EricChan's judgment; a Dashboard should only package a loop that already works.
+
 ## Output Files
 
 Each run writes:
@@ -194,9 +231,11 @@ Each run writes:
 - `data/reports/YYYY-MM-DD.json`
 - `data/raw/YYYY-MM-DD.json`
 - `feedback/YYYY-MM-DD.md` when using `npm run daily` or `npm run feedback:today`
+- `reviews/YYYY-MM-DD-review.md` and `data/reviews/YYYY-MM-DD-review.json` when using `npm run review:today`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
+`reviews/` and `data/reviews/` store generated review artifacts and are ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -241,6 +280,8 @@ npm run report:mock  # mock trends + mock analysis
 npm run validate:report # validate the generated report quality
 npm run daily        # generate report, validate it, and prepare feedback/YYYY-MM-DD.md
 npm run feedback:today # create today's feedback file without regenerating the report
+npm run review:today # generate today's Daily Review from report + feedback
+npm run review -- --date YYYY-MM-DD # generate review for a specific date
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
@@ -249,6 +290,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A is now implemented as `npm run daily` plus `feedback/YYYY-MM-DD.md`. Run it for 7 days before deciding what needs a Dashboard.
+Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, and `npm run review:today`. Run it for 7 days before deciding what needs a Dashboard.
 
 Stage 2 can add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.

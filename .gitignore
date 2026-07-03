@@ -7,3 +7,5 @@ reports/*.md
 data/reports/*.json
 data/raw/*.json
 feedback/*.md
+reviews/*.md
+data/reviews/*.json
