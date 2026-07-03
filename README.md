@@ -148,6 +148,44 @@ Allowed feedback decisions are `pending`, `accept`, `watch`, `reject`, and `done
 
 Use `templates/daily-feedback-template.md` after reviewing a report. Fill accepted suggestions, watched suggestions, rejected suggestions, actual actions, useful parts, noise, context updates, and prompt updates. For now this is manual by design; automatic Obsidian writing comes later.
 
+## V0.1.5 Stage 1A Daily Runner
+
+Stage 1A is automatic daily report generation plus a manual feedback file. It is still not a Dashboard, deployment, Obsidian sync, push notification system, or real multi-agent executor.
+
+Run the full daily loop:
+
+```bash
+npm run daily
+```
+
+The daily runner:
+
+- Generates today's report with `npm run report` behavior.
+- Runs the same quality validation used by `npm run validate:report`.
+- Creates `feedback/YYYY-MM-DD.md` from `templates/daily-feedback-template.md`.
+- Preserves an existing feedback file so human notes are never overwritten.
+- Prints mode, warnings, quality score, report paths, JSON path, raw snapshot path, and feedback path.
+
+If the API is configured and succeeds, the report JSON should show `"mode": "live"`. If the API is unavailable, the runner safely falls back to mock mode and prints the warning; treat that as a pipeline check, not a real strategic report.
+
+Create only today's feedback file without regenerating the report:
+
+```bash
+npm run feedback:today
+```
+
+Daily human loop:
+
+1. Open `reports/YYYY-MM-DD.md`.
+2. Check `data/reports/YYYY-MM-DD.json` for `mode`, `warnings`, and `qualityValidation`.
+3. Fill `feedback/YYYY-MM-DD.md` with accepted, watched, rejected, and completed suggestions.
+4. Move recurring useful feedback into `context/context.md`.
+5. Move recurring prompt failures into `prompts/analysis-prompt.md`.
+
+Windows Task Scheduler can run `npm run daily` once per day. See `scripts/setup-schedule.md` for the manual setup command and troubleshooting notes. The project does not register scheduled tasks automatically.
+
+Stage 1B Dashboard should wait until at least 7 daily runs produce useful feedback patterns, stable quality scores, no placeholder trends, stage-appropriate actions, and clear evidence that a visual review surface would reduce manual review friction.
+
 ## Output Files
 
 Each run writes:
@@ -155,8 +193,10 @@ Each run writes:
 - `reports/YYYY-MM-DD.md`
 - `data/reports/YYYY-MM-DD.json`
 - `data/raw/YYYY-MM-DD.json`
+- `feedback/YYYY-MM-DD.md` when using `npm run daily` or `npm run feedback:today`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
+`feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -199,6 +239,8 @@ Trend sources live in `config/sources.config.json`. Prefer official RSS, changel
 npm run report       # live sources + real API when .env is configured
 npm run report:mock  # mock trends + mock analysis
 npm run validate:report # validate the generated report quality
+npm run daily        # generate report, validate it, and prepare feedback/YYYY-MM-DD.md
+npm run feedback:today # create today's feedback file without regenerating the report
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
@@ -207,6 +249,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A should prepare automatic daily reports and human feedback capture. A small local Dashboard belongs after feedback patterns are stable.
+Stage 1A is now implemented as `npm run daily` plus `feedback/YYYY-MM-DD.md`. Run it for 7 days before deciding what needs a Dashboard.
 
 Stage 2 can add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.

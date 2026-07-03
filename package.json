@@ -7,6 +7,8 @@
     "report": "node scripts/generate-report.js",
     "report:mock": "node scripts/generate-report.js --mock",
     "validate:report": "node scripts/validate-report.js",
+    "daily": "node scripts/run-daily-report.js",
+    "feedback:today": "node scripts/run-daily-report.js --feedback-only",
     "clean": "node scripts/generate-report.js --clean",
     "test": "node --test"
   },
