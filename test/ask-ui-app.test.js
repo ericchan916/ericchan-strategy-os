@@ -242,6 +242,38 @@ test("HTML 含 loading 容器", () => {
   assert.ok(hasLoading, "缺少 loading 容器");
 });
 
+test("HTML loading 容器包含完整 wheel-and-hamster 结构（V0.3.4-hotfix-2）", () => {
+  // 用户提供的 Uiverse 结构必须完整出现在 #answerLoading 里。
+  // 不可接受任何 "用 SVG 圆环替代" 的简化。
+  // 抓取 #answerLoading 开始到整个文件末尾不匹配的多行 nested div 容器。
+  const startIdx = indexHtml.indexOf('id="answerLoading"');
+  assert.ok(startIdx > 0, "找不到 #answerLoading 节点");
+  // 用查找最后一个 </div> 之前闭合一个 div 的方式不够稳；这里简单地抓
+  // 接下来 2000 个字符作为内层区域，包含整个 #answerLoading DOM 子树。
+  const inner = indexHtml.slice(startIdx, startIdx + 2400);
+  assert.ok(/class="[^"]*wheel-and-hamster[^"]*"/.test(inner), "缺少 wheel-and-hamster");
+  assert.ok(/class="[^"]*\bwheel\b[^"]*"/.test(inner), "缺少 wheel");
+  assert.ok(/class="[^"]*\bhamster\b[^"]*"/.test(inner), "缺少 hamster");
+  assert.ok(/class="[^"]*hamster__body[^"]*"/.test(inner), "缺少 hamster__body");
+  assert.ok(/class="[^"]*hamster__head[^"]*"/.test(inner), "缺少 hamster__head");
+  assert.ok(/class="[^"]*hamster__ear[^"]*"/.test(inner), "缺少 hamster__ear");
+  assert.ok(/class="[^"]*hamster__eye[^"]*"/.test(inner), "缺少 hamster__eye");
+  assert.ok(/class="[^"]*hamster__nose[^"]*"/.test(inner), "缺少 hamster__nose");
+  assert.ok(/class="[^"]*\bspoke\b[^"]*"/.test(inner), "缺少 spoke");
+  for (const limb of ["fr", "fl", "br", "bl"]) {
+    assert.ok(
+      new RegExp(`class="[^"]*hamster__limb--${limb}[^"]*"`).test(inner),
+      `缺少 hamster__limb--${limb}`
+    );
+  }
+  assert.ok(/class="[^"]*hamster__tail[^"]*"/.test(inner), "缺少 hamster__tail");
+  // 中文 aria-label
+  assert.ok(
+    /aria-label="[^"]*仓鼠[^"]*"|aria-label="[^"]*战略判断[^"]*"/.test(inner),
+    "loading 容器应使用中文 aria-label"
+  );
+});
+
 test("HTML 仍含'不自动联网搜索'联网说明", () => {
   assert.ok(indexHtml.includes("不自动联网搜索"), "缺少联网能力说明");
 });
@@ -253,9 +285,71 @@ test("CSS 包含复制按钮样式（.copy-button / .answer-copy）", () => {
   assert.ok(hasCss, "缺少复制按钮样式");
 });
 
+test("README 提到仓鼠跑轮 loading（V0.3.4-hotfix-2）", () => {
+  // 读 README 内容（不一定每次都重新构建 fs 读取）
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
+  assert.ok(/仓鼠/.test(readme), "README 应明确提到 '仓鼠' loading");
+  assert.ok(/Uiverse/.test(readme), "README 应注明来源 Uiverse");
+});
+
 test("CSS 包含 loading 动画样式（@keyframes / hamster / spinner）", () => {
   const hasKeyframes = /@keyframes\s+[A-Za-z_-]+/.test(stylesCss);
   assert.ok(hasKeyframes, "缺少 @keyframes（loading 动画）");
+});
+
+test("CSS 包含完整 Uiverse wheel-and-hamster 关键帧（V0.3.4-hotfix-2）", () => {
+  // Uiverse 仓鼠动画必须真存在：列出的 keyframes 全部出现在 CSS 中。
+  const requiredKeyframes = [
+    "hamster",
+    "hamsterHead",
+    "hamsterEye",
+    "hamsterEar",
+    "hamsterBody",
+    "hamsterFRLimb",
+    "hamsterFLLimb",
+    "hamsterBRLimb",
+    "hamsterBLLimb",
+    "hamsterTail",
+    "spoke"
+  ];
+  for (const name of requiredKeyframes) {
+    const re = new RegExp(`@keyframes\\s+${name}\\b`);
+    assert.ok(re.test(stylesCss), `缺少 @keyframes ${name}`);
+  }
+  // class 选择器必须存在
+  const requiredSelectors = [
+    ".wheel-and-hamster",
+    ".wheel",
+    ".hamster",
+    ".hamster__head",
+    ".hamster__ear",
+    ".hamster__eye",
+    ".hamster__nose",
+    ".hamster__body",
+    ".hamster__limb--fr",
+    ".hamster__limb--fl",
+    ".hamster__limb--br",
+    ".hamster__limb--bl",
+    ".hamster__tail",
+    ".spoke"
+  ];
+  for (const selector of requiredSelectors) {
+    const re = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{`);
+    assert.ok(re.test(stylesCss), `缺少 ${selector} 规则块`);
+  }
+});
+
+test("CSS loading 区域高度被限制（仓鼠动画不会撑大页面）", () => {
+  // .answer-loading 应有 max-height 或固定高度约束；
+  // .wheel-and-hamster 应有 font-size / width / height 限制（Uiverse 用 em 作单位）。
+  // 不强制具体数值，只要 .wheel-and-hamster 规则里有 width / height 关键字即可。
+  // 注意：必须把 .wheel-and-hamster 后面的真实声明块（非 reduced-motion 覆盖）匹配出来。
+  const wheelHamsterRule = stylesCss.match(/\.wheel-and-hamster\s*\{[\s\S]*?\n\s*\}\s*\.wheel,/);
+  assert.ok(wheelHamsterRule, "找不到 .wheel-and-hamster 主规则");
+  const target = wheelHamsterRule[0];
+  assert.ok(/width|height|font-size/i.test(target), ".wheel-and-hamster 应限制尺寸");
 });
 
 test("CSS 包含 prefers-reduced-motion 媒体查询", () => {

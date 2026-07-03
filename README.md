@@ -715,11 +715,29 @@ V0.3.4 调整了 Ask UI 的键盘与点击习惯；V0.3.4-hotfix 进一步加入
 - 点击历史项：填入问题、恢复回答、恢复来源与状态，**不**自动重新请求。
 - 左下角有”清空”按钮，触发 `window.confirm(“确定清空最近提问记录吗？”)`。
 
-**Loading 动画**：
+**Loading 动画（V0.3.4-hotfix-2 完整仓鼠跑轮）**：
 
-- 提问后显示”正在生成战略判断……”和一个克制版思考轮 SVG（深墨绿主色，64×64 px）。
-- 完成 / 出错 / 回退时动画自动隐藏，显示回答或失败提示。
-- 用户设置 `prefers-reduced-motion: reduce` 时，动画被替换成静态描边，无旋转 / 跳动。
+- 提问后显示”正在生成战略判断……”和一个**完整 Uiverse 仓鼠跑轮动画**（来自 Uiverse by Nawsome —— `wheel-and-hamster`）。
+- 完整 class 名单保留：`wheel-and-hamster` → `wheel` / `hamster` / `hamster__body` / `hamster__head` / `hamster__ear` / `hamster__eye` / `hamster__nose` / `hamster__limb--{fr,fl,br,bl}` / `hamster__tail` / `spoke` 全部都在；不再是抽象 SVG 圆环。
+- 完整 Uiverse 关键帧全部启用：`@keyframes hamster` / `hamsterHead` / `hamsterEye` / `hamsterEar` / `hamsterBody` / `hamsterFRLimb` / `hamsterFLLimb` / `hamsterBRLimb` / `hamsterBLLimb` / `hamsterTail` / `spoke`。
+- 颜色：深墨绿滚轮 / 暖橙 - 米色仓鼠身体 / 粉色耳朵鼻子 —— 保留卡通感，但配色克制、不过饱、不抢戏。
+- 整体尺寸：约 7.5em（≈110px），不撑大页面、不抢戏。
+- 完成 / 出错 / 回退时动画隐藏。
+- 用户设置 `prefers-reduced-motion: reduce` 时，所有动画停用，仓鼠和滚轮停留在静态首帧 —— 仍然能看出仓鼠与滚轮。无障碍合规。
+
+**Ask Mode 自适应回答（V0.3.4-hotfix-2）**：
+
+- 不再机械套用”结论 / 理由 / 行动 / 今天不要做”四段式。
+- 系统会**先判断问题类型**，再选择回答形式：
+  - **决策型问题**：今天适合做什么、是否开新项目、项目优先级、是否过度复杂、智能体分工 —— 按需精简保留结构，但**不强求四项**。”今天不要做”只在用户明显做错事 / 资源紧张 / 风险出现时再写。
+  - **自然回答型问题**：概念解释、界面使用、体验反馈、能力确认、闲聊式提问、为什么、比较工具、提示词请求、技术排查 —— 直接自然回答，**不必**强行使用结论 / 理由 / 行动 / 今天不要做。
+  - 例：`现在这个系统能联网搜索吗？` → 一句自然答：”不能。当前基于本地上下文与 LLM 回答，不自动联网搜索。”
+- 仍保留结构化输出：
+  - **项目体检**（Project Checkup）：10 节骨架不动。
+  - **项目开工包**（Kickoff Package）：10 节骨架不动。
+  - **智能体分工建议**：保留清晰结构。
+- 其余安全边栏继续保留：内部状态词中文化、`think` / `reasoning` 清洗、技术名词白名单、不暴露 API Key。
+- prompt 与 fallback prompt 同步：两份 prompt 都包含”不是模板填空器、不要每次都固定输出四段式、请按问题类型选择回答形式”。
 
 **联网能力说明**：
 

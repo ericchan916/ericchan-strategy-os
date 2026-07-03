@@ -67,15 +67,28 @@
             </div>
           </div>
           <div id="questionEcho" class="question-echo" hidden></div>
-          <div id="answerLoading" class="answer-loading" hidden aria-live="polite">
-            <span class="loading-text">正在生成战略判断……</span>
-            <span class="loading-wheel" aria-hidden="true">
-              <svg class="loading-wheel-svg" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-                <circle class="loading-wheel-ring" cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-opacity="0.18" stroke-width="3"></circle>
-                <circle class="loading-wheel-arc" cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="55 200" transform="rotate(-90 32 32)"></circle>
-                <circle class="loading-wheel-dot" cx="32" cy="20" r="3" fill="currentColor"></circle>
-              </svg>
-            </span>
+          <div id="answerLoading" class="answer-loading" hidden aria-live="polite" role="status" aria-label="仓鼠在滚轮里奔跑，表示正在生成战略判断">
+            <div class="loading-inner">
+              <span class="loading-text">正在生成战略判断……</span>
+              <div aria-hidden="true" class="wheel-and-hamster">
+                <div class="wheel"></div>
+                <div class="hamster">
+                  <div class="hamster__body">
+                    <div class="hamster__head">
+                      <div class="hamster__ear"></div>
+                      <div class="hamster__eye"></div>
+                      <div class="hamster__nose"></div>
+                    </div>
+                    <div class="hamster__limb hamster__limb--fr"></div>
+                    <div class="hamster__limb hamster__limb--fl"></div>
+                    <div class="hamster__limb hamster__limb--br"></div>
+                    <div class="hamster__limb hamster__limb--bl"></div>
+                    <div class="hamster__tail"></div>
+                  </div>
+                </div>
+                <div class="spoke"></div>
+              </div>
+            </div>
           </div>
           <article id="answerOutput" class="answer empty" aria-live="polite">
             点击左侧一个推荐问题，或在下方输入框里写下你的问题。

@@ -583,12 +583,10 @@ h2 {
   .primary-button:hover {
     transform: none;
   }
-  .loading-wheel-svg .loading-wheel-arc,
-  .loading-wheel-svg .loading-wheel-dot {
-    animation: none;
-  }
-  .loading-wheel-svg .loading-wheel-arc {
-    stroke-dasharray: 0 200;
+  /* 完整仓鼠跑轮在 reduced-motion 下静止：保留静态首帧，仍能看出仓鼠与滚轮，无旋转。 */
+  .wheel-and-hamster *,
+  .wheel-and-hamster {
+    animation: none !important;
   }
 }
 
@@ -650,13 +648,13 @@ h2 {
   display: block;
 }
 
-/* ---------------- Loading (V0.3.4-hotfix) ---------------- */
+/* ---------------- Loading: 完整 Uiverse 仓鼠跑轮 (V0.3.4-hotfix-2) ---------------- */
 
 .answer-loading {
   display: none;
   align-items: center;
-  gap: 18px;
-  padding: 18px 22px;
+  justify-content: center;
+  padding: 22px 22px 26px;
   border-radius: var(--radius-md);
   background: var(--panel-strong);
   border: 1px solid var(--line-soft);
@@ -665,44 +663,281 @@ h2 {
 }
 
 .answer-loading:not([hidden]) {
+  display: flex;
+}
+
+.loading-inner {
   display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
 }
 
 .loading-text {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--muted);
   letter-spacing: 0.02em;
 }
 
-.loading-wheel {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
+/* ------------------------------------------------------------------
+   Uiverse by Nawsome — Orange and Tan hamster running in a metal wheel.
+   原版 12em = 168px (1em = 14px)；此处缩到 ~110px 适配 Ask UI 容器。
+   颜色保留：暖橙/米色仓鼠 + 深灰绿滚轮 + 粉色耳朵/鼻子。
+   关键帧全部保留；reduced-motion 下整体停止动画。
+   ------------------------------------------------------------------ */
+
+.wheel-and-hamster {
+  --dur: 1s;
+  position: relative;
+  width: 7.5em;
+  height: 7.5em;
+  font-size: 14px;
 }
 
-.loading-wheel-svg {
-  display: block;
+.wheel,
+.hamster,
+.hamster div,
+.spoke {
+  position: absolute;
 }
 
-@keyframes loadingWheelSpin {
-  to { transform: rotate(360deg); }
+.wheel,
+.spoke {
+  border-radius: 50%;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
 }
 
-@keyframes loadingWheelDot {
-  0%, 100% { transform: translateY(0); opacity: 0.85; }
-  50% { transform: translateY(-6px); opacity: 1; }
+.wheel {
+  /* 深灰绿滚轮，避免饱和的金属橙抢戏 */
+  background:
+    radial-gradient(
+      100% 100% at center,
+      hsla(168, 18%, 60%, 0) 47.8%,
+      hsl(168, 22%, 32%) 48%
+    );
+  z-index: 2;
 }
 
-.loading-wheel-svg .loading-wheel-arc {
-  transform-origin: 32px 32px;
-  animation: loadingWheelSpin 1.4s linear infinite;
+.spoke {
+  background:
+    radial-gradient(
+      100% 100% at center,
+      hsla(168, 18%, 60%, 0) 47.8%,
+      hsl(168, 22%, 40%) 48%
+    );
+  z-index: 1;
+  animation: spoke var(--dur) linear infinite;
 }
 
-.loading-wheel-svg .loading-wheel-dot {
-  transform-origin: 32px 32px;
-  animation: loadingWheelDot 1.6s ease-in-out infinite;
+.hamster {
+  animation: hamster var(--dur) ease-in-out infinite;
+  top: 50%;
+  left: calc(50% - 2.5em);
+  width: 5em;
+  height: 3em;
+  transform: rotate(4deg) translate(-0.6em, 1.4em);
+  transform-origin: 50% 0;
+  z-index: 1;
+}
+
+.hamster__head {
+  animation: hamsterHead var(--dur) ease-in-out infinite;
+  background: #ffd9b3;
+  border-radius: 40% 40% 30% 30%;
+  width: 1.5em;
+  height: 1.55em;
+  top: 1em;
+  left: 0.6em;
+  position: absolute;
+}
+
+.hamster__ear {
+  animation: hamsterEar var(--dur) ease-in-out infinite;
+  background: #f7b9a2;
+  border-radius: 50%;
+  width: 0.55em;
+  height: 0.55em;
+  top: 0.45em;
+  left: 1.05em;
+  position: absolute;
+}
+
+.hamster__eye {
+  animation: hamsterEye var(--dur) linear infinite;
+  background: #1a2120;
+  border-radius: 50%;
+  width: 0.3em;
+  height: 0.3em;
+  top: 0.95em;
+  left: 0.7em;
+  position: absolute;
+}
+
+.hamster__nose {
+  background: #d97a78;
+  border-radius: 50% 50% 70% 70%;
+  width: 0.25em;
+  height: 0.18em;
+  top: 1.45em;
+  left: 1.4em;
+  position: absolute;
+}
+
+.hamster__body {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(28, 100%, 78%) 0%,
+      hsl(28, 100%, 72%) 30%,
+      hsl(28, 100%, 62%) 60%,
+      hsl(28, 100%, 50%) 100%
+    );
+  border-radius: 50% 30% 30% 50% / 60% 40% 60% 40%;
+  width: 1.8em;
+  height: 1.6em;
+  top: 1.4em;
+  left: 0.5em;
+  position: absolute;
+  animation: hamsterBody var(--dur) ease-in-out infinite;
+}
+
+.hamster__limb--fr,
+.hamster__limb--fl {
+  background: hsl(28, 100%, 78%);
+  border-radius: 0.6em 0.6em 0.4em 0.4em;
+  width: 0.45em;
+  height: 0.7em;
+  top: 2em;
+  left: 0.65em;
+  position: absolute;
+  transform-origin: 50% 0%;
+  z-index: 1;
+}
+
+.hamster__limb--fr { animation: hamsterFRLimb var(--dur) linear infinite; }
+.hamster__limb--fl { animation: hamsterFLLimb var(--dur) linear infinite; }
+
+.hamster__limb--br,
+.hamster__limb--bl {
+  background: hsl(28, 100%, 60%);
+  border-radius: 0.6em 0.6em 0.4em 0.4em;
+  width: 0.45em;
+  height: 0.7em;
+  top: 2em;
+  left: 1.2em;
+  position: absolute;
+  transform-origin: 50% 0%;
+}
+
+.hamster__limb--br { animation: hamsterBRLimb var(--dur) linear infinite; }
+.hamster__limb--bl { animation: hamsterBLLimb var(--dur) linear infinite; }
+
+.hamster__tail {
+  background: hsl(28, 100%, 50%);
+  border-radius: 0.3em;
+  width: 0.2em;
+  height: 0.4em;
+  top: 2em;
+  left: 0.2em;
+  position: absolute;
+  transform-origin: 50% 30%;
+  animation: hamsterTail var(--dur) linear infinite;
+}
+
+/* ---------------- Keyframes（Uiverse 原文，适配 Ask UI） ---------------- */
+
+@keyframes hamster {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(0deg);
+  }
+  12% { transform: rotate(-12deg); }
+  22% { transform: rotate(8deg); }
+  32% { transform: rotate(-10deg); }
+  42% { transform: rotate(4deg); }
+}
+
+@keyframes hamsterHead {
+  from, 25%, 36%, 50%, 51%, to {
+    transform: rotate(0deg);
+  }
+  12%, 24% { transform: rotate(-8deg); }
+  32%, 40% { transform: rotate(6deg); }
+}
+
+@keyframes hamsterEye {
+  from, 25%, 36%, 50%, to {
+    transform: scaleY(1);
+  }
+  12%, 24%, 32%, 40%, 50% {
+    transform: scaleY(0.6);
+  }
+}
+
+@keyframes hamsterEar {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(0deg);
+  }
+  12%, 32% { transform: rotate(6deg); }
+  22%, 42% { transform: rotate(-6deg); }
+}
+
+@keyframes hamsterBody {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(0deg);
+  }
+  12% { transform: rotate(-2deg); }
+  22% { transform: rotate(2deg); }
+  32% { transform: rotate(-2deg); }
+  42% { transform: rotate(2deg); }
+}
+
+@keyframes hamsterFRLimb {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(50deg);
+  }
+  12%, 32% { transform: rotate(-30deg); }
+  22%, 42% { transform: rotate(30deg); }
+}
+
+@keyframes hamsterFLLimb {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(-30deg);
+  }
+  12%, 32% { transform: rotate(50deg); }
+  22%, 42% { transform: rotate(-30deg); }
+}
+
+@keyframes hamsterBRLimb {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(-30deg);
+  }
+  12%, 32% { transform: rotate(50deg); }
+  22%, 42% { transform: rotate(-30deg); }
+}
+
+@keyframes hamsterBLLimb {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(30deg);
+  }
+  12%, 32% { transform: rotate(-30deg); }
+  22%, 42% { transform: rotate(30deg); }
+}
+
+@keyframes hamsterTail {
+  from, 25%, 36%, 50%, to {
+    transform: rotate(0deg);
+  }
+  12%, 22% { transform: rotate(8deg); }
+  32%, 42% { transform: rotate(-8deg); }
+}
+
+@keyframes spoke {
+  from { transform: rotate(0); }
+  to { transform: rotate(-1turn); }
 }
 
 /* ---------------- History panel (V0.3.4-hotfix) ---------------- */
