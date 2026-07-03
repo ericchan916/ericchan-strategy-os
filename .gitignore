@@ -9,3 +9,4 @@ data/raw/*.json
 feedback/*.md
 reviews/*.md
 data/reviews/*.json
+proposals/*.md

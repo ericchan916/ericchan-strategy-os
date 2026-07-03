@@ -223,6 +223,39 @@ Use the generated review as a manual decision aid:
 
 Dashboard is still deferred. The review loop tells us whether the system is learning EricChan's judgment; a Dashboard should only package a loop that already works.
 
+## V0.1.7 Update Proposal
+
+V0.1.7 turns a Daily Review into a human-reviewable update proposal. It reads `data/reviews/YYYY-MM-DD-review.json` and `reviews/YYYY-MM-DD-review.md`, extracts context suggestions, prompt suggestions, noise, rejected ideas, and next-report instructions, then writes:
+
+- `proposals/YYYY-MM-DD-update-proposal.md`
+
+Run today's proposal:
+
+```bash
+npm run propose:today
+```
+
+Run a specific date:
+
+```bash
+npm run propose -- --date 2026-06-30
+```
+
+If a proposal already exists, the script refuses to overwrite it. Use `--force` only when intentionally regenerating:
+
+```bash
+npm run propose -- --date 2026-06-30 --force
+```
+
+The proposal is deliberately not an automatic patch. Review suggestions can contain one-off mood, noisy wording, or overfit lessons from a single day. Human approval should decide:
+
+- Which context updates are stable enough for `context/context.md`.
+- Which prompt updates should become standing behavior.
+- Which rejected or noisy signals should stay out of system memory.
+- Whether to apply manually or ask Codex to apply approved changes.
+
+Only after proposal approval should the project enter an apply phase.
+
 ## Output Files
 
 Each run writes:
@@ -232,10 +265,12 @@ Each run writes:
 - `data/raw/YYYY-MM-DD.json`
 - `feedback/YYYY-MM-DD.md` when using `npm run daily` or `npm run feedback:today`
 - `reviews/YYYY-MM-DD-review.md` and `data/reviews/YYYY-MM-DD-review.json` when using `npm run review:today`
+- `proposals/YYYY-MM-DD-update-proposal.md` when using `npm run propose:today`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
 `reviews/` and `data/reviews/` store generated review artifacts and are ignored by Git except for `.gitkeep`.
+`proposals/` stores generated update proposals and is ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -282,6 +317,8 @@ npm run daily        # generate report, validate it, and prepare feedback/YYYY-M
 npm run feedback:today # create today's feedback file without regenerating the report
 npm run review:today # generate today's Daily Review from report + feedback
 npm run review -- --date YYYY-MM-DD # generate review for a specific date
+npm run propose:today # generate today's context/prompt update proposal
+npm run propose -- --date YYYY-MM-DD # generate proposal for a specific date
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
@@ -290,6 +327,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, and `npm run review:today`. Run it for 7 days before deciding what needs a Dashboard.
+Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, and `npm run propose:today`. Run it for 7 days before deciding what needs a Dashboard.
 
 Stage 2 can add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.
