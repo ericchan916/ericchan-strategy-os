@@ -3,6 +3,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 npm-debug.log*
+.claude/
 reports/*.md
 data/reports/*.json
 data/raw/*.json

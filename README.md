@@ -755,6 +755,31 @@ baseUrl 兼容三种写法（系统会归一化）：
 - `https://host/v1/` → `https://host/v1/chat/completions`
 - `https://host/v1/chat/completions` → 不会重复拼接成 `/chat/completions/chat/completions`
 
+## LLM 回答清洗（V0.3.3-hotfix-3）
+
+Ask Mode 只展示中文最终答案。系统在两个层面做约束：
+
+**Prompt 层**（`prompts/ask-mode-system-prompt.md`）：
+
+- 明文要求模型只输出最终答案，不得输出思考过程、推理过程、草稿、chain-of-thought。
+- 禁止输出 `<think>...</think>` 标签，禁止 `Analysis:` / `Reasoning:` / `Thought:` / `Chain of thought:` / `CoT:` / `Internal reasoning:` 等英文标签段落。
+- 禁止 `We need to ...` / `Let's analyze ...` / `The user asks ...` / `I need to ...` / `First, let me ...` 等英文元说明。
+- 理由部分只能是简短结论性理由，每条不超过一行，不展示逐步推理。
+- 所有用户可见内容必须为中文；技术名词如 GPT 5.5 Thinking、Codex、OpenDesign、MiniMax、WorkBuddy、API、MVP、OPC 例外。
+
+**工程层**（`scripts/llm-client.js` 的 `sanitizeLlmAnswer`）作为兜底：
+
+- 移除 `<think>...</think>` 块（包括多行）。
+- 移除 ` ```thinking ``` ` / ` ```reasoning ``` ` / ` ```analysis ``` ` / ` ```cot ``` ` 围栏代码块。
+- 移除以 `Analysis:` / `Reasoning:` / `Thought:` / `Chain of thought:` / `CoT:` / `Internal reasoning:` 开头的整段。
+- 移除以 `We need to ...` / `Let's analyze ...` / `The user asks ...` / `I need to ...` / `First, let me ...` 开头的英文元说明。
+- 若出现 `Final:` 或 `最终答案：` 标记，只保留标记之后的内容。
+- **不**误删中文"理由："部分。
+- **不**误删技术名词 GPT 5.5 Thinking、Codex、API、MVP。
+- 清洗后为空 → 抛 `empty` 错误 → fallback 到本地规则回答。
+
+`/api/ask` 和 `npm run ask` 都会自动应用这个清洗。如果某些模型仍持续输出 reasoning，建议更换模型或在请求参数里关闭 reasoning 输出。
+
 ## Output Files
 
 Each run writes:

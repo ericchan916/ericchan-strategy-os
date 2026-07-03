@@ -9,7 +9,7 @@ require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先�
 const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
 const ASK_MODE_SYSTEM_PROMPT_PATH = path.join(__dirname, "..", "prompts", "ask-mode-system-prompt.md");
 const ASK_MODE_SYSTEM_PROMPT_FALLBACK =
-  "你是 EricChan·战略OS 的战略总控问答模块。请用中文回答：先给结论，再给最多 3 个理由和最多 3 个行动，并明确指出今天不要做什么。不要默认建议更新旧项目；项目开工包必须先交给 GPT 5.5 Thinking 总控判断。";
+  "你是 EricChan·战略OS 的战略总控问答模块。请只用中文回答：先给结论，再给最多 3 个简短结论性理由和最多 3 个行动，并明确指出今天不要做什么。不要默认建议更新旧项目；项目开工包必须先交给 GPT 5.5 Thinking 总控判断。不得输出任何英文句子（技术名词如 GPT 5.5 Thinking、Codex、OpenDesign、MiniMax、WorkBuddy、API、MVP、OPC 例外），不得输出 <think> 标签、Analysis/Reasoning/Chain of thought/CoT/Internal reasoning 段落，不得出现 We need to / Let's analyze / The user asks 等英文元说明。所有理由必须是简短结论，不要展示逐步推理。";
 
 const DEFAULT_QUESTIONS = [
   "今天适合做什么？",

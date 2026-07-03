@@ -10,6 +10,28 @@ const llmClient = require("../scripts/llm-client");
 const loadEnv = require("../scripts/load-env");
 const http = require("node:http");
 
+// 这些测试主要验证本地规则回答；测试期间清掉 STRATEGY_OS_LLM_* / LLM_*
+// 以避免误命中真实 .env，跑到真实 LLM API。
+const LLM_TEST_KEYS = [
+  "STRATEGY_OS_LLM_ENABLED",
+  "STRATEGY_OS_LLM_API_KEY",
+  "STRATEGY_OS_LLM_BASE_URL",
+  "STRATEGY_OS_LLM_MODEL",
+  "STRATEGY_OS_LLM_TIMEOUT_MS",
+  "LLM_API_KEY",
+  "LLM_API_BASE_URL",
+  "LLM_MODEL"
+];
+const SAVED_LLM_ENV = {};
+for (const key of LLM_TEST_KEYS) SAVED_LLM_ENV[key] = process.env[key];
+for (const key of LLM_TEST_KEYS) delete process.env[key];
+test.after(() => {
+  for (const key of LLM_TEST_KEYS) {
+    if (SAVED_LLM_ENV[key] === undefined) delete process.env[key];
+    else process.env[key] = SAVED_LLM_ENV[key];
+  }
+});
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));

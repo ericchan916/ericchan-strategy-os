@@ -193,11 +193,65 @@ async function callChatCompletion({ config, systemPrompt, userPrompt, fetchImpl 
       text = choice.text;
     }
   }
-  text = String(text || "").trim();
+  // 走清洗：去除模型内部 thinking / reasoning / analysis 等英文推理残留。
+  text = sanitizeLlmAnswer(String(text || ""));
 
   if (!text) {
     throw new LlmError("empty", "LLM 没有返回内容。");
   }
+
+  return text;
+}
+
+// 兜底清洗 LLM 回答：
+// - 移除 <think>...</think>（含跨行）
+// - 移除 ```thinking / reasoning / analysis / cot``` 围栏代码块
+// - 移除以英文 reasoning 标签开头的段落（Analysis: / Reasoning: / Thought: / Chain of thought: / CoT: / Internal reasoning:）
+// - 移除 "We need to ..." / "Let's analyze ..." / "The user asks ..." 等英文元说明整段
+// - 若出现 "Final:" 或 "最终答案：" 标记，只保留标记之后的内容
+// - 保留中文 "理由："、技术名词、Markdown 结构
+// - 不激进：能不动中文就尽量不动；只在推理标记明显时切掉
+function sanitizeLlmAnswer(input) {
+  if (!input) return "";
+  let text = String(input);
+
+  // 1) <think>...</think> 块：支持跨行、非贪婪。
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+  // 2) 围栏代码块：```thinking ... ``` / ```reasoning ... ``` / ```analysis ... ``` / ```cot ... ```
+  text = text.replace(/```[ \t]*(?:thinking|reasoning|analysis|cot|chain[_-]?of[_-]?thought)[^\n]*\n[\s\S]*?```/gi, "");
+
+  // 3) 英文 reasoning 标签段：整段切到下一个空行 / Markdown 标题 / 列表项之前。
+  const englishLabels = [
+    "Analysis",
+    "Reasoning",
+    "Thought",
+    "Chain of thought",
+    "CoT",
+    "Internal reasoning"
+  ];
+  for (const label of englishLabels) {
+    // 段内可包含换行；在遇到 ## / 标题、列表行 - 、或双换行结束。
+    const re = new RegExp(`(^|\\n)\\s*${label.replace(/ /g, "\\s+")}\\s*:[\\s\\S]*?(?=\\n\\s*\\n|\\n\\s*#{1,6}\\s|\\n\\s*-\\s|$)`, "gi");
+    text = text.replace(re, "\n");
+  }
+
+  // 4) 元说明开头的英文整段：We need to / Let's analyze / The user asks / I need to / First[,]? let me
+  const metaIntros = [
+    /^[\s\S]*?(?=\n\s*#{1,6}\s|\Z)/i.test("") ? "" : "", // placeholder to keep array non-empty
+  ];
+  // 真正匹配：行首或独立段的英文元说明
+  const metaRe = /(?:^|\n)\s*(?:We need to [^.\n]+\.|Let's analyze [^.\n]+\.|The user asks [^.\n]+\.|I need to [^.\n]+\.|First,? let me [^.\n]+\.)\s*\n?/gi;
+  text = text.replace(metaRe, "\n");
+
+  // 5) Final: / 最终答案： 标记之后才保留。
+  const finalMatch = text.match(/(?:^|\n)\s*(?:Final|最终答案|最终回答)\s*[:：]\s*\n?([\s\S]*)$/i);
+  if (finalMatch) {
+    text = finalMatch[1];
+  }
+
+  // 6) 折叠多于两个的连续空行、整体 trim。
+  text = text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 
   return text;
 }
@@ -208,6 +262,7 @@ module.exports = {
   KEY_REDACT_RE,
   redactKey,
   normalizeBaseUrl,
+  sanitizeLlmAnswer,
   readConfig,
   isConfigured,
   callChatCompletion,
