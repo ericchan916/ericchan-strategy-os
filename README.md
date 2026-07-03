@@ -297,6 +297,71 @@ The validator now blocks default old-project optimization such as updating iPort
 
 The next structural step should be an Opportunity Pool, not legacy project updates.
 
+## V0.1.9 Opportunity Pool
+
+V0.1.9 adds a local Opportunity Pool. Daily reports can discover opportunities, but the pool is where good candidates become durable strategic assets that can be deduped, reviewed, watched, validated, or rejected.
+
+This is the next step before any Dashboard because the important question is not how opportunities look on screen. The important question is whether EricChan can repeatedly collect, compare, and approve opportunities without losing human judgment.
+
+Recommended flow:
+
+```bash
+npm run daily
+npm run opportunities:update
+npm run opportunities:validate
+```
+
+Useful commands:
+
+```bash
+npm run opportunities:update
+npm run opportunities:update -- --date 2026-06-30
+npm run opportunities:validate
+npm run opportunities:list
+```
+
+The pool writes:
+
+- `opportunities/opportunity-pool.md`
+- `data/opportunities/opportunity-pool.json`
+
+These files are ignored by Git because they are long-term user strategy assets. The repo keeps only `.gitkeep` files so the directories exist.
+
+Only opportunities with `enterOpportunityPool: true` and `shouldIgnore: false` are imported. The updater also skips obvious legacy-project optimization ideas such as updating iPortfolio, rebuilding XiaoChan, deploying old projects, redesigning the personal website, or expanding 节律 App.
+
+Each opportunity contains:
+
+- identity: `id`, `createdAt`, `updatedAt`, `opportunityName`
+- source: `sourceTrend`, `sourceReportDate`, `sourceReportDates`, `classification`, `evidence`, `sourceUrls`
+- judgment: `whyItMatters`, `monetizationPotential`, `ericChanFit`, `scores`
+- experiment path: `mvpForm`, `firstValidationAction`, `recommendedAgent`
+- control flags: `enterOpportunityPool`, `needsHumanConfirmation`, `shouldIgnore`
+- user fields: `status`, `humanDecision`, `tags`, `notes`
+
+Status values:
+
+- `inbox`: newly imported, not yet reviewed.
+- `watch`: interesting but not ready for validation.
+- `validate`: ready for market/user validation.
+- `mvp-spec`: ready for a small MVP spec.
+- `building`: actively being built.
+- `archived`: kept for reference.
+- `rejected`: explicitly rejected.
+
+Human decision values:
+
+- `pending`: not reviewed yet.
+- `accepted`: approved as a real opportunity.
+- `watching`: keep observing.
+- `rejected`: not worth pursuing.
+- `done`: completed or resolved.
+
+Deduping uses a stable id built from normalized `opportunityName` and `sourceTrend`. If the same opportunity appears again, the updater merges evidence, source URLs, and report dates, but preserves `notes`, `humanDecision`, and `status`.
+
+Validation checks that the pool schema is legal, ids are unique, scores have all nine dimensions, high `complexityRisk` items are not already `building`, ignored opportunities are not active, and legacy optimization ideas do not enter active states.
+
+Use `opportunity-pool.md` for manual review. Move only human-approved opportunities toward `validate`, `mvp-spec`, or `building`.
+
 ## Output Files
 
 Each run writes:
@@ -307,11 +372,13 @@ Each run writes:
 - `feedback/YYYY-MM-DD.md` when using `npm run daily` or `npm run feedback:today`
 - `reviews/YYYY-MM-DD-review.md` and `data/reviews/YYYY-MM-DD-review.json` when using `npm run review:today`
 - `proposals/YYYY-MM-DD-update-proposal.md` when using `npm run propose:today`
+- `opportunities/opportunity-pool.md` and `data/opportunities/opportunity-pool.json` when using `npm run opportunities:update`
 
 `reports/` is for Obsidian-friendly Markdown. `data/reports/` is for future Dashboard consumption. `data/raw/` stores collected source items.
 `feedback/` stores personal review notes and is ignored by Git except for `.gitkeep`.
 `reviews/` and `data/reviews/` store generated review artifacts and are ignored by Git except for `.gitkeep`.
 `proposals/` stores generated update proposals and is ignored by Git except for `.gitkeep`.
+`opportunities/` and `data/opportunities/` store the generated Opportunity Pool and are ignored by Git except for `.gitkeep`.
 
 ## How To Judge Report Value
 
@@ -367,6 +434,10 @@ npm run review:today # generate today's Daily Review from report + feedback
 npm run review -- --date YYYY-MM-DD # generate review for a specific date
 npm run propose:today # generate today's context/prompt update proposal
 npm run propose -- --date YYYY-MM-DD # generate proposal for a specific date
+npm run opportunities:update # import report opportunities into the local Opportunity Pool
+npm run opportunities:update -- --date YYYY-MM-DD # import opportunities for a specific date
+npm run opportunities:validate # validate Opportunity Pool schema and strategy gates
+npm run opportunities:list # list Opportunity Pool entries
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
@@ -375,6 +446,6 @@ npm test             # run local verification tests
 
 Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, and `npm run propose:today`. V0.1.8 changes the strategic target to opportunity discovery. Run it for 7 days before deciding what needs an Opportunity Pool structure or Dashboard.
+Stage 1A is now implemented as `npm run daily`, `feedback/YYYY-MM-DD.md`, `npm run review:today`, `npm run propose:today`, and `npm run opportunities:update`. V0.1.9 adds the Opportunity Pool so the next work should be manual opportunity screening before any Dashboard.
 
-Stage 2 can add an Opportunity Pool, richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.
+Stage 2 can expand the Opportunity Pool, add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.
