@@ -32,6 +32,19 @@ function validateOpportunityPool(pool) {
   if (opportunities.some((item) => item.status === "building" && item.scores?.complexityRisk >= 4)) {
     failures.push("high complexity opportunities are not building");
   }
+  if (opportunities.some((item) => item.status === "validate" && !["accepted", "watching"].includes(item.humanDecision))) {
+    failures.push("validate opportunities require accepted or watching humanDecision");
+  }
+  if (opportunities.some((item) => item.status === "rejected" && item.humanDecision !== "rejected")) {
+    failures.push("rejected opportunities require rejected humanDecision");
+  }
+  if (
+    opportunities.some(
+      (item) => item.reviewInternalSystemImprovement === true && ["mvp-spec", "building"].includes(item.status)
+    )
+  ) {
+    failures.push("internal system improvements do not jump directly to mvp-spec or building");
+  }
   if (opportunities.some((item) => item.shouldIgnore === true && ACTIVE_STATUSES.has(item.status))) {
     failures.push("ignored opportunities are not active");
   }

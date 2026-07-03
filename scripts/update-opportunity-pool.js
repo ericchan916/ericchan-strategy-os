@@ -169,7 +169,7 @@ function renderStatusItems(items) {
 - firstValidationAction: ${item.firstValidationAction}
 - recommendedAgent: ${item.recommendedAgent}
 - sourceReportDate: ${(item.sourceReportDates || [item.sourceReportDate]).join(", ")}
-- humanDecision: ${item.humanDecision}`
+- humanDecision: ${item.humanDecision}${item.reviewReason ? `\n- reviewReason: ${item.reviewReason}` : ""}${item.reviewNextAction ? `\n- reviewNextAction: ${item.reviewNextAction}` : ""}${item.notes ? `\n- notes: ${item.notes}` : ""}`
     )
     .join("\n\n");
 }

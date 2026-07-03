@@ -397,6 +397,54 @@ Do not move directly from Opportunity Pool to MVP spec. First screen each opport
 
 After filling the Human Review section, manually update `opportunity-pool.md` / `opportunity-pool.json` or ask Codex to apply the approved status and human-decision changes.
 
+## V0.1.11 Apply Opportunity Review
+
+V0.1.11 turns the filled review package into a safe write-back step. It reads `opportunities/reviews/YYYY-MM-DD-opportunity-review.md`, parses the `Human Review` block for each opportunity, and writes approved decisions back into:
+
+- `data/opportunities/opportunity-pool.json`
+- `opportunities/opportunity-pool.md`
+
+Run it after the review package has been filled:
+
+```bash
+npm run opportunities:apply-review
+```
+
+Or apply a specific date:
+
+```bash
+npm run opportunities:apply-review -- --date 2026-07-03
+```
+
+The script writes back only review-control fields:
+
+- `status`
+- `humanDecision`
+- `reviewReason`
+- `reviewNextAction`
+- `reviewInternalSystemImprovement`
+- `updatedAt`
+
+It keeps existing `notes`, `evidence`, `sourceUrls`, and `sourceReportDates`. It never creates new opportunities and never rewrites the original review Markdown.
+
+Safety rules:
+
+- Invalid `Suggested status` or `Suggested humanDecision` fails the whole run.
+- `status=validate` requires `humanDecision=accepted` or `watching`.
+- `status=rejected` requires `humanDecision=rejected`.
+- Internal system improvements cannot jump directly to `mvp-spec` or `building`.
+- If a review block is still the template placeholder, that opportunity is left unchanged.
+- If a review name does not match the pool, the script warns and skips it.
+
+This still does not generate an MVP spec. The point of V0.1.11 is to safely move human judgment into the Opportunity Pool so the next step can be chosen deliberately.
+
+After write-back, re-run:
+
+```bash
+npm run opportunities:validate
+npm run opportunities:list
+```
+
 ## Output Files
 
 Each run writes:
@@ -476,6 +524,7 @@ npm run opportunities:update -- --date YYYY-MM-DD # import opportunities for a s
 npm run opportunities:validate # validate Opportunity Pool schema and strategy gates
 npm run opportunities:list # list Opportunity Pool entries
 npm run opportunities:review # generate a manual Opportunity Pool screening package
+npm run opportunities:apply-review # write filled Human Review decisions back into the Opportunity Pool
 npm run clean        # remove generated report files, keep .gitkeep files
 npm test             # run local verification tests
 ```
