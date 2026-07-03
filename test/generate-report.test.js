@@ -52,6 +52,9 @@ test("mock report binds trends to EricChan projects and writes markdown/json", a
   assert.ok(result.report.trends.every((item) => item.sourceIds?.length || item.sourceUrls?.length || item.evidence));
   assert.ok(result.report.opportunities.every((item) => item.stageFit));
   assert.ok(result.report.recommendedActions.every((item) => item.stageFit));
+  assert.equal(result.report.humanFeedbackRequired, true);
+  assert.ok(result.report.opportunities.every((item) => item.humanFeedback?.decision === "pending"));
+  assert.ok(result.report.recommendedActions.every((item) => item.humanFeedback?.decision === "pending"));
   assert.equal(result.report.qualityChecklist.evidenceBacked, true);
   assert.equal(result.report.qualityChecklist.stageAppropriate, true);
   assert.equal(result.report.qualityChecklist.noPlaceholderAsTrend, true);
@@ -99,6 +102,7 @@ test("report quality validation catches missing strategic substance", () => {
     dataGaps: undefined,
     opportunities: [],
     recommendedActions: [{ action: "" }],
+    humanFeedbackRequired: undefined,
     qualityChecklist: {
       boundToProjects: false,
       hasExecutableAction: false,
@@ -116,6 +120,7 @@ test("report quality validation catches missing strategic substance", () => {
   assert.ok(weakResult.failures.includes("dataGaps exists"));
   assert.ok(weakResult.failures.includes("opportunities exists"));
   assert.ok(weakResult.failures.includes("recommendedActions has at least one executable action"));
+  assert.ok(weakResult.failures.includes("humanFeedbackRequired exists"));
   assert.ok(weakResult.failures.includes("qualityChecklist.boundToProjects is true"));
   assert.ok(weakResult.failures.includes("qualityChecklist.evidenceBacked is true"));
 });
@@ -152,6 +157,52 @@ test("strategic quality gate blocks premature now-stage build recommendations", 
 
   assert.equal(result.ok, false);
   assert.ok(result.failures.includes("premature build/deployment suggestions are not stageFit now"));
+});
+
+test("feedback quality gate requires pending feedback and limits report-regeneration actions", () => {
+  const report = createMockAnalysis({
+    date: "2026-06-30",
+    rawItems: [],
+    contextText: "iPortfolio XiaoChan OPC Codex Obsidian",
+    warnings: []
+  });
+
+  const result = validateReportQuality({
+    ...report,
+    humanFeedbackRequired: true,
+    opportunities: report.opportunities.map((item, index) => ({
+      ...item,
+      humanFeedback: index === 0 ? undefined : item.humanFeedback
+    })),
+    recommendedActions: [
+      {
+        action: "Generate another live report for agentic AI.",
+        owner: "GPT 5.5 Thinking",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: { decision: "pending", reason: "", followUp: "" }
+      },
+      {
+        action: "Generate another live report for coding models.",
+        owner: "GPT 5.5 Thinking",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: { decision: "pending", reason: "", followUp: "" }
+      },
+      {
+        action: "Request human feedback on the latest report.",
+        owner: "EricChan",
+        urgency: "today",
+        stageFit: "now",
+        humanFeedback: { decision: "accept", reason: "", followUp: "" }
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes("opportunities include pending humanFeedback"));
+  assert.ok(result.failures.includes("recommendedActions start with pending humanFeedback"));
+  assert.ok(result.failures.includes("generate another live report actions stay under one third"));
 });
 
 test("strategic quality gate blocks deployment-on-vercel wording", () => {

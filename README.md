@@ -112,6 +112,42 @@ V0.1.2 adds a strategic quality gate:
 
 `dataGaps` records source gaps such as manual placeholders, failed sources, unverified categories, or missing real data. It is the right place for China AI / OPC placeholders until they are validated.
 
+## V0.1.4 Human Feedback Loop
+
+V0.1.4 treats Stage 0.5 as graduated after live reports repeatedly pass quality gates. The next step is Stage 1A: automatic daily report plus human feedback loop.
+
+Stage 0.5 graduation means:
+
+- `mode` is `live`.
+- `warnings` are empty or explainable.
+- `npm run validate:report` passes.
+- Trends cite evidence and do not include placeholders.
+- Stage-fit prevents premature Dashboard, Vercel, deployment, push, or real multi-agent execution.
+- Human review finds the report useful enough to guide next actions.
+
+Stage 1A means:
+
+- Keep producing daily strategic reports.
+- Capture EricChan's feedback on accepted, watched, rejected, and completed suggestions.
+- Feed recurring feedback into `context/context.md` and `prompts/analysis-prompt.md`.
+- Prepare automation for daily generation, without building a Dashboard first.
+
+Dashboard is intentionally deferred because the core risk is not visualization. The current risk is whether the system learns EricChan's real judgment. A Dashboard before feedback would make weak recommendations look polished.
+
+Every report includes `humanFeedbackRequired: true`. Each opportunity and recommended action includes:
+
+```json
+"humanFeedback": {
+  "decision": "pending",
+  "reason": "",
+  "followUp": ""
+}
+```
+
+Allowed feedback decisions are `pending`, `accept`, `watch`, `reject`, and `done`.
+
+Use `templates/daily-feedback-template.md` after reviewing a report. Fill accepted suggestions, watched suggestions, rejected suggestions, actual actions, useful parts, noise, context updates, and prompt updates. For now this is manual by design; automatic Obsidian writing comes later.
+
 ## Output Files
 
 Each run writes:
@@ -169,8 +205,8 @@ npm test             # run local verification tests
 
 ## Stage 1 / Stage 2 Ideas
 
-Enter Stage 1 only after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, and pass `npm run validate:report`.
+Enter Stage 1A after 2-3 live reports are useful without manual rescue: they should bind trends to projects, cite evidence, avoid placeholder trends, mark premature build/deployment ideas as `later` or `not-yet`, pass `npm run validate:report`, and produce feedback worth recording.
 
-Stage 1 can add a small local Dashboard that reads `data/reports/*.json`, filters opportunities by status, and shows project impact history.
+Stage 1A should prepare automatic daily reports and human feedback capture. A small local Dashboard belongs after feedback patterns are stable.
 
 Stage 2 can add richer source ingestion, Obsidian export automation, recurring schedules, trend deduplication, and explicit feedback scoring across multiple days.

@@ -23,16 +23,20 @@ For each important trend, explain:
 - Which agent should handle it
 - Whether it should become an experiment
 
-Current stage: EricChan Strategy OS is in V0.1.1 / Stage 0.5. The current goal is report quality validation, not deployment or Dashboard construction.
+Current stage: EricChan Strategy OS has graduated Stage 0.5 and is preparing Stage 1A. Stage 1A is automatic daily report plus human feedback loop, not Dashboard construction.
 
-Prioritize recommendations that fit Stage 0.5:
+Prioritize recommendations that fit the next 7 days:
 
-- Generate 2-3 more live reports.
 - Fix context.
-- Fix prompt quality.
-- Fix source quality.
-- Run human strategic review.
-- Improve evidence and stage-fit validation.
+- Fill dataGaps.
+- Extract executable experiments.
+- Request human feedback.
+- Archive accepted/rejected suggestions in Obsidian.
+- Prepare automatic daily report.
+- Improve source quality.
+- Improve prompt quality when feedback shows repeated noise.
+
+Do not make "generate another live report" the default first action. Recommend a topic-specific report only when information is insufficient or a focused analysis is needed. No more than one third of recommendedActions should be report-generation actions.
 
 Do not prioritize these as immediate actions:
 
@@ -53,6 +57,17 @@ Use these enums:
 - `confidence`: high, medium, low
 - `stageFit`: now, later, not-yet, blocked
 - opportunity `status`: ignore, watch, test, build, archive
+- `humanFeedback.decision`: pending, accept, watch, reject, done
+
+Every opportunity and recommended action must include:
+
+```json
+"humanFeedback": {
+  "decision": "pending",
+  "reason": "",
+  "followUp": ""
+}
+```
 
 Return only JSON with this shape:
 
@@ -61,6 +76,7 @@ Return only JSON with this shape:
   "date": "YYYY-MM-DD",
   "generatedAt": "ISO timestamp",
   "mode": "live",
+  "humanFeedbackRequired": true,
   "sourcesUsed": [],
   "warnings": [],
   "dataGaps": [
@@ -116,7 +132,12 @@ Return only JSON with this shape:
       "recommendedAgent": "",
       "priority": "high",
       "status": "test",
-      "stageFit": "now"
+      "stageFit": "now",
+      "humanFeedback": {
+        "decision": "pending",
+        "reason": "",
+        "followUp": ""
+      }
     }
   ],
   "recommendedActions": [
@@ -124,7 +145,12 @@ Return only JSON with this shape:
       "action": "",
       "owner": "",
       "urgency": "today",
-      "stageFit": "now"
+      "stageFit": "now",
+      "humanFeedback": {
+        "decision": "pending",
+        "reason": "",
+        "followUp": ""
+      }
     }
   ],
   "agentDispatchSuggestions": [

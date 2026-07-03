@@ -14,6 +14,18 @@ const AGENTS = [
 ];
 
 const PREMATURE_NOW_PATTERN = /vercel.*deploy|deploy.*vercel|unified vercel|dashboard|multi[- ]?agent.*execution|cloud.*deploy|deploy.*cloud|wechat|telegram|微信|推送|云端架构|统一部署/i;
+const FEEDBACK_DECISIONS = new Set(["pending", "accept", "watch", "reject", "done"]);
+
+function pendingFeedback() {
+  return { decision: "pending", reason: "", followUp: "" };
+}
+
+function withPendingFeedback(item) {
+  return {
+    ...item,
+    humanFeedback: item.humanFeedback || pendingFeedback()
+  };
+}
 
 function readText(filePath, fallback = "") {
   try {
@@ -211,6 +223,7 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
     date,
     generatedAt: new Date().toISOString(),
     mode: "mock",
+    humanFeedbackRequired: true,
     sourcesUsed: [...new Set(sourceItems.map((item) => item.source))],
     warnings,
     dataGaps,
@@ -291,7 +304,8 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       recommendedAgent: "GPT 5.5 Thinking + Codex",
       priority: "high",
       status: "test",
-      stageFit: "now"
+      stageFit: "now",
+      humanFeedback: pendingFeedback()
     },
     {
       title: "小Chan Persona 记忆稳定性检查",
@@ -302,7 +316,8 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       recommendedAgent: "Codex",
       priority: "medium",
       status: "test",
-      stageFit: "later"
+      stageFit: "later",
+      humanFeedback: pendingFeedback()
     },
     {
       title: "iPortfolio 信息架构审美升级观察",
@@ -313,27 +328,31 @@ function createMockAnalysis({ date, rawItems, contextText, warnings }) {
       recommendedAgent: "OpenDesign",
       priority: "low",
       status: "watch",
-      stageFit: "later"
+      stageFit: "later",
+      humanFeedback: pendingFeedback()
     }
   ],
   recommendedActions: [
     {
-      action: "先跑通 3 天 mock/真实混合报告，观察建议是否持续绑定具体项目。",
+      action: "整理最新 live 报告并请求人工反馈，判断哪些建议接受、观察或拒绝。",
       owner: "EricChan",
       urgency: "today",
-      stageFit: "now"
+      stageFit: "now",
+      humanFeedback: pendingFeedback()
     },
     {
-      action: "把最高优先级 opportunity 手动转成 Obsidian 任务卡。",
+      action: "把人工接受的最高优先级 opportunity 手动转成 Obsidian 任务卡。",
       owner: "Obsidian + Claudian",
       urgency: "today",
-      stageFit: "now"
+      stageFit: "now",
+      humanFeedback: pendingFeedback()
     },
     {
       action: "只在报告质量稳定后再做 Dashboard。",
       owner: "GPT 5.5 Thinking",
       urgency: "watch",
-      stageFit: "later"
+      stageFit: "later",
+      humanFeedback: pendingFeedback()
     }
   ],
     agentDispatchSuggestions: [
@@ -394,6 +413,13 @@ function extractJson(text) {
     if (!match) throw new Error("LLM response did not contain JSON.");
     return JSON.parse(match[0]);
   }
+}
+
+function applyHumanFeedbackDefaults(report) {
+  report.humanFeedbackRequired = report.humanFeedbackRequired === undefined ? true : report.humanFeedbackRequired;
+  report.opportunities = (report.opportunities || []).map(withPendingFeedback);
+  report.recommendedActions = (report.recommendedActions || []).map(withPendingFeedback);
+  return report;
 }
 
 async function analyzeWithLlm({ rootDir, date, rawItems, dataGaps, contextText, promptText, warnings, mock }) {
@@ -503,13 +529,14 @@ ${opportunities
 - 推荐智能体：${item.recommendedAgent}
 - 优先级：${item.priority}
 - 状态：${item.status}
-- 阶段适配：${item.stageFit || ""}`
+- 阶段适配：${item.stageFit || ""}
+- 人工反馈：${item.humanFeedback?.decision || ""}`
   )
   .join("\n\n")}
 
 ## 6. 推荐下一步行动
 
-${bullet(actions.map((item) => `${item.action} 负责人：${item.owner}；紧急度：${item.urgency}；阶段适配：${item.stageFit || ""}`))}
+${bullet(actions.map((item) => `${item.action} 负责人：${item.owner}；紧急度：${item.urgency}；阶段适配：${item.stageFit || ""}；人工反馈：${item.humanFeedback?.decision || ""}`))}
 
 ## 7. 推荐智能体派发
 
@@ -553,6 +580,14 @@ function validateReportQuality(report) {
   const validStageFit = (item) => ["now", "later", "not-yet", "blocked"].includes(item?.stageFit);
   const textOf = (item) => [item?.title, item?.action, item?.suggestedExperiment, item?.whyItMatters].filter(Boolean).join(" ");
   const isPrematureNow = (item) => item?.stageFit === "now" && PREMATURE_NOW_PATTERN.test(textOf(item)) && !item.explicitOverrideReason;
+  const hasPendingFeedback = (item) =>
+    item?.humanFeedback?.decision === "pending" &&
+    typeof item.humanFeedback.reason === "string" &&
+    typeof item.humanFeedback.followUp === "string";
+  const hasValidFeedback = (item) => FEEDBACK_DECISIONS.has(item?.humanFeedback?.decision);
+  const reportGenerationActions = (report.recommendedActions || []).filter((item) =>
+    /generate (another |a |one more |new |live )*.*report|再生成.*报告|生成.*报告/i.test(item.action || "")
+  ).length;
 
   const checks = [
     ["trends exists", () => Array.isArray(report.trends) && report.trends.length > 0],
@@ -579,11 +614,19 @@ function validateReportQuality(report) {
         )
     ],
     ["opportunities include stageFit", () => (report.opportunities || []).every(validStageFit)],
+    ["opportunities include pending humanFeedback", () => (report.opportunities || []).every(hasPendingFeedback)],
     [
       "recommendedActions has at least one executable action",
       () => (report.recommendedActions || []).some((item) => typeof item.action === "string" && item.action.trim())
     ],
     ["recommendedActions include stageFit", () => (report.recommendedActions || []).every(validStageFit)],
+    ["recommendedActions start with pending humanFeedback", () => (report.recommendedActions || []).every(hasPendingFeedback)],
+    ["humanFeedback decisions are valid", () => [...(report.opportunities || []), ...(report.recommendedActions || [])].every(hasValidFeedback)],
+    ["humanFeedbackRequired exists", () => report.humanFeedbackRequired === true],
+    [
+      "generate another live report actions stay under one third",
+      () => !report.recommendedActions?.length || reportGenerationActions <= Math.floor(report.recommendedActions.length / 3)
+    ],
     [
       "high priority build opportunities are not blocked",
       () =>
@@ -634,6 +677,7 @@ async function generateReport({ rootDir = process.cwd(), mock = false, date = ge
   }
 
   if (!Array.isArray(report.dataGaps)) report.dataGaps = dataGaps;
+  applyHumanFeedbackDefaults(report);
 
   report.qualityValidation = validateReportQuality(report);
 
