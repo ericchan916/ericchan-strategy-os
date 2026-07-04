@@ -386,6 +386,220 @@ h2 {
   padding: 5px 12px;
 }
 
+/* ---------------- Opportunity chips / scores / add button (V0.3.10) ----------------
+   标签由旧版自由输入框改为可选 chips。
+   评分字段以中文 label + 数值的小 chip 呈现。
+   标题不清时显示弱提示，缺字段用中文空态（暂无备注 / 暂无下一步）。
+   ----------------------------------------------------------------- */
+
+.opportunity-title-warning {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.opportunity-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 6px 0 4px;
+}
+
+.opportunity-tag {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+.opportunity-tag--custom {
+  background: var(--bg-soft);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
+.opportunity-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 4px 0 0;
+}
+
+.opportunity-tag-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--ink-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.opportunity-tag-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.opportunity-tag-chip--selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-dark);
+}
+
+.opportunity-tags-fieldset {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px 8px;
+  margin: 0;
+}
+
+.opportunity-tags-fieldset legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+}
+
+.opportunity-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 4px 0;
+}
+
+.opportunity-score-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--ink-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.opportunity-score-key {
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.opportunity-score-value {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.opportunity-note-empty,
+.opportunity-next-empty {
+  color: var(--muted-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-style: italic;
+  margin: 4px 0 0;
+}
+
+.opportunity-next {
+  color: var(--ink-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12.5px;
+  margin: 4px 0 0;
+}
+
+.opportunity-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.add-opportunity-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--accent-dark);
+  cursor: pointer;
+  font: inherit;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12.5px;
+  padding: 5px 12px 5px 10px;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.add-opportunity-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-dark);
+}
+
+.add-opportunity-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(20, 86, 74, 0.18);
+}
+
+.add-opportunity-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.add-opportunity-icon {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.add-opportunity-container[hidden] {
+  display: none;
+}
+
+.add-opportunity-container {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+}
+
+.opportunity-add-form {
+  display: grid;
+  gap: 8px;
+}
+
+.opportunity-add-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.opportunity-add-head h3 {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color: var(--accent-dark);
+}
+
+.opportunity-source-urls {
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+  font-style: italic;
+}
+
 /* ---------------- Composer (sticky bottom) ---------------- */
 
 .composer {

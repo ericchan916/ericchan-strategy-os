@@ -65,6 +65,46 @@ const OPPORTUNITY_STATUS_LABELS = {
   rejected: "已拒绝"
 };
 
+// V0.3.10：机会类型英文枚举 → 中文标签
+const OPPORTUNITY_TYPE_LABELS = {
+  "new-project-opportunity": "新项目机会",
+  "current-project-improvement": "当前项目改进",
+  "legacy-learning-material": "旧项目学习材料",
+  "watch-only": "仅观察"
+};
+
+// V0.3.10：评分字段英文 → 中文标签
+const OPPORTUNITY_SCORE_LABELS = {
+  monetizationPotential: "变现潜力",
+  ericChanFit: "个人匹配度",
+  mvpSpeed: "MVP 速度",
+  aiLeverage: "AI 杠杆",
+  opcFit: "OPC 匹配度",
+  contentAssetPotential: "内容资产潜力",
+  longTermCompounding: "长期复利",
+  complexityRisk: "复杂度风险",
+  currentStageFit: "当前阶段匹配度"
+};
+
+// V0.3.10：预设标签 chips 白名单
+const PRESET_TAGS = [
+  "AI Agent",
+  "大模型应用",
+  "独立开发者",
+  "小型可变现",
+  "内容产品",
+  "自动化工作流",
+  "编程工具",
+  "前端视觉",
+  "个人 OS",
+  "OPC",
+  "需要调研",
+  "可快速验证",
+  "暂缓",
+  "高潜力",
+  "噪声较大"
+];
+
 // 生成稳定的 id：用时间戳 + 随机后缀（同题 push 时区分实例）。
 function makeHistoryId(prefix = "h") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -414,16 +454,27 @@ function statusLabel(status) {
 
 function normalizeOpportunityForUi(item) {
   const raw = item && typeof item === "object" ? item : {};
+  const type = OPPORTUNITY_TYPE_LABELS[raw.type] ? raw.type : (raw.type || "new-project-opportunity");
+  // V0.3.10：humanDecisionLabel 缺失时，根据 humanDecision 自动派生
+  let humanDecisionLabel = String(raw.humanDecisionLabel || "");
+  if (!humanDecisionLabel && raw.humanDecision) {
+    const labelMap = { pending: "待判断", accepted: "已确认", watching: "观察中", rejected: "已拒绝", done: "已完成" };
+    humanDecisionLabel = labelMap[raw.humanDecision] || "";
+  }
   return {
     id: String(raw.id || ""),
     opportunityName: String(raw.opportunityName || raw.title || "未命名机会"),
     status: String(raw.status || "inbox"),
     statusLabel: String(raw.statusLabel || statusLabel(raw.status)),
-    humanDecisionLabel: String(raw.humanDecisionLabel || ""),
+    type,
+    typeLabel: OPPORTUNITY_TYPE_LABELS[type] || "新项目机会",
+    humanDecisionLabel,
     notes: String(raw.notes || ""),
+    nextAction: typeof raw.nextAction === "string" ? raw.nextAction : "",
     tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
     updatedAt: raw.updatedAt ? String(raw.updatedAt) : "",
     sourceTrend: raw.sourceTrend ? String(raw.sourceTrend) : "",
+    source: raw.source ? String(raw.source) : "",
     scores: raw.scores && typeof raw.scores === "object" ? raw.scores : {}
   };
 }
@@ -445,6 +496,41 @@ function renderOpportunityStats(stats = {}) {
   </div>`;
 }
 
+function renderScoreChips(scores) {
+  if (!scores || typeof scores !== "object") return "";
+  const items = Object.entries(scores)
+    .filter(([key, value]) => OPPORTUNITY_SCORE_LABELS[key] && value != null && value !== "")
+    .map(([key, value]) => `<span class="opportunity-score-chip"><span class="opportunity-score-key">${escapeHtml(OPPORTUNITY_SCORE_LABELS[key])}</span><span class="opportunity-score-value">${escapeHtml(String(value))}</span></span>`)
+    .join("");
+  return items ? `<div class="opportunity-scores">${items}</div>` : "";
+}
+
+function renderTagChips(tags, { selectedAttr = "" } = {}) {
+  if (!Array.isArray(tags) || !tags.length) return "";
+  return tags
+    .filter((tag) => tag)
+    .map((tag) => {
+      const safe = escapeHtml(String(tag));
+      const cls = PRESET_TAGS.includes(tag) ? "opportunity-tag opportunity-tag--preset" : "opportunity-tag opportunity-tag--custom";
+      const attr = selectedAttr ? ` data-op-tag="${safe}"` : "";
+      return `<span class="${cls}"${attr}>${safe}</span>`;
+    })
+    .join("");
+}
+
+function renderPresetTagChips(selectedTags) {
+  const selected = new Set(Array.isArray(selectedTags) ? selectedTags : []);
+  return PRESET_TAGS
+    .map((tag) => {
+      const isSelected = selected.has(tag);
+      const cls = isSelected
+        ? "opportunity-tag-chip opportunity-tag-chip--selected"
+        : "opportunity-tag-chip";
+      return `<button type="button" class="${cls}" data-op-add-tag="${escapeHtml(tag)}" aria-pressed="${isSelected ? "true" : "false"}">${escapeHtml(tag)}</button>`;
+    })
+    .join("");
+}
+
 function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
   const list = Array.isArray(opportunities) ? opportunities.map(normalizeOpportunityForUi) : [];
   if (!list.length) return { statsHtml: renderOpportunityStats(stats), listHtml: "" };
@@ -453,27 +539,64 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
       const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
         .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === item.status ? " selected" : ""}>${escapeHtml(label)}</option>`)
         .join("");
-      const score = item.scores && item.scores.ericChanFit ? `匹配 ${escapeHtml(item.scores.ericChanFit)}/5` : "";
-      const tags = item.tags.length ? item.tags.join(", ") : "";
+      const typeOptions = Object.entries(OPPORTUNITY_TYPE_LABELS)
+        .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === item.type ? " selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("");
+      const isUnclearTitle = !item.opportunityName || item.opportunityName === "未命名机会";
+      const titleWarning = isUnclearTitle
+        ? `<p class="opportunity-title-warning">这个机会缺少清晰标题，建议补充名称。</p>`
+        : "";
+      const tagChips = renderTagChips(item.tags);
+      const scoreChips = renderScoreChips(item.scores);
+      const sourceLabelMap = {
+        "ask-mode": "来自 Ask Mode",
+        search: "来自搜索",
+        manual: "手动添加",
+        history: "历史机会"
+      };
+      const sourceLabel = sourceLabelMap[item.source] || "";
+      const noteLine = item.notes
+        ? `<p class="opportunity-note">${escapeHtml(item.notes)}</p>`
+        : `<p class="opportunity-note-empty">暂无备注</p>`;
+      const nextLine = item.nextAction
+        ? `<p class="opportunity-next">下一步：${escapeHtml(item.nextAction)}</p>`
+        : `<p class="opportunity-next-empty">暂无下一步</p>`;
+      const updatedLine = item.updatedAt
+        ? `<span>更新 ${escapeHtml(item.updatedAt.slice(0, 10))}</span>`
+        : "";
+      const sourceLine = sourceLabel ? `<span>${escapeHtml(sourceLabel)}</span>` : "";
       return `<article class="opportunity-item" data-opportunity-id="${escapeHtml(item.id)}">
         <div class="opportunity-item-head">
           <h3>${escapeHtml(item.opportunityName)}</h3>
           <span class="opportunity-badge">${escapeHtml(item.statusLabel)}</span>
         </div>
-        <p class="opportunity-meta">${escapeHtml([item.humanDecisionLabel, score, item.updatedAt ? `更新 ${item.updatedAt.slice(0, 10)}` : ""].filter(Boolean).join(" · "))}</p>
+        ${titleWarning}
+        <p class="opportunity-meta">${escapeHtml(item.typeLabel)}${item.humanDecisionLabel ? ` · ${escapeHtml(item.humanDecisionLabel)}` : ""}${sourceLine ? ` · ${sourceLine}` : ""}${updatedLine ? ` · ${updatedLine}` : ""}</p>
         ${item.sourceTrend ? `<p class="opportunity-source">${escapeHtml(item.sourceTrend)}</p>` : ""}
-        ${item.notes ? `<p class="opportunity-note">${escapeHtml(item.notes)}</p>` : ""}
-        <button type="button" class="link-button opportunity-edit" data-op-edit="${escapeHtml(item.id)}">编辑</button>
+        ${scoreChips}
+        ${tagChips ? `<div class="opportunity-tags">${tagChips}</div>` : ""}
+        ${noteLine}
+        ${nextLine}
+        <div class="opportunity-actions">
+          <button type="button" class="link-button opportunity-edit" data-op-edit="${escapeHtml(item.id)}">编辑</button>
+        </div>
         <form class="opportunity-form" data-op-form="${escapeHtml(item.id)}" hidden>
           <label>状态
             <select name="status" data-op-status="${escapeHtml(item.id)}">${statusOptions}</select>
           </label>
+          <label>类型
+            <select name="type" data-op-type="${escapeHtml(item.id)}">${typeOptions}</select>
+          </label>
           <label>备注
-            <textarea name="notes" data-op-notes="${escapeHtml(item.id)}" rows="3">${escapeHtml(item.notes)}</textarea>
+            <textarea name="notes" data-op-notes="${escapeHtml(item.id)}" rows="3" placeholder="暂无备注">${escapeHtml(item.notes)}</textarea>
           </label>
-          <label>标签
-            <input name="tags" data-op-tags="${escapeHtml(item.id)}" value="${escapeHtml(tags)}" />
+          <label>下一步
+            <input name="nextAction" data-op-next="${escapeHtml(item.id)}" value="${escapeHtml(item.nextAction)}" placeholder="暂无下一步" />
           </label>
+          <fieldset class="opportunity-tags-fieldset">
+            <legend>标签（点击切换）</legend>
+            <div class="opportunity-tag-chips" data-op-tags="${escapeHtml(item.id)}">${renderPresetTagChips(item.tags)}</div>
+          </fieldset>
           <div class="opportunity-form-actions">
             <button type="submit" class="mini-button">保存</button>
             <button type="button" class="link-button" data-op-cancel="${escapeHtml(item.id)}">取消</button>
@@ -483,6 +606,77 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
     })
     .join("");
   return { statsHtml: renderOpportunityStats(stats), listHtml };
+}
+
+// V0.3.10：从一次 Ask 回答构建"加入机会池"表单的 HTML
+function buildAddOpportunityFormMarkup({
+  question = "",
+  answer = "",
+  sourceUrls = [],
+  source = "ask-mode"
+} = {}) {
+  const safeQuestion = String(question || "").trim();
+  const safeAnswer = String(answer || "").trim();
+  // 摘要 = 截到最近的句子边界，不超过 300 字
+  function shortAnswer(text, max = 300) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (value.length <= max) return value;
+    const slice = value.slice(0, max);
+    const lastStop = Math.max(slice.lastIndexOf("。"), slice.lastIndexOf("."), slice.lastIndexOf("！"), slice.lastIndexOf("!"));
+    return lastStop > max * 0.5 ? `${slice.slice(0, lastStop + 1)}…` : `${slice}…`;
+  }
+  const summary = shortAnswer(safeAnswer, 300);
+  const defaultTitle = safeQuestion
+    ? safeQuestion.replace(/[？?！!。.,，、；;：:]+$/g, "").slice(0, 60)
+    : "";
+  const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === "validate" ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  const typeOptions = Object.entries(OPPORTUNITY_TYPE_LABELS)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === "new-project-opportunity" ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  const tagChips = renderPresetTagChips([]);
+  const sourceUrlList = Array.isArray(sourceUrls) && sourceUrls.length
+    ? `<ul class="opportunity-source-url-list" aria-label="已带入的参考来源">${sourceUrls.map((u) => {
+        const t = escapeHtml(String(u.title || "未命名来源"));
+        const s = escapeHtml(String(u.source || ""));
+        const url = escapeHtml(String(u.url || ""));
+        return `<li class="opportunity-source-url-item"><span class="opportunity-source-url-title">${t}</span>${s ? `<span class="opportunity-source-url-meta">${s}</span>` : ""}${url ? `<span class="opportunity-source-url-link">${url}</span>` : ""}</li>`;
+      }).join("")}</ul>`
+    : "";
+  const sourceUrlChips = Array.isArray(sourceUrls) && sourceUrls.length
+    ? `<div class="opportunity-source-urls">${escapeHtml(`已带入 ${sourceUrls.length} 条参考来源（仅保存标题/链接/域名）`)}${sourceUrlList}</div>`
+    : "";
+  const sourceBadge = source === "search"
+    ? `<span class="opportunity-source">来自搜索</span>`
+    : `<span class="opportunity-source">来自 Ask Mode</span>`;
+  return `<form class="opportunity-add-form" data-op-add-form>
+    <div class="opportunity-add-head">
+      <h3>加入机会池</h3>
+      ${sourceBadge}
+    </div>
+    <label>机会名称
+      <input name="title" data-op-add-title placeholder="请填写机会名称（必填）" value="${escapeHtml(defaultTitle)}" required maxlength="200" />
+    </label>
+    <label>状态
+      <select name="status" data-op-add-status>${statusOptions}</select>
+    </label>
+    <label>类型
+      <select name="type" data-op-add-type>${typeOptions}</select>
+    </label>
+    <label>备注（默认填入本次问题与回答摘要，可编辑）
+      <textarea name="note" data-op-add-note rows="4" maxlength="3000" placeholder="暂无备注">${escapeHtml(summary || safeQuestion || "")}</textarea>
+    </label>
+    <fieldset class="opportunity-tags-fieldset">
+      <legend>标签（点击切换）</legend>
+      <div class="opportunity-tag-chips" data-op-add-tags>${tagChips}</div>
+    </fieldset>
+    ${sourceUrlChips}
+    <div class="opportunity-form-actions">
+      <button type="submit" class="mini-button" data-op-add-submit>加入机会池</button>
+      <button type="button" class="link-button" data-op-add-cancel>取消</button>
+    </div>
+  </form>`;
 }
 
 function hideSearchProcess(node) {
@@ -552,6 +746,8 @@ function createApp(deps) {
   const opportunityList = nodes.opportunityList;
   const opportunityEmpty = nodes.opportunityEmpty;
   const opportunityStatus = nodes.opportunityStatus;
+  const addOpportunityButton = nodes.addOpportunityButton;
+  const addOpportunityContainer = nodes.addOpportunityContainer;
   const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
@@ -574,6 +770,8 @@ function createApp(deps) {
     selectedButton: null,
     currentAnswer: "",
     currentSource: "",
+    currentSearch: null,
+    currentQuestion: "",
     opportunities: []
   };
 
@@ -679,6 +877,14 @@ function createApp(deps) {
         saveOpportunity(form.getAttribute("data-op-form"));
       });
     }
+    // V0.3.10：标签 chip 点击切换
+    for (const chip of opportunityList.querySelectorAll("[data-op-tag]")) {
+      chip.addEventListener("click", () => {
+        const selected = chip.getAttribute("aria-pressed") === "true";
+        chip.setAttribute("aria-pressed", selected ? "false" : "true");
+        chip.classList.toggle("opportunity-tag-chip--selected", !selected);
+      });
+    }
   }
 
   function toggleOpportunityForm(id, open) {
@@ -687,12 +893,29 @@ function createApp(deps) {
     if (form) form.hidden = !open;
   }
 
+  function readSelectedTagsFromChips(container) {
+    if (!container || typeof container.querySelectorAll !== "function") return [];
+    const out = [];
+    for (const chip of container.querySelectorAll("[data-op-tag]")) {
+      if (chip.getAttribute("aria-pressed") === "true") {
+        out.push(chip.getAttribute("data-op-tag"));
+      }
+    }
+    return out;
+  }
+
   async function saveOpportunity(id) {
     if (!fetchImpl || !opportunityList) return { ok: false, reason: "fetch-unavailable" };
     const statusNode = opportunityList.querySelector(`[data-op-status="${cssEscape(id)}"]`);
     const notesNode = opportunityList.querySelector(`[data-op-notes="${cssEscape(id)}"]`);
-    const tagsNode = opportunityList.querySelector(`[data-op-tags="${cssEscape(id)}"]`);
+    const typeNode = opportunityList.querySelector(`[data-op-type="${cssEscape(id)}"]`);
+    const nextNode = opportunityList.querySelector(`[data-op-next="${cssEscape(id)}"]`);
+    const tagsContainer = opportunityList.querySelector(`[data-op-tags="${cssEscape(id)}"]`);
     const nextStatus = statusNode ? statusNode.value : "";
+    const nextType = typeNode ? typeNode.value : "";
+    const nextNote = notesNode ? notesNode.value : "";
+    const nextAction = nextNode ? nextNode.value : "";
+    const nextTags = readSelectedTagsFromChips(tagsContainer);
     if ((nextStatus === "archived" || nextStatus === "rejected") && !confirmImpl("确认要归档或忽略这个机会吗？")) {
       return { ok: false, reason: "cancelled" };
     }
@@ -702,8 +925,10 @@ function createApp(deps) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           status: nextStatus,
-          notes: notesNode ? notesNode.value : "",
-          tags: tagsNode ? tagsNode.value : ""
+          type: nextType,
+          notes: nextNote,
+          nextAction: nextAction,
+          tags: nextTags
         })
       });
       const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
@@ -757,14 +982,156 @@ function createApp(deps) {
     });
   }
 
-  function setCurrentAnswer(answer, source) {
+  function setCurrentAnswer(answer, source, meta = {}) {
     state.currentAnswer = typeof answer === "string" ? answer : "";
     state.currentSource = typeof source === "string" ? source : "";
+    if (meta && typeof meta === "object") {
+      if (typeof meta.question === "string") state.currentQuestion = meta.question;
+      if (meta.search) state.currentSearch = meta.search;
+    }
     if (copyButton) {
       const hasText = state.currentAnswer.trim().length > 0;
       copyButton.disabled = !hasText;
       copyButton.hidden = !hasText;
       copyButton.removeAttribute("data-state");
+    }
+    // V0.3.10：回答存在时显示"加入机会池"按钮
+    if (addOpportunityButton) {
+      const hasAnswer = state.currentAnswer.trim().length > 0;
+      addOpportunityButton.hidden = !hasAnswer;
+      addOpportunityButton.disabled = state.inFlight;
+    }
+    // 关闭之前的"加入机会池"弹层
+    if (!state.currentAnswer.trim()) {
+      closeAddOpportunityForm();
+    }
+  }
+
+  // V0.3.10：判断回答类型是否是"可能包含新项目 / 机会 / 开工包 / 趋势建议"
+  function isOpportunityLikeAnswer(text) {
+    const t = String(text || "");
+    if (!t) return false;
+    return /(开工包|项目体检|新项目|新机会|新方向|新工具|新流程|建议尝试|建议尝试做|可以做|做一个小|机会池|试试|先做|趋势|关注)/.test(t);
+  }
+
+  function openAddOpportunityForm() {
+    if (!addOpportunityContainer) return;
+    const isOpportunityLike = isOpportunityLikeAnswer(state.currentAnswer);
+    const labelText = isOpportunityLike ? "加入机会池" : "从本次回答创建机会";
+    const source = state.currentSearch && state.currentSearch.used ? "search" : "ask-mode";
+    const sourceUrls = state.currentSearch && Array.isArray(state.currentSearch.sources)
+      ? state.currentSearch.sources.slice(0, 5).map((s) => ({
+          title: String(s.title || "").slice(0, 200),
+          url: String(s.url || "").slice(0, 500),
+          source: String(s.source || "").slice(0, 80)
+        }))
+      : [];
+    const markup = buildAddOpportunityFormMarkup({
+      question: state.currentQuestion,
+      answer: state.currentAnswer,
+      sourceUrls,
+      source
+    }).replace("加入机会池", labelText);
+    addOpportunityContainer.innerHTML = markup;
+    addOpportunityContainer.hidden = false;
+    bindAddOpportunityForm();
+    if (addOpportunityContainer.scrollIntoView) {
+      addOpportunityContainer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  function closeAddOpportunityForm() {
+    if (!addOpportunityContainer) return;
+    addOpportunityContainer.innerHTML = "";
+    addOpportunityContainer.hidden = true;
+  }
+
+  function bindAddOpportunityForm() {
+    if (!addOpportunityContainer || typeof addOpportunityContainer.querySelectorAll !== "function") return;
+    for (const chip of addOpportunityContainer.querySelectorAll("[data-op-add-tag]")) {
+      chip.addEventListener("click", () => {
+        const selected = chip.getAttribute("aria-pressed") === "true";
+        chip.setAttribute("aria-pressed", selected ? "false" : "true");
+        chip.classList.toggle("opportunity-tag-chip--selected", !selected);
+      });
+    }
+    for (const btn of addOpportunityContainer.querySelectorAll("[data-op-add-cancel]")) {
+      btn.addEventListener("click", () => closeAddOpportunityForm());
+    }
+    const form = addOpportunityContainer.querySelector("[data-op-add-form]");
+    if (form) {
+      form.addEventListener("submit", (event) => {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        submitAddOpportunity();
+      });
+    }
+  }
+
+  function readAddFormPayload() {
+    if (!addOpportunityContainer) return null;
+    const titleEl = addOpportunityContainer.querySelector("[data-op-add-title]");
+    const statusEl = addOpportunityContainer.querySelector("[data-op-add-status]");
+    const typeEl = addOpportunityContainer.querySelector("[data-op-add-type]");
+    const noteEl = addOpportunityContainer.querySelector("[data-op-add-note]");
+    const tagsContainer = addOpportunityContainer.querySelector("[data-op-add-tags]");
+    const tags = tagsContainer ? readSelectedTagsFromChips(tagsContainer) : [];
+    return {
+      title: titleEl ? String(titleEl.value || "").trim() : "",
+      status: statusEl ? statusEl.value : "validate",
+      type: typeEl ? typeEl.value : "new-project-opportunity",
+      note: noteEl ? String(noteEl.value || "").trim() : "",
+      tags
+    };
+  }
+
+  async function submitAddOpportunity() {
+    if (!fetchImpl) {
+      setOpportunityStatus("无法连接机会池 API。", "error");
+      return { ok: false, reason: "fetch-unavailable" };
+    }
+    const payload = readAddFormPayload();
+    if (!payload) return { ok: false, reason: "form-missing" };
+    if (!payload.title) {
+      setOpportunityStatus("请填写机会名称。", "error");
+      return { ok: false, reason: "title-required" };
+    }
+    const source = state.currentSearch && state.currentSearch.used ? "search" : "ask-mode";
+    const sourceUrls = state.currentSearch && Array.isArray(state.currentSearch.sources)
+      ? state.currentSearch.sources.slice(0, 5).map((s) => ({
+          title: String(s.title || "").slice(0, 200),
+          url: String(s.url || "").slice(0, 500),
+          source: String(s.source || "").slice(0, 80)
+        }))
+      : [];
+    const body = {
+      title: payload.title,
+      status: payload.status,
+      type: payload.type,
+      tags: payload.tags,
+      note: payload.note,
+      source,
+      sourceQuestion: state.currentQuestion || "",
+      sourceAnswerSummary: state.currentAnswer.slice(0, 600),
+      sourceUrls
+    };
+    try {
+      const response = await fetchImpl("/api/opportunities", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const result = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
+      if (!response || !response.ok) {
+        throw new Error((result && result.error) || "加入机会池失败。");
+      }
+      applyOpportunityPanel(result);
+      const warning = result.warning;
+      setOpportunityStatus(warning ? `已加入，但${warning}` : "已加入机会池。");
+      closeAddOpportunityForm();
+      return { ok: true, warning };
+    } catch (error) {
+      setOpportunityStatus((error && error.message) || "加入机会池失败。", "error");
+      return { ok: false, reason: (error && error.message) || "unknown" };
     }
   }
 
@@ -867,7 +1234,10 @@ function createApp(deps) {
     if (search.warning) setGlobalStatus("searchFailed");
     else if (search.used) setGlobalStatus("searchSuccess");
     else setGlobalStatus("localAnswer");
-    setCurrentAnswer(entry.answer || "", entry.source || "local");
+    setCurrentAnswer(entry.answer || "", entry.source || "local", {
+      question: entry.question || "",
+      search
+    });
     state.inFlight = false;
     if (askButton) askButton.disabled = false;
     for (const btn of state.recommendedButtons) btn.disabled = false;
@@ -913,6 +1283,8 @@ function createApp(deps) {
       questionEcho.hidden = false;
       questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(value)}`;
     }
+    state.currentQuestion = value;
+    state.currentSearch = null;
     applySearchSources(null);
     applySearchProcess(null);
     setCurrentAnswer("", "");
@@ -932,15 +1304,17 @@ function createApp(deps) {
       // 前端兜底翻译：服务端 sanitize + translate 之后，再做一遍中文化。
       const rawAnswer = payload.answer || "";
       const translatedAnswer = translateInternalTermsClient(rawAnswer);
-      state.currentAnswer = translatedAnswer;
-      if (answerOutput) {
-        answerOutput.innerHTML = renderMarkdown(translatedAnswer);
-        answerOutput.hidden = false;
-      }
       const warning = payload.warning;
       const source = payload.source || "local";
       const search = payload.search || null;
       state.currentSource = source;
+      state.currentSearch = search;
+      // 用 setCurrentAnswer 触发"加入机会池"按钮显隐
+      setCurrentAnswer(translatedAnswer, source, { question: value, search });
+      if (answerOutput) {
+        answerOutput.innerHTML = renderMarkdown(translatedAnswer);
+        answerOutput.hidden = false;
+      }
       setStatus(statusFromSource(source, warning, search), warning || (search && search.warning) ? "error" : null);
       if (search && search.warning) setGlobalStatus("searchFailed");
       else if (search && search.used) setGlobalStatus("searchSuccess");
@@ -1041,6 +1415,12 @@ function createApp(deps) {
     }
     if (copyButton) {
       copyButton.addEventListener("click", handleCopy);
+    }
+    if (addOpportunityButton) {
+      addOpportunityButton.addEventListener("click", () => {
+        if (state.inFlight) return;
+        openAddOpportunityForm();
+      });
     }
     if (historyClearButton) {
       historyClearButton.addEventListener("click", () => {
@@ -1188,6 +1568,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const opportunityList = document.querySelector("#opportunityList");
   const opportunityEmpty = document.querySelector("#opportunityEmpty");
   const opportunityStatus = document.querySelector("#opportunityStatus");
+  const addOpportunityButton = document.querySelector("#addOpportunityButton");
+  const addOpportunityContainer = document.querySelector("#addOpportunityContainer");
 
   const app = createApp({
     nodes: {
@@ -1209,7 +1591,9 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       opportunityStats,
       opportunityList,
       opportunityEmpty,
-      opportunityStatus
+      opportunityStatus,
+      addOpportunityButton,
+      addOpportunityContainer
     }
   });
   app.mount();
@@ -1231,7 +1615,6 @@ module.exports = {
   buildClipboardPayload,
   handleCopyClick,
   buildLoadingMarkup,
-  WHEEL_SVG,
   translateInternalTermsClient,
   createApp,
   renderMarkdown,
@@ -1241,5 +1624,10 @@ module.exports = {
   renderSearchSources,
   renderSearchProcess,
   renderOpportunityPanel,
-  isSafeExternalUrl
+  isSafeExternalUrl,
+  // V0.3.10 机会池中文化 + chips + 一键加入
+  buildAddOpportunityFormMarkup,
+  OPPORTUNITY_TYPE_LABELS,
+  OPPORTUNITY_SCORE_LABELS,
+  PRESET_TAGS
 };

@@ -5,6 +5,7 @@ const path = require("node:path");
 const { getDateString } = require("./generate-report");
 const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
 const { searchWeb, toPublicSearchMeta, shouldUseWebSearch } = require("./search-client");
+const { buildOpportunityContextForPrompt } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
@@ -544,14 +545,11 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
     if (action) lines.push(`- firstAction: ${trimContext(action.action || "", 200)}`);
   }
   if (Array.isArray(context.opportunityPool && context.opportunityPool.opportunities)) {
-    const items = context.opportunityPool.opportunities
-      .slice(0, 5)
-      .map((item) => `- ${item.opportunityName || item.id || "未命名"}（${item.status || "未知"} / ${item.humanDecision || "pending"}）`)
-      .join("\n");
-    if (items) {
+    // V0.3.10：使用结构化中文摘要注入机会池上下文，优先：已确认 / 待验证 / 观察中 / 最近更新 / 高潜力。
+    const ctx = buildOpportunityContextForPrompt(context.opportunityPool.opportunities, { maxItems: 10 });
+    if (ctx) {
       lines.push("");
-      lines.push("【当前机会池（最多 5 条）】");
-      lines.push(items);
+      lines.push(ctx);
     }
   }
   if (context.report) {

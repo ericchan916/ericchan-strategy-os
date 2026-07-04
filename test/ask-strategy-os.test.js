@@ -639,3 +639,105 @@ test("start-ask-ui /api/ask never echoes the API key back", async () => {
     await closeAskUiServers(servers);
   }
 });
+
+// ============== V0.3.10 Ask Mode 上下文注入机会池 ==============
+
+test("buildLlmUserPrompt: 注入机会池摘要，使用中文 status / type", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      dailyCommand: null,
+      opportunityPool: {
+        opportunities: [
+          {
+            id: "1",
+            opportunityName: "短视频选题工具",
+            status: "validate",
+            type: "new-project-opportunity",
+            tags: ["高潜力", "可快速验证"],
+            notes: "用户认为适合做短视频选题工具验证。",
+            nextAction: "做一个最小页面或提示词流程。"
+          }
+        ]
+      },
+      report: null
+    },
+    type: "general-strategy-question",
+    question: "今天适合做什么？"
+  });
+  assert.ok(prompt.includes("短视频选题工具"), "prompt 应包含机会标题");
+  assert.ok(prompt.includes("待验证"), "prompt 应使用中文 status 标签");
+  assert.ok(prompt.includes("新项目机会"), "prompt 应使用中文 type 标签");
+  assert.ok(prompt.includes("高潜力"), "prompt 应包含 tags");
+  assert.ok(prompt.includes("用户认为适合做短视频选题工具验证"), "prompt 应包含 note");
+});
+
+test("buildLlmUserPrompt: archived / rejected 默认不注入机会池", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      opportunityPool: {
+        opportunities: [
+          { id: "1", opportunityName: "已归档A", status: "archived" },
+          { id: "2", opportunityName: "已拒绝B", status: "rejected" }
+        ]
+      }
+    },
+    type: "general-strategy-question",
+    question: "q"
+  });
+  assert.equal(prompt.includes("已归档A"), false, "archived 不应注入");
+  assert.equal(prompt.includes("已拒绝B"), false, "rejected 不应注入");
+});
+
+test("buildLlmUserPrompt: prompt 中不出现 raw JSON 字段名", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      opportunityPool: {
+        opportunities: [
+          {
+            id: "1",
+            opportunityName: "字段测试",
+            status: "validate",
+            type: "new-project-opportunity",
+            tags: ["a"],
+            notes: "n",
+            scores: { ericChanFit: 4 },
+            sourceUrls: [{ title: "t", url: "u", source: "s" }]
+          }
+        ]
+      }
+    },
+    type: "general-strategy-question",
+    question: "q"
+  });
+  for (const field of ["\"tags\":", "\"notes\":", "\"scores\":", "\"sourceUrls\":", "humanDecision:", "ericChanFit"]) {
+    assert.equal(prompt.includes(field), false, `prompt 不应出现 '${field}'`);
+  }
+});
+
+test("buildLlmUserPrompt: 用户编辑机会后，prompt 包含新 note", () => {
+  // 模拟用户编辑：第二次 build 时 notes 已被更新
+  const ctx = {
+    contextText: "",
+    opportunityPool: {
+      opportunities: [
+        {
+          id: "1",
+          opportunityName: "编辑测试",
+          status: "validate",
+          type: "new-project-opportunity",
+          tags: [],
+          notes: "更新后这是我重点关注的方向"
+        }
+      ]
+    }
+  };
+  const prompt = buildLlmUserPrompt({
+    context: ctx,
+    type: "general-strategy-question",
+    question: "今天适合做什么？"
+  });
+  assert.ok(prompt.includes("更新后这是我重点关注的方向"), "应包含用户最新编辑的备注");
+});

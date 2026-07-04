@@ -4,7 +4,11 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { askStrategyOsAsync } = require("./ask-strategy-os");
-const { loadOpportunityPool, updateOpportunity } = require("./opportunity-store");
+const {
+  loadOpportunityPool,
+  updateOpportunity,
+  addOpportunity
+} = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const DEFAULT_PORT = 5177;
@@ -101,6 +105,36 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, { opportunities: result.opportunities, stats: result.stats });
       } catch (error) {
         sendJson(res, 500, { error: String(error.message || "机会池读取失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+      }
+      return;
+    }
+
+    // V0.3.10：POST /api/opportunities - 从 Ask Mode / 搜索 / 手动 一键加入机会
+    // 安全约束：
+    //  - 只接受白名单字段（addOpportunity 内部过滤）
+    //  - 任何 filePath / jsonPath / markdownPath / rootDir / apiKey 都不被持久化
+    //  - sourceUrls 截到 5 条，只保留 title / url / source
+    //  - rawAnswer 不被持久化，只生成 sourceAnswerSummary
+    //  - 重复标题给出中文 warning
+    if (req.method === "POST" && url.pathname === "/api/opportunities") {
+      try {
+        const raw = JSON.parse((await readBody(req)) || "{}");
+        if (!raw || typeof raw !== "object") {
+          sendJson(res, 400, { error: "请求体格式不合法。" });
+          return;
+        }
+        const result = addOpportunity({ rootDir, input: raw });
+        const body = {
+          opportunity: result.opportunity,
+          opportunities: result.opportunities,
+          stats: result.stats
+        };
+        if (result.warning) body.warning = result.warning;
+        sendJson(res, 200, body);
+      } catch (error) {
+        const status = error.statusCode || 400;
+        const safeMessage = String(error.message || "机会新增失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        sendJson(res, status, { error: safeMessage });
       }
       return;
     }

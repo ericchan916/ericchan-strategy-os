@@ -938,6 +938,94 @@ V0.3.9 不改变默认不联网原则，也不把 Ask UI 做成复杂 Dashboard�
 - 搜索失败 fallback：显示“联网搜索失败，已本地回答”。
 - 回答正文仍是主内容；参考来源在回答后；搜索过程默认折叠；搜索质量只是一句辅助摘要；机会池作为侧边管理区。
 
+## V0.3.10 机会池中文化、标签体系与一键收录
+
+V0.3.10 不改后端搜索 provider / 不改 Ask Mode prompt / 不动 loading / 不动端口监听。它只做三件事：让机会池 UI 全中文、让标签变成可选 chips、让"问 Ask → 一键加入机会池"形成闭环，并且让用户编辑的备注 / 标签 / 状态会变成 AI 下一次回答的上下文。
+
+### 机会池 UI 全中文化
+
+- 状态 / 人类决策 / 类型 / 评分字段在 UI 上全部显示为中文，例如：
+  - 状态：`待处理` / `观察中` / `待验证` / `MVP 规格` / `构建中` / `已归档` / `已拒绝`
+  - 类型：`新项目机会` / `当前项目改进` / `旧项目学习材料` / `仅观察`
+  - 评分字段：`变现潜力` / `个人匹配度` / `MVP 速度` / `AI 杠杆` / `OPC 匹配度` / `内容资产潜力` / `长期复利` / `复杂度风险` / `当前阶段匹配度`
+- 底层 JSON 仍然保留英文枚举（`status: "validate"` 等），中文 label 只在 UI 渲染时映射；保存回盘时不会写中文 status / type。
+- 缺字段时显示中文空态，例如"暂无备注"、"暂无下一步"；不显示 `null` / `undefined` / 英文内部字段。
+- 标题不清（默认"未命名机会"）时显示弱提示："这个机会缺少清晰标题，建议补充名称。"但不会自动重写用户数据。
+
+### 机会项展示更清楚
+
+每个机会至少显示：
+
+1. 机会名称（h3）
+2. 中文状态徽标
+3. 中文类型 + 人类决策（如"新项目机会 · 已确认"）
+4. 来源（来自 Ask Mode / 来自搜索 / 手动添加 / 历史机会）
+5. 更新时间
+6. 评分 chips（仅显示非空字段）
+7. 标签 chips
+8. 备注 / 下一步（如有）
+9. 编辑按钮
+
+编辑表单新增"类型"下拉、"下一步"输入框、标签 chips 多选（点击切换）。
+
+### 标签改为可选 chips
+
+预设 15 个产品标签：
+
+```
+AI Agent / 大模型应用 / 独立开发者 / 小型可变现 / 内容产品 / 自动化工作流 /
+编程工具 / 前端视觉 / 个人 OS / OPC / 需要调研 / 可快速验证 / 暂缓 / 高潜力 / 噪声较大
+```
+
+- 编辑表单提供 chips 点击切换；不需要手打逗号字符串。
+- 已选标签高亮（深墨绿底 + 白字）。
+- 用户已有的自定义标签（不在 15 个预设里）会被保留，并显示为虚线边 chip 区分。
+- 标签保存为数组，存到 `opportunity-pool.json` 的 `tags` 字段。
+
+### 备注、标签、状态进入 Ask Mode 上下文
+
+- 新增 `buildOpportunityContextForPrompt(opportunities, { maxItems=10 })`，输出结构化中文摘要（不是 raw JSON）。
+- 注入规则：
+  - 默认最多 10 条；按优先级排序：已确认 > 待验证 > 观察中；带"高潜力" / "可快速验证"标签加分；最近更新加分。
+  - 默认不注入 `archived` / `rejected` / `ignore`（除非显式 `includeArchived=true`）。
+  - 缺失字段用中文空态（"暂无备注" / "暂无标签" / "暂无下一步"）而不是 null/undefined。
+  - 输出不含 raw JSON 字段名（如 `"tags":` / `"scores":` / `humanDecision:`）。
+- 每次 Ask 请求的 user prompt 都会带上当前机会池的中文摘要（`buildLlmUserPrompt` 内部使用）。
+- 用户编辑机会的备注 / 标签 / 状态后，**下一次**提问会自动反映新内容（因为读盘每次都重读 `opportunity-pool.json`）。
+
+### 一键加入机会池
+
+回答区右上角新增"加入机会池"按钮（与复制按钮并排，但样式区分）。点击后展开一个轻量内联表单，字段包括：
+
+- 机会名称（必填，预填入问题摘要前 60 字）
+- 状态（默认 `待验证`）
+- 类型（默认 `新项目机会`）
+- 备注（默认填入问题 + 回答摘要 ≤ 300 字，可编辑）
+- 标签（chips 多选）
+- 来源（自动判断：`ask-mode` 或 `search`）
+- 如果本次回答带 search sources，会显示"已带入 N 条参考来源（仅保存标题 / 链接 / 域名）"
+
+如果回答内容含有 `开工包 / 项目体检 / 新项目 / 新机会 / 趋势 / 建议尝试 / 试试` 等关键词，按钮文案为"加入机会池"；否则更保守地写"从本次回答创建机会"。
+
+### POST /api/opportunities 安全约束
+
+- 只接受白名单字段：`title` / `status` / `type` / `tags` / `note` / `nextAction` / `humanDecision` / `source` / `sourceQuestion` / `sourceAnswerSummary` / `sourceUrls` / `scores`。
+- `filePath` / `jsonPath` / `markdownPath` / `rootDir` 都不会被持久化（即使 body 注入也无效）。
+- 任何 `apiKey` / `STRATEGY_OS_LLM_API_KEY` / `LLM_API_KEY` / `sk-` 形式的 Key 都不会被持久化。
+- `rawAnswer` / `rawResponse` 不持久化；如需保留回答片段，只存 `sourceAnswerSummary`（≤ 600 字）。
+- `sourceUrls` 截断到 5 条，每条只保留 `title` / `url` / `source`。
+- `note` 截断到 3000 字。
+- `title` 缺失时返回 400 + 中文错误："请填写机会名称。"
+- 重复标题给出 `warning: "已存在同名机会，建议编辑已有条目而不是重复添加。"`
+
+### 不动的部分
+
+- 不修改 `scripts/search-client.js` / `scripts/search-planner.js` / `scripts/llm-client.js` / `prompts/ask-mode-system-prompt.md`。
+- 不修改 Bocha / Tavily provider。
+- 不修改 `scripts/start-ask-ui.js` 的双 loopback 监听（127.0.0.1 + ::1）。
+- 不修改 loading 动画（V0.3.4-hotfix-3 深色卡片 + 仓鼠跑轮 / 后续切换的 3D 盒子任一版本都保留）。
+- 默认不联网原则不变；"本次联网搜索"checkbox 仍默认关闭。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

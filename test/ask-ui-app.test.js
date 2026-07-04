@@ -17,7 +17,11 @@ const {
   handleCopyClick,
   renderSearchSources,
   renderSearchProcess,
-  renderOpportunityPanel
+  renderOpportunityPanel,
+  buildAddOpportunityFormMarkup,
+  PRESET_TAGS,
+  OPPORTUNITY_TYPE_LABELS,
+  OPPORTUNITY_SCORE_LABELS
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -83,6 +87,26 @@ function makeFakeDocument() {
     },
     querySelector() { return null; }
   };
+}
+
+// node --test 在每个 test 里可能拿不到全局 fetch。用 node:http 直接发请求更稳。
+const http2 = require("node:http");
+function httpRequest({ port, method = "GET", path = "/", body = null, host = "127.0.0.1" } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http2.request({ host, port, path, method, headers: { "content-type": "application/json" } }, (res) => {
+      let chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* keep null */ }
+        resolve({ status: res.statusCode, json, text });
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
+    req.end();
+  });
 }
 
 test("validateSubmit: empty value returns ok=false with Chinese hint", () => {
@@ -189,6 +213,7 @@ test("applyQuestionToComposer does not call /api/ask (no auto-submit)", () => {
 
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 
 const ROOT = path.join(__dirname, "..");
 const indexHtml = fs.readFileSync(path.join(ROOT, "public", "ask-ui", "index.html"), "utf8");
@@ -1211,4 +1236,358 @@ test("restoreHistoryItem: 不调用 fetch（点击历史项不重新请求）", 
   assert.equal(nodes.searchProcess.hidden, false, "历史恢复应恢复搜索过程");
   assert.ok(nodes.searchProcess.innerHTML.includes("搜索过程"));
   assert.ok(nodes.searchProcess.innerHTML.includes("Anthropic AI news"));
+});
+
+// ============== V0.3.10 机会池中文化 / chips / 一键加入 ==============
+
+test("OPPORTUNITY_TYPE_LABELS 覆盖常见英文 type", () => {
+  assert.equal(OPPORTUNITY_TYPE_LABELS["new-project-opportunity"], "新项目机会");
+  assert.equal(OPPORTUNITY_TYPE_LABELS["current-project-improvement"], "当前项目改进");
+  assert.equal(OPPORTUNITY_TYPE_LABELS["legacy-learning-material"], "旧项目学习材料");
+  assert.equal(OPPORTUNITY_TYPE_LABELS["watch-only"], "仅观察");
+});
+
+test("OPPORTUNITY_SCORE_LABELS 覆盖常见英文 score 字段", () => {
+  assert.equal(OPPORTUNITY_SCORE_LABELS.monetizationPotential, "变现潜力");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.ericChanFit, "个人匹配度");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.mvpSpeed, "MVP 速度");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.aiLeverage, "AI 杠杆");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.opcFit, "OPC 匹配度");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.contentAssetPotential, "内容资产潜力");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.complexityRisk, "复杂度风险");
+  assert.equal(OPPORTUNITY_SCORE_LABELS.currentStageFit, "当前阶段匹配度");
+});
+
+test("PRESET_TAGS 包含必填产品标签", () => {
+  for (const tag of ["AI Agent", "大模型应用", "独立开发者", "OPC", "高潜力", "可快速验证"]) {
+    assert.ok(PRESET_TAGS.includes(tag), `PRESET_TAGS 应包含 '${tag}'`);
+  }
+});
+
+test("renderOpportunityPanel: 状态 / 类型 / score 字段全部用中文 label", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "opp-1",
+        opportunityName: "短视频选题工具",
+        status: "validate",
+        humanDecision: "accepted",
+        type: "new-project-opportunity",
+        tags: ["高潜力"],
+        notes: "用户认为适合做短视频选题工具。",
+        nextAction: "做一个最小页面。",
+        sourceTrend: "tr-1",
+        scores: { ericChanFit: 4, monetizationPotential: 3 },
+        updatedAt: "2026-07-04T00:00:00.000Z"
+      }
+    ],
+    stats: { total: 1, validate: 1 }
+  });
+  // 关键中文 label 必须出现
+  assert.ok(listHtml.includes("待验证"), "状态应显示'待验证'");
+  assert.ok(listHtml.includes("已确认"), "humanDecision 应显示'已确认'");
+  assert.ok(listHtml.includes("个人匹配度"), "score 字段应使用中文 label");
+  assert.ok(listHtml.includes("变现潜力"), "score 字段应使用中文 label");
+  assert.ok(listHtml.includes("高潜力"), "标签应原样显示");
+  // 可见 UI 文本不应出现常见英文内部字段。
+  // 注意：表单 <option value="..."> 会保留英文 enum 作为提交值，但 <option> 标签文字必须是中文。
+  // 用一个简化的"可见文本"视图：把 <option value=...> 标签替换为只保留显示文本
+  const visibleText = listHtml.replace(/<option[^>]*value="[^"]+"[^>]*>([^<]+)<\/option>/g, "$1");
+  // 不应出现常见英文内部字段
+  for (const field of ["new-project-opportunity", "humanDecision", "monetizationPotential", "ericChanFit"]) {
+    assert.equal(visibleText.includes(field), false, `机会池 UI 可见文本不应出现英文内部字段 '${field}'`);
+  }
+});
+
+test("renderOpportunityPanel: 缺字段用中文空态，不显示 null/undefined", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [{ id: "opp-x", opportunityName: "无名", status: "validate" }],
+    stats: { total: 1 }
+  });
+  assert.ok(/暂无|没有下一步|暂无备注/.test(listHtml), "缺字段应有中文空态");
+  assert.equal(/null|undefined/.test(listHtml), false, "不应出现 null/undefined");
+});
+
+test("renderOpportunityPanel: 标题不明时显示弱提示", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [{ id: "opp-y", opportunityName: "未命名机会", status: "inbox" }],
+    stats: { total: 1 }
+  });
+  assert.ok(/缺少清晰标题|建议补充名称/.test(listHtml), "标题不清时应显示弱提示");
+});
+
+test("renderOpportunityPanel: 渲染标签为 chips (而非逗号字符串)", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      { id: "1", opportunityName: "A", status: "validate", tags: ["高潜力", "可快速验证"] }
+    ],
+    stats: { total: 1 }
+  });
+  // 标签应作为独立 chip 元素
+  assert.ok(/class="[^"]*opportunity-tag[^"]*"/.test(listHtml), "标签应渲染成 chip 元素");
+  // 编辑表单里的标签 chips 也应有标记
+  assert.ok(/data-op-tag/.test(listHtml), "编辑表单应提供 chips 切换标记");
+});
+
+test("buildAddOpportunityFormMarkup: 默认 status=validate, type=new-project-opportunity, 标签 chips", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "适合做短视频选题工具？",
+    answer: "看起来不错"
+  });
+  assert.ok(html.includes("待验证"), "应显示'待验证'默认值");
+  assert.ok(html.includes("新项目机会"), "应显示'新项目机会'默认值");
+  assert.ok(/data-op-add-tag/.test(html), "应包含标签 chip 标记");
+  // 标签默认应带预设选项
+  assert.ok(/AI Agent/.test(html), "应包含 AI Agent 预设标签");
+  assert.ok(/高潜力/.test(html), "应包含高潜力预设标签");
+  // 备注默认应包含问题摘要（而非 raw 全文）
+  assert.ok(html.includes("适合做短视频选题工具"), "应包含问题摘要");
+});
+
+test("buildAddOpportunityFormMarkup: 标题不明时给出占位提示", () => {
+  const html = buildAddOpportunityFormMarkup({ question: "q", answer: "" });
+  assert.ok(/请填写|未命名|占位/.test(html), "标题为空时应给占位提示");
+});
+
+test("buildAddOpportunityFormMarkup: sourceUrls 可选注入", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "a",
+    sourceUrls: [
+      { title: "T1", url: "https://e.com/1", source: "e.com" }
+    ]
+  });
+  assert.ok(html.includes("T1"), "应包含来源标题");
+});
+
+// ============== V0.3.10 HTML / CSS / app.js 静态断言 ==============
+
+test("HTML 顶部状态条 #globalStatusText 默认文案包含'默认不联网'", () => {
+  assert.ok(indexHtml.includes('id="globalStatusText"'));
+  assert.ok(indexHtml.includes("默认不联网"));
+});
+
+test("HTML 含'加入机会池'按钮节点（#addOpportunityButton 或类似）", () => {
+  const hasAdd =
+    /id="addOpportunityButton"/.test(indexHtml) ||
+    /id="addOpportunity"/.test(indexHtml) ||
+    /加入机会池/.test(indexHtml);
+  assert.ok(hasAdd, "应存在'加入机会池'按钮");
+});
+
+test("HTML 机会池区域含 #opportunityList / #opportunityStats", () => {
+  assert.ok(indexHtml.includes('id="opportunityList"'));
+  assert.ok(indexHtml.includes('id="opportunityStats"'));
+});
+
+test("CSS 含标签 chips 样式（.opportunity-tag 或类似）", () => {
+  const hasChip =
+    /\.opportunity-tag\s*\{[\s\S]{0,400}?\}/i.test(stylesCss) ||
+    /\.opportunity-tag\s*[\{\.]/i.test(stylesCss);
+  assert.ok(hasChip, "缺少标签 chip 样式");
+});
+
+test("CSS 含'加入机会池'按钮样式（.add-opportunity-button / .opportunity-add）", () => {
+  const hasAdd =
+    /\.add-opportunity-button[\s\S]{0,400}?\{/i.test(stylesCss) ||
+    /\.opportunity-add[\s\S]{0,400}?\{/i.test(stylesCss);
+  assert.ok(hasAdd, "缺少加入机会池按钮样式");
+});
+
+test("app.js: 暴露 PRESET_TAGS / OPPORTUNITY_TYPE_LABELS / OPPORTUNITY_SCORE_LABELS", () => {
+  assert.ok(appJsText.includes("PRESET_TAGS"), "app.js 应暴露 PRESET_TAGS");
+  assert.ok(appJsText.includes("OPPORTUNITY_TYPE_LABELS"), "app.js 应暴露 OPPORTUNITY_TYPE_LABELS");
+  assert.ok(appJsText.includes("OPPORTUNITY_SCORE_LABELS"), "app.js 应暴露 OPPORTUNITY_SCORE_LABELS");
+});
+
+test("app.js: buildAddOpportunityFormMarkup 纯函数已实现", () => {
+  assert.ok(/function buildAddOpportunityFormMarkup/.test(appJsText), "缺少 buildAddOpportunityFormMarkup 实现");
+});
+
+test("app.js: POST /api/opportunities 客户端调用存在", () => {
+  assert.ok(/\/api\/opportunities/.test(appJsText), "应存在 /api/opportunities 调用");
+  assert.ok(/method:\s*['"]POST['"]/.test(appJsText), "应使用 POST 方法");
+});
+
+test("app.js: 机会项 UI 不应原样输出常见英文 score 字段名", () => {
+  // 检查 .opportunity-score 渲染时使用了中文 label；用关键词 pattern 验证。
+  assert.ok(/OPPORTUNITY_SCORE_LABELS\[/.test(appJsText), "score 字段应通过中文 label 字典渲染");
+});
+
+// ============== V0.3.10 POST /api/opportunities 集成测试 ==============
+
+test("startAskUiServer: POST /api/opportunities 接受最小 body 并返回新增项", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api-"));
+  const server = await startAskUiServer({ rootDir, port: 5291, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({
+      port: 5291,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "测试新增机会",
+        status: "validate",
+        type: "new-project-opportunity",
+        tags: ["高潜力", "可快速验证"],
+        note: "用户备注：适合做工具验证。",
+        source: "ask-mode"
+      }
+    });
+    assert.equal(status, 200);
+    assert.ok(json.opportunity, "响应应包含 opportunity");
+    assert.equal(json.opportunity.opportunityName, "测试新增机会");
+    assert.equal(json.opportunity.status, "validate");
+    assert.deepEqual(json.opportunity.tags, ["高潜力", "可快速验证"]);
+    assert.equal(json.opportunity.notes, "用户备注：适合做工具验证。");
+    assert.ok(Array.isArray(json.opportunities) && json.opportunities.length === 1);
+    assert.ok(json.stats && typeof json.stats.total === "number");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST 缺失 title 返回 400 + 中文错误", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api2-"));
+  const server = await startAskUiServer({ rootDir, port: 5292, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({
+      port: 5292,
+      method: "POST",
+      path: "/api/opportunities",
+      body: { note: "no title" }
+    });
+    assert.equal(status, 400);
+    assert.ok(json.error && /标题|名称/.test(json.error), "应返回中文错误");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST 不持久化 filePath / API Key 等非白名单字段", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api3-"));
+  const server = await startAskUiServer({ rootDir, port: 5293, host: "127.0.0.1" });
+  try {
+    const { status } = await httpRequest({
+      port: 5293,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "白名单测试",
+        filePath: "/etc/passwd",
+        apiKey: "sk-12345",
+        STRATEGY_OS_LLM_API_KEY: "sk-real",
+        rawAnswer: "完整 3000 字回答，不应保存"
+      }
+    });
+    assert.equal(status, 200);
+    // 重新读盘
+    const jsonPath = path.join(rootDir, "data", "opportunities", "opportunity-pool.json");
+    const saved = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+    const json = JSON.stringify(saved.opportunities[0]);
+    assert.equal(json.includes("filePath"), false);
+    assert.equal(json.includes("sk-12345"), false);
+    assert.equal(json.includes("sk-real"), false);
+    assert.equal(json.includes("rawAnswer"), false);
+    assert.equal(json.includes("完整 3000 字"), false);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST sourceUrls 最多 5 条", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api4-"));
+  const server = await startAskUiServer({ rootDir, port: 5294, host: "127.0.0.1" });
+  try {
+    const sourceUrls = Array.from({ length: 8 }, (_, i) => ({
+      title: `T${i + 1}`,
+      url: `https://e.com/${i + 1}`,
+      source: "e.com"
+    }));
+    const { status, json } = await httpRequest({
+      port: 5294,
+      method: "POST",
+      path: "/api/opportunities",
+      body: { title: "sourceUrls 测试", sourceUrls }
+    });
+    assert.equal(status, 200);
+    assert.equal(json.opportunity.sourceUrls.length, 5, "sourceUrls 应限制为 5 条");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST 不允许 body 控制路径 (filePath/jsonPath/markdownPath 等)", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api5-"));
+  const server = await startAskUiServer({ rootDir, port: 5295, host: "127.0.0.1" });
+  try {
+    const { status } = await httpRequest({
+      port: 5295,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "路径注入测试",
+        jsonPath: "../../../etc/passwd",
+        markdownPath: "../../../tmp/x.md",
+        rootDir: "/"
+      }
+    });
+    assert.equal(status, 200);
+    // 应写到 rootDir/data/opportunities/opportunity-pool.json
+    const jsonPath = path.join(rootDir, "data", "opportunities", "opportunity-pool.json");
+    assert.ok(fs.existsSync(jsonPath), "应写到 rootDir/data 下");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST 重复标题给出 warning 字段", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api6-"));
+  const server = await startAskUiServer({ rootDir, port: 5296, host: "127.0.0.1" });
+  try {
+    await httpRequest({ port: 5296, method: "POST", path: "/api/opportunities", body: { title: "同名机会" } });
+    const { json: p2 } = await httpRequest({ port: 5296, method: "POST", path: "/api/opportunities", body: { title: "同名机会" } });
+    assert.ok(p2.warning && /重复|同名|已存在/.test(p2.warning), "应返回重复警告");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: GET /api/opportunities 不回归", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api7-"));
+  const server = await startAskUiServer({ rootDir, port: 5297, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({ port: 5297, method: "GET", path: "/api/opportunities" });
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(json.opportunities));
+    assert.ok(json.stats);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: PATCH /api/opportunities/:id 不回归", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api8-"));
+  const server = await startAskUiServer({ rootDir, port: 5298, host: "127.0.0.1" });
+  try {
+    const { json: created } = await httpRequest({ port: 5298, method: "POST", path: "/api/opportunities", body: { title: "PATCH 测试" } });
+    const id = created.opportunity.id;
+    const { status, json: p2 } = await httpRequest({
+      port: 5298,
+      method: "PATCH",
+      path: `/api/opportunities/${encodeURIComponent(id)}`,
+      body: { status: "watch", notes: "new" }
+    });
+    assert.equal(status, 200);
+    assert.equal(p2.opportunity.status, "watch");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
 });
