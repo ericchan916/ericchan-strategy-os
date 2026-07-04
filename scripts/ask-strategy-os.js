@@ -512,6 +512,244 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
   };
 }
 
+// V0.3.11：从机会卡生成"开工包"
+// 输入：opportunity（normalize 后的对象）
+// 输出：{ answer, source, warning }
+//  - 使用现有 LLM 客户端
+//  - 不联网（默认）
+//  - 不调用真实 Codex / WorkBuddy / MiniMax
+//  - 失败时回退到本地"保守开工包"模板，仍能给出结构化建议
+async function generateKickoffPackageForOpportunity({ opportunity, env = process.env, deps = {} } = {}) {
+  if (!opportunity || typeof opportunity !== "object") {
+    const error = new Error("机会数据不完整。");
+    error.statusCode = 400;
+    throw error;
+  }
+  const name = opportunity.displayTitle || opportunity.opportunityName || "未命名机会";
+  const oneLine = String(opportunity.oneLineSummary || "").trim();
+  const note = String(opportunity.notes || opportunity.note || "").trim();
+  const next = String(opportunity.nextAction || "").trim();
+  const tags = Array.isArray(opportunity.tags) ? opportunity.tags.filter(Boolean) : [];
+  const sourceQuestion = String(opportunity.sourceQuestion || "").trim();
+  const sourceUrls = Array.isArray(opportunity.sourceUrls) ? opportunity.sourceUrls.slice(0, 5) : [];
+
+  // 信息不足时给保守版开工包
+  const isSparse = !oneLine && !note && !next && tags.length === 0;
+  if (isSparse) {
+    return {
+      answer: buildSparseKickoff({ name, sourceQuestion }),
+      source: "local",
+      warning: "当前机会信息不足，以下是保守版开工包，建议先补充备注或标签。",
+      opportunity
+    };
+  }
+
+  const llmConfig = readConfig(env);
+  const llmEnabled = isConfigured(llmConfig);
+  if (!llmEnabled) {
+    return {
+      answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }),
+      source: "local",
+      warning: null,
+      opportunity
+    };
+  }
+  try {
+    const userPrompt = buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls });
+    const answer = await callChatCompletion({
+      config: llmConfig,
+      systemPrompt: readKickoffSystemPrompt(),
+      userPrompt,
+      fetchImpl: deps.fetch,
+      abortImpl: deps.AbortController
+    });
+    if (answer) {
+      return { answer, source: "llm", warning: null, opportunity };
+    }
+  } catch (error) {
+    logLlmError(error);
+  }
+  return {
+    answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }),
+    source: "local-fallback",
+    warning: "LLM 动态开工包暂时不可用，已回退到本地规则版开工包。",
+    opportunity
+  };
+}
+
+function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
+  // V0.3.11 安全：脱敏所有可能含 API Key 的字段
+  const sanitize = (s) => String(s || "")
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
+    .replace(/STRATEGY_OS_LLM_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]")
+    .replace(/api[_-]?key\s*[=:]\s*\S+/gi, "[已脱敏]");
+  const safeName = sanitize(name);
+  const safeOneLine = sanitize(oneLine);
+  const safeNote = sanitize(note);
+  const safeNext = sanitize(next);
+  const safeQuestion = sanitize(sourceQuestion);
+  const lines = [];
+  lines.push("请基于下面这个机会卡数据，生成一份结构化开工包。");
+  lines.push("");
+  lines.push("【机会卡数据】");
+  lines.push(`- 机会名称：${safeName}`);
+  if (oneLine) lines.push(`- 一句话说明：${safeOneLine}`);
+  if (note) lines.push(`- 备注：${safeNote}`);
+  if (next) lines.push(`- 下一步：${safeNext}`);
+  if (tags.length) lines.push(`- 标签：${tags.join("、")}`);
+  if (sourceQuestion) lines.push(`- 原始问题：${safeQuestion}`);
+  if (sourceUrls.length) {
+    lines.push(`- 参考来源（最多 5 条）：`);
+    for (const u of sourceUrls) {
+      lines.push(`  - ${sanitize(u.title || "(无标题)")}${u.source ? `（${sanitize(u.source)}）` : ""}${u.url ? ` ${sanitize(u.url)}` : ""}`);
+    }
+  }
+  lines.push("");
+  lines.push("【开工包结构 - 请按这些小节输出】");
+  lines.push("1. 项目一句话");
+  lines.push("2. 为什么值得做");
+  lines.push("3. 目标用户");
+  lines.push("4. 最小 MVP");
+  lines.push("5. 第一版功能边界");
+  lines.push("6. 不要做什么");
+  lines.push("7. 推荐执行工具");
+  lines.push("8. 第一轮验证路径");
+  lines.push("9. 风险与卡点");
+  lines.push("10. 下一步提示词草稿");
+  lines.push("");
+  lines.push("要求：");
+  lines.push("- 内容必须基于上面机会卡数据生成，不要凭空发明数据。");
+  lines.push("- 数据不足的小节，明确写「信息不足，建议补充 X」。");
+  lines.push("- 严格中文输出，不调用任何外部智能体，不真的去执行项目。");
+  return lines.join("\n");
+}
+
+function readKickoffSystemPrompt() {
+  // 复用 Ask Mode system prompt 的安全壳：不要真调用 Codex / WorkBuddy / OpenDesign / MiniMax
+  // 仅作为"开工包生成"的 system prompt
+  return [
+    "你是 EricChan·战略OS 的「机会开工包」生成器。",
+    "你的任务是基于给定的机会卡数据，输出一份结构化开工包。",
+    "约束：",
+    "- 严格中文输出。",
+    "- 不要真的执行项目、不要模拟调用任何外部 Agent / API。",
+    "- 不要发明数据：信息不足的地方明确说「信息不足」。",
+    "- 不要泄露任何 API Key / 内部配置。",
+    "- 不要使用 markdown 标题 # / ##，用 1./2. 数字小节即可。",
+    "- 不要把「项目」当成「机会」：开工包针对一个具体可执行项目。",
+    "默认不联网，不要主动建议用户开启联网搜索。"
+  ].join("\n");
+}
+
+function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
+  // V0.3.11 安全：脱敏所有可能含 API Key 的字段
+  const sanitize = (s) => String(s || "")
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
+    .replace(/STRATEGY_OS_LLM_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]")
+    .replace(/api[_-]?key\s*[=:]\s*\S+/gi, "[已脱敏]");
+  const safeName = sanitize(name);
+  const safeOneLine = sanitize(oneLine);
+  const safeNote = sanitize(note);
+  const safeNext = sanitize(next);
+  const safeQuestion = sanitize(sourceQuestion);
+  const lines = [];
+  lines.push(`# 开工包：${safeName}`);
+  lines.push("");
+  lines.push("1. 项目一句话");
+  lines.push(safeOneLine || `基于「${safeName}」机会的最小可执行项目。`);
+  lines.push("");
+  lines.push("2. 为什么值得做");
+  if (note) {
+    lines.push(safeNote.slice(0, 300));
+  } else {
+    lines.push("信息不足，建议补充这个方向为什么值得做。");
+  }
+  lines.push("");
+  lines.push("3. 目标用户");
+  lines.push("信息不足，建议补充：谁会用、为什么现在用、为什么不选替代品。");
+  lines.push("");
+  lines.push("4. 最小 MVP");
+  if (next) {
+    lines.push(safeNext.slice(0, 200));
+  } else {
+    lines.push("信息不足，建议补充：先做哪 1-2 个最小动作验证假设。");
+  }
+  lines.push("");
+  lines.push("5. 第一版功能边界");
+  if (tags.length) {
+    lines.push(`围绕标签 [${tags.map(sanitize).join("、")}] 圈定核心功能，不做无关特性。`);
+  } else {
+    lines.push("信息不足，建议补充：第一版只做哪 3 个功能，其余都标记为 V2。");
+  }
+  lines.push("");
+  lines.push("6. 不要做什么");
+  lines.push("- 不做账号系统。");
+  lines.push("- 不做完整产品，先做最小验证。");
+  lines.push("- 不直接派发外部 Agent / 智能体。");
+  lines.push("");
+  lines.push("7. 推荐执行工具");
+  lines.push("GPT 5.5 Thinking（总控判断）+ Codex（代码/脚本）+ 普通浏览器/LibreOffice（人工记录）。");
+  lines.push("");
+  lines.push("8. 第一轮验证路径");
+  lines.push("- Step 1：写一份 1 页验证计划（含假设、动作、判定标准）。");
+  lines.push("- Step 2：花 1-2 天执行最小动作。");
+  lines.push("- Step 3：收集反馈，决定继续 / 暂停 / 放弃。");
+  lines.push("");
+  lines.push("9. 风险与卡点");
+  if (sourceQuestion) {
+    lines.push(`原始问题：${safeQuestion.slice(0, 200)}`);
+  }
+  lines.push("信息不足，建议补充：已知卡点 / 假设风险 / 缓解方式。");
+  lines.push("");
+  lines.push("10. 下一步提示词草稿");
+  if (sourceQuestion) {
+    lines.push(`基于"${safeName}"这个机会，帮我做：${safeQuestion.slice(0, 100)}`);
+  } else {
+    lines.push(`帮我把"${safeName}"拆成 3 个可执行的下一步动作。`);
+  }
+  return lines.join("\n");
+}
+
+function buildSparseKickoff({ name, sourceQuestion }) {
+  const lines = [];
+  lines.push(`# 开工包：${name}（保守版）`);
+  lines.push("");
+  lines.push("1. 项目一句话");
+  lines.push(`基于「${name}」机会的最小可执行项目。`);
+  lines.push("");
+  lines.push("2. 为什么值得做");
+  lines.push("信息不足，建议补充这个方向为什么值得做。");
+  lines.push("");
+  lines.push("3. 目标用户");
+  lines.push("信息不足，建议补充：谁会用、为什么现在用。");
+  lines.push("");
+  lines.push("4. 最小 MVP");
+  lines.push("信息不足，建议先做一个最小页面 / 提示词流程。");
+  lines.push("");
+  lines.push("5. 第一版功能边界");
+  lines.push("信息不足，建议补充：第一版只做哪 3 个功能。");
+  lines.push("");
+  lines.push("6. 不要做什么");
+  lines.push("- 不做账号系统。");
+  lines.push("- 不做完整产品。");
+  lines.push("- 不直接派发 Agent。");
+  lines.push("");
+  lines.push("7. 推荐执行工具");
+  lines.push("GPT 5.5 Thinking（总控）+ Codex（执行）+ 浏览器（人工记录）。");
+  lines.push("");
+  lines.push("8. 第一轮验证路径");
+  lines.push("- Step 1：写一份 1 页验证计划。");
+  lines.push("- Step 2：花 1-2 天执行最小动作。");
+  lines.push("");
+  lines.push("9. 风险与卡点");
+  if (sourceQuestion) lines.push(`原始问题：${sourceQuestion.slice(0, 200)}`);
+  lines.push("信息不足。");
+  lines.push("");
+  lines.push("10. 下一步提示词草稿");
+  lines.push(`帮我把"${name}"拆成 3 个可执行的下一步动作。`);
+  return lines.join("\n");
+}
+
 function readSystemPrompt() {
   return readText(ASK_MODE_SYSTEM_PROMPT_PATH) || ASK_MODE_SYSTEM_PROMPT_FALLBACK;
 }
@@ -650,6 +888,10 @@ module.exports = {
   renderProjectCheckup,
   readSystemPrompt,
   buildLlmUserPrompt,
+  buildKickoffUserPrompt,
+  generateKickoffPackageForOpportunity,
+  buildLocalKickoff,
+  buildSparseKickoff,
   shouldUseWebSearch,
   LLM_FALLBACK_WARNING
 };

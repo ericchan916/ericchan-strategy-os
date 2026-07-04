@@ -106,6 +106,7 @@ const PRESET_TAGS = [
 ];
 
 // V0.3.10：新增机会时允许持久化的字段白名单
+// V0.3.11：增加 oneLineSummary（一句话说明）
 const OPPORTUNITY_PERSIST_FIELDS = [
   "id",
   "opportunityName",
@@ -115,6 +116,7 @@ const OPPORTUNITY_PERSIST_FIELDS = [
   "tags",
   "notes",
   "note",
+  "oneLineSummary",
   "nextAction",
   "humanDecision",
   "source",
@@ -182,6 +184,8 @@ function normalizeOpportunity(item) {
     type,
     typeLabel: TYPE_LABELS[type] || "新项目机会",
     notes: String(raw.notes || raw.note || ""),
+    // V0.3.11：透出一句话说明
+    oneLineSummary: String(raw.oneLineSummary || ""),
     nextAction: typeof raw.nextAction === "string" ? raw.nextAction : "",
     tags: normalizeTags(raw.tags),
     updatedAt: raw.updatedAt || ""
@@ -233,6 +237,199 @@ function summarizeAnswer(text, max = 300) {
   return `${slice}…`;
 }
 
+// V0.3.11：从 Ask 回答里提炼"机会卡草稿"（不调用 LLM，纯规则型）
+// 输入：question / answer / search (含 sources) / recommendedQuestions
+// 输出：{ opportunityName, oneLineSummary, note, nextAction, suggestedTags,
+//         status, type, source, sourceQuestion, sourceAnswerSummary, sourceUrls }
+//
+// 规则说明：
+//  - 不会直接拿 question 当 opportunityName（避免"问题当机会"）
+//  - 不会原样复制 answer 到 note（只保留"机会卡视图"的关键句）
+//  - oneLineSummary 是一句完整中文
+//  - nextAction 是可执行动作，不是泛泛而谈
+//  - suggestedTags 从 PRESET_TAGS 选择（最多 3 个）
+//  - 不包含 raw search response / API Key / 内部字段
+//
+// V0.3.11 安全：answer 在写入前会脱敏（移除 sk-* / apiKey / rawResponse 字串）
+function sanitizeAnswerForDraft(text) {
+  let value = String(text || "");
+  // 去除 sk-xxx / API Key 字串
+  value = value.replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]");
+  value = value.replace(/STRATEGY_OS_LLM_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]");
+  value = value.replace(/STRATEGY_OS_SEARCH_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]");
+  value = value.replace(/api[_-]?key\s*[=:]\s*\S+/gi, "[已脱敏]");
+  return value;
+}
+
+function deriveOpportunityDraftFromAnswer({
+  question = "",
+  answer = "",
+  search = null,
+  recommendedQuestions = null
+} = {}) {
+  // 安全脱敏：防止 API Key 串进入 draft
+  const safeQ = sanitizeAnswerForDraft(question);
+  const safeA = sanitizeAnswerForDraft(answer);
+  const q = String(safeQ || "").trim();
+  const a = String(safeA || "").trim();
+  const hasSearch = !!(search && search.used === true);
+  const safeSources = hasSearch && Array.isArray(search.sources) ? search.sources.slice(0, 5).map((u) => {
+    const item = u && typeof u === "object" ? u : {};
+    return {
+      title: String(item.title || "").slice(0, 200),
+      url: String(item.url || "").slice(0, 500),
+      source: String(item.source || "").slice(0, 80)
+    };
+  }).filter((u) => u.title || u.url) : [];
+
+  // ---- 1) 提炼 opportunityName ----
+  // 优先从 answer 第一句里抽取"做/做一个/做一个 X"的关键短语
+  let name = "";
+  const firstSentence = a.split(/[\n。！？!]/).map((s) => s.trim()).find((s) => s.length >= 4) || "";
+  // 模式 1: 显式产品 / 工具名
+  //  - "AI 短视频选题助手"、"短视频选题工具"、"ESP32 墨水屏日历"
+  const productNameMatch = a.match(/([一-龥A-Za-z0-9 ]{2,24}(?:助手|工具|平台|产品|机器人|机器人|系统|工作流|工作台|服务|网站|小程序|插件|模板|模板|技能|技能库|看板|代理|机器人|日历|选题|日历))/);
+  if (productNameMatch) name = productNameMatch[1].trim();
+  // 模式 2: 短句压缩
+  if (!name) {
+    const doMatch = firstSentence.match(/(?:做|做一个|做一个最小|做一个\s*MVP|做\s*MVP|尝试做|做\s*)([一-龥A-Za-z0-9 ·\-]{2,30})/);
+    if (doMatch) name = doMatch[1].trim();
+  }
+  // 模式 3: 从 question 里抽取
+  if (!name && q) {
+    const qMatch = q.match(/([一-龥A-Za-z0-9 ·\-]{2,30}(?:工具|助手|平台|产品|项目|方向|机会|主题|选题))/);
+    if (qMatch) name = qMatch[1].trim();
+  }
+  // 兜底：从 question 截取到 24 字
+  if (!name) {
+    name = q ? q.replace(/[？?！!。.,，、；;：:]+$/g, "").slice(0, 24) : "";
+  }
+  // 长度裁剪：≤ 24 字
+  name = name.replace(/\s+/g, " ").trim().slice(0, 24);
+  // ---- 0.5) 检测是否真的像"机会"上下文 ----
+  // 如果问题/回答里都不含"项目/做/工具/助手/选题/MVP/想法/方向/趋势/可做/值得做"等信号，
+  // 那么原始问题/回答很可能不是机会，应当给出中文兜底。
+  const opportunitySignal = /(项目|工具|助手|选题|平台|产品|方向|趋势|想法|MVP|值得做|做\s*一个|尝试|验证|可做|可变现|短视频|内容|博客|写|做一个)/;
+  const looksLikeOpportunity = opportunitySignal.test(a) || opportunitySignal.test(q);
+  if (!looksLikeOpportunity) {
+    return {
+      opportunityName: "没有识别到明确机会，请手动补充名称。",
+      oneLineSummary: "当前问题/回答里没有明显项目机会线索。建议：换一个更具体的问题，或者在下面手动填写。",
+      note: "暂无备注。",
+      nextAction: "先在问题里补充「我想做一个 X 工具/项目」等明确意图，再加入机会池。",
+      suggestedTags: ["需要调研"],
+      status: "validate",
+      type: "new-project-opportunity",
+      source: hasSearch ? "search" : "ask-mode",
+      sourceQuestion: q.slice(0, 1000),
+      sourceAnswerSummary: summarizeAnswer(a, 600),
+      sourceUrls: safeSources
+    };
+  }
+  if (!name) {
+    name = "未命名机会（请手动补充名称）";
+  }
+
+  // ---- 2) oneLineSummary ----
+  // 从 answer 里挑出首句或"它/这个 X"开头的一句话
+  let oneLineSummary = "";
+  if (firstSentence) {
+    oneLineSummary = firstSentence.replace(/^(我|我们|现在|让我|可以的|可以的，|我建议|我推荐|我看到|可以的，)/, "").trim();
+    if (oneLineSummary.length > 80) oneLineSummary = oneLineSummary.slice(0, 80);
+  }
+  if (!oneLineSummary) {
+    // 用 answer 前 80 字
+    oneLineSummary = a.replace(/\s+/g, " ").slice(0, 80);
+  }
+  // 一句话以标点收尾
+  if (oneLineSummary && !/[。.！!？?]$/.test(oneLineSummary)) {
+    oneLineSummary = `${oneLineSummary}。`;
+  }
+  if (!oneLineSummary) oneLineSummary = "暂无一句话说明，建议补充这个机会是什么。";
+
+  // ---- 3) note: 精炼备注（不复制整段 answer）----
+  // 策略：从 answer 中提炼 2-4 个关键短句（每句 ≤ 30 字），用换行分隔；总长 ≤ 300 字
+  const keySentences = [];
+  const seen = new Set();
+  for (const raw of a.split(/[\n。！？!]/)) {
+    const s = String(raw || "").trim();
+    if (s.length < 6) continue;
+    const norm = s.slice(0, 30);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    keySentences.push(s.slice(0, 60));
+    if (keySentences.length >= 5) break;
+  }
+  let note = keySentences.join("\n");
+  if (note.length > 300) note = note.slice(0, 300);
+
+  // ---- 4) nextAction: 找一个"做 X"开头的可执行句 ----
+  let nextAction = "";
+  // 模式 1: "做一个最小..." / "先做 X" / "MVP 步骤..."
+  const actionMatch = a.match(/(?:做一个|做一个最小|做一个\s*MVP|先做|第一步|验证|MVP[：:]|MVP\s*步骤|可以|先跑通|做一个\s*最小可执行)([^。\n!?！？]{4,80})/);
+  if (actionMatch) {
+    nextAction = actionMatch[0].replace(/^。|^，|^、|^：/, "").trim();
+  }
+  // 模式 2: 找包含动词的首句
+  if (!nextAction && firstSentence) {
+    if (/(做|写|跑|选|建|搭|上线|验证|测试|找|画|列|出|填|输入|输出)/.test(firstSentence)) {
+      nextAction = firstSentence.slice(0, 80);
+    }
+  }
+  if (!nextAction) {
+    // 兜底：基于类型给一个通用动作
+    nextAction = "先列一个最小 MVP 范围，写 3-5 条下一步动作。";
+  }
+  if (nextAction.length > 500) nextAction = nextAction.slice(0, 500);
+
+  // ---- 5) suggestedTags: 从 answer 关键词推断 PRESET_TAGS ----
+  const tagHints = {
+    "AI Agent": /(agent|智能体|代理|自治)/i,
+    "大模型应用": /(大模型|LLM|GPT|Claude|Gemini|语言模型)/,
+    "独立开发者": /(独立开发|一人|单人|indie|独自)/,
+    "小型可变现": /(可变现|付费|订阅|商业化|变现)/,
+    "内容产品": /(内容|选题|博客|视频|播客|文章|写作)/,
+    "自动化工作流": /(自动化|workflow|工作流|批处理)/,
+    "编程工具": /(开发工具|IDE|代码|debug|调试|编程)/,
+    "前端视觉": /(前端|UI|视觉|动画|设计|动效)/,
+    "个人 OS": /(个人\s*OS|战略\s*OS|操作系统|个人系统)/,
+    "OPC": /OPC|one\s*person|单兵|一人公司/,
+    "需要调研": /(调研|考察|研究|看看|了解)/,
+    "可快速验证": /(MVP|可快速|快速验证|原型|快速跑通|先做最小)/,
+    "暂缓": /(暂缓|晚点|不急|之后|延后)/,
+    "高潜力": /(高潜力|潜力大|很值得|值得做|值得做|值得做)/,
+    "噪声较大": /(噪声|噪音|不稳定|风险)/,
+  };
+  const suggestedTags = [];
+  for (const [tag, regex] of Object.entries(tagHints)) {
+    if (regex.test(a) || regex.test(q)) {
+      suggestedTags.push(tag);
+      if (suggestedTags.length >= 4) break;
+    }
+  }
+  if (suggestedTags.length === 0) {
+    // 至少给一个兜底
+    suggestedTags.push("需要调研");
+  }
+
+  // ---- 6) source 标识 ----
+  const source = hasSearch ? "search" : "ask-mode";
+
+  return {
+    opportunityName: name,
+    oneLineSummary: oneLineSummary.slice(0, 300),
+    note: note || "暂无备注。",
+    nextAction: nextAction || "先列一个最小 MVP 范围。",
+    suggestedTags,
+    status: "validate",
+    type: "new-project-opportunity",
+    source,
+    sourceQuestion: q.slice(0, 1000),
+    sourceAnswerSummary: summarizeAnswer(a, 600),
+    sourceUrls: safeSources
+  };
+}
+
 // V0.3.10：新增机会
 function addOpportunity({ rootDir = process.cwd(), input = {} } = {}) {
   const cleaned = pickPersistFields(input);
@@ -260,7 +457,9 @@ function addOpportunity({ rootDir = process.cwd(), input = {} } = {}) {
     type,
     humanDecision: HUMAN_DECISION_LABELS[cleaned.humanDecision] ? cleaned.humanDecision : "pending",
     notes: String(cleaned.notes || cleaned.note || "").slice(0, 3000),
-    nextAction: String(cleaned.nextAction || "").slice(0, 1000),
+    // V0.3.11：一句话说明 ≤ 300 字
+    oneLineSummary: typeof cleaned.oneLineSummary === "string" ? cleaned.oneLineSummary.trim().slice(0, 300) : "",
+    nextAction: String(cleaned.nextAction || "").slice(0, 500),
     tags: normalizeTags(cleaned.tags),
     source: typeof cleaned.source === "string" ? cleaned.source.slice(0, 80) : "ask-mode",
     sourceQuestion: typeof cleaned.sourceQuestion === "string" ? cleaned.sourceQuestion.slice(0, 1000) : "",
@@ -322,12 +521,15 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
     const tags = Array.isArray(raw.tags) ? raw.tags.filter(Boolean) : [];
     const tagText = tags.length ? tags.join("、") : "暂无标签";
     const note = String(raw.notes || raw.note || "").trim() || "暂无备注";
+    // V0.3.11：注入一句话说明 + 下一步
+    const oneLine = String(raw.oneLineSummary || "").trim() || "暂无一句话说明";
     const next = String(raw.nextAction || "").trim() || "暂无下一步";
     const updated = raw.updatedAt ? String(raw.updatedAt).slice(0, 10) : "";
     const linesForItem = [
       `${idx + 1}. ${name}`,
       `   状态：${statusText}`,
       `   类型：${typeText}`,
+      `   一句话：${oneLine}`,
       `   标签：${tagText}`,
       `   备注：${note}`,
       `   下一步：${next}`
@@ -337,7 +539,7 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
   });
   lines.push("");
   lines.push("【使用机会池的规则】");
-  lines.push("- 用户编辑的备注和标签会作为个人上下文，下一次回答时优先参考。");
+  lines.push("- 用户编辑的备注、一句话说明、标签和下一步会作为个人上下文，下一次回答时优先参考。");
   lines.push("- 优先围绕已确认 / 待验证 / 观察中 的机会给出建议。");
   lines.push("- 已归档 / 已拒绝 / 忽略 的机会默认不优先，除非用户明确要求。");
   lines.push("- 不要把机会池里没写的方向凭空当作用户已关心的项目。");
@@ -507,6 +709,7 @@ module.exports = {
   deleteOpportunity,
   addOpportunity,
   buildOpportunityContextForPrompt,
+  deriveOpportunityDraftFromAnswer,
   normalizeSourceUrls,
   summarizeAnswer
 };

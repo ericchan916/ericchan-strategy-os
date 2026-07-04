@@ -1806,6 +1806,149 @@ test("startAskUiServer: GET /api/opportunities 返回带 displayTitle 的列表�
   }
 });
 
+// ============== V0.3.11: 开工包 / 智能草稿 集成测试 ==============
+
+test("startAskUiServer: POST /api/opportunities/:id/kickoff 返回开工包（基于机会池数据）", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-kickoff-"));
+  const server = await startAskUiServer({ rootDir, port: 5310, host: "127.0.0.1" });
+  try {
+    // 先创建一个有完整字段的机会
+    const { json: c } = await httpRequest({
+      port: 5310,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "AI 短视频选题助手",
+        oneLineSummary: "把热点和方向结合，生成可拍选题",
+        note: "MVP 验证",
+        nextAction: "做一个最小网页",
+        tags: ["高潜力", "可快速验证"]
+      }
+    });
+    const id = c.opportunity.id;
+    // kickoff
+    const { status, json: k } = await httpRequest({
+      port: 5310,
+      method: "POST",
+      path: `/api/opportunities/${encodeURIComponent(id)}/kickoff`
+    });
+    assert.equal(status, 200);
+    assert.ok(k.answer.length > 100, "应有结构化开工包");
+    // 10 个小节
+    for (let i = 1; i <= 10; i += 1) {
+      assert.ok(k.answer.includes(`${i}.`), `开工包应包含小节 ${i}.`);
+    }
+    assert.ok(k.answer.includes("AI 短视频选题助手"), "开工包应基于机会名称");
+    assert.equal(k.opportunity.id, id, "应回传机会数据");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST /api/opportunities/:id/kickoff 不存在 id 返回 404 中文", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-kickoff404-"));
+  const server = await startAskUiServer({ rootDir, port: 5311, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({
+      port: 5311,
+      method: "POST",
+      path: "/api/opportunities/opp-does-not-exist/kickoff"
+    });
+    assert.equal(status, 404);
+    assert.ok(/没有找到/.test(json.error), "应返回中文 404 错误");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST /api/opportunities/:id/kickoff 路径含 .. 返回 400", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-kickoffbad-"));
+  const server = await startAskUiServer({ rootDir, port: 5312, host: "127.0.0.1" });
+  try {
+    const id = encodeURIComponent("opp..id");
+    const { status, json } = await httpRequest({
+      port: 5312,
+      method: "POST",
+      path: `/api/opportunities/${id}/kickoff`
+    });
+    assert.equal(status, 400, "应拒绝含 .. 的 id");
+    assert.ok(/不合法|包含|路径/.test(json.error));
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: kickoff 答案不暴露 API Key", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-kickoffkey-"));
+  const server = await startAskUiServer({ rootDir, port: 5313, host: "127.0.0.1" });
+  try {
+    const { json: c } = await httpRequest({
+      port: 5313,
+      method: "POST",
+      path: "/api/opportunities",
+      body: { title: "测试 sk-abcdef1234", note: "y" }
+    });
+    const { json: k } = await httpRequest({
+      port: 5313,
+      method: "POST",
+      path: `/api/opportunities/${encodeURIComponent(c.opportunity.id)}/kickoff`
+    });
+    assert.equal(k.answer.includes("sk-abcdef1234"), false, "开工包应脱敏 sk-xxx");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("buildAddOpportunityFormMarkup: 接受 draft 参数预填精炼字段", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "a",
+    draft: {
+      opportunityName: "AI 短视频选题助手",
+      oneLineSummary: "把热点和方向结合，生成可拍选题",
+      note: "精炼备注",
+      nextAction: "做一个最小网页",
+      suggestedTags: ["高潜力", "可快速验证"],
+      status: "validate",
+      type: "new-project-opportunity"
+    }
+  });
+  assert.ok(html.includes("AI 短视频选题助手"));
+  assert.ok(html.includes("把热点和方向结合"));
+  assert.ok(html.includes("做一个最小网页"));
+  // 标签应预选 (aria-pressed="true")
+  const highPotential = html.match(/<button[^>]*data-op-add-tag="高潜力"[^>]*aria-pressed="(true|false)"/);
+  assert.ok(highPotential && highPotential[1] === "true", "高潜力 标签应预选");
+});
+
+test("buildAddOpportunityFormMarkup: 不传 draft 时自动调用 deriveOpportunityDraftFromAnswer 提炼", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "推荐做一个 AI 短视频选题助手，方向是把热点和你的能力结合，MVP 可以用提示词跑通"
+  });
+  // 不应直接把原问题当 opportunityName
+  assert.equal(/最近有什么适合独立开发者做的小型 AI 项目？/.test(html), false, "V0.3.11 不应直接把原问题当机会名");
+  // 应有一句话说明输入
+  assert.ok(/data-op-add-one-line/.test(html));
+  // 应有下一步输入
+  assert.ok(/data-op-add-next/.test(html));
+});
+
+test("renderOpportunityPanel: 每个机会项有「生成开工包」按钮", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      { id: "1", opportunityName: "测试", status: "validate", type: "new-project-opportunity" }
+    ],
+    stats: { total: 1 }
+  });
+  assert.ok(/data-op-kickoff="1"/.test(listHtml), "应渲染 data-op-kickoff 按钮");
+  assert.ok(/生成开工包/.test(listHtml), "按钮文字应含'生成开工包'");
+});
+
 // ============== V0.3.10-hotfix: createApp 真实链路 = "加入机会池" 按钮 ==============
 
 test("createApp: 有回答时加入机会池按钮可见，无回答时隐藏", () => {
@@ -1843,7 +1986,12 @@ test("createApp: 点击加入机会池按钮后表单注入到容器", () => {
   // 注入的 innerHTML 是表单 markup，应当包含 form 与 title input
   assert.ok(/data-op-add-form/.test(container.innerHTML), "应渲染加入机会池表单 markup");
   assert.ok(/data-op-add-title/.test(container.innerHTML), "应包含标题输入框");
-  assert.ok(/适合做短视频选题工具/.test(container.innerHTML), "标题应预填问题");
+  // V0.3.11：标题应被精炼（deriveOpportunityDraftFromAnswer 自动从 answer 提取）
+  // answer 含"推荐做短视频选题工具"，应提炼出"AI 短视频选题助手"或类似
+  assert.ok(/data-op-add-one-line/.test(container.innerHTML), "应包含一句话说明输入框");
+  assert.ok(/data-op-add-next/.test(container.innerHTML), "应包含下一步输入框");
+  assert.ok(/短视频|选题/.test(container.innerHTML), "标题应反映回答里的核心方向");
+  assert.notEqual(/适合做短视频选题工具吗/.test(container.innerHTML), true, "V0.3.11 不应直接把原问题当机会名");
 });
 
 test("createApp: 提交 POST 成功后容器关闭并刷新机会池", async () => {

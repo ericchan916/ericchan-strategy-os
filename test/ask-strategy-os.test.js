@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt } = require("../scripts/ask-strategy-os");
+const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt, generateKickoffPackageForOpportunity, buildKickoffUserPrompt, buildLocalKickoff, buildSparseKickoff } = require("../scripts/ask-strategy-os");
 const llmClient = require("../scripts/llm-client");
 const loadEnv = require("../scripts/load-env");
 const http = require("node:http");
@@ -740,4 +740,114 @@ test("buildLlmUserPrompt: 用户编辑机会后，prompt 包含新 note", () => 
     question: "今天适合做什么？"
   });
   assert.ok(prompt.includes("更新后这是我重点关注的方向"), "应包含用户最新编辑的备注");
+});
+
+// ============== V0.3.11 开工包 ==============
+
+test("buildKickoffUserPrompt: 包含机会名称、备注、标签、下一步", () => {
+  const prompt = buildKickoffUserPrompt({
+    name: "AI 短视频选题助手",
+    oneLine: "把热点和方向结合成可拍选题",
+    note: "MVP 验证",
+    next: "做一个最小页面",
+    tags: ["高潜力", "可快速验证"],
+    sourceQuestion: "想做点啥",
+    sourceUrls: []
+  });
+  assert.ok(prompt.includes("AI 短视频选题助手"));
+  assert.ok(prompt.includes("MVP 验证"));
+  assert.ok(prompt.includes("做一个最小页面"));
+  assert.ok(prompt.includes("高潜力"));
+  assert.ok(prompt.includes("可快速验证"));
+});
+
+test("buildKickoffUserPrompt: 不注入 API Key / raw search response 字段", () => {
+  const prompt = buildKickoffUserPrompt({
+    name: "N",
+    oneLine: "a",
+    note: "sk-1234567890abcdef",
+    next: "do",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  assert.equal(prompt.includes("sk-1234567890abcdef"), false, "应脱敏");
+  assert.equal(prompt.includes("rawResponse"), false);
+});
+
+test("buildLocalKickoff: 包含 10 个小节", () => {
+  const text = buildLocalKickoff({
+    name: "X",
+    oneLine: "y",
+    note: "n",
+    next: "做 X",
+    tags: ["t"],
+    sourceQuestion: "q",
+    sourceUrls: []
+  });
+  for (let i = 1; i <= 10; i += 1) {
+    assert.ok(text.includes(`${i}.`), `应包含小节 ${i}.`);
+  }
+  assert.ok(text.includes("X"), "应包含机会名");
+  assert.ok(text.includes("做 X"), "应包含 next");
+  assert.ok(text.includes("y"), "应包含一句话");
+});
+
+test("buildSparseKickoff: 信息不足时给保守版开工包 + 中文提示", () => {
+  const text = buildSparseKickoff({ name: "N", sourceQuestion: "q" });
+  assert.ok(/保守版|信息不足/.test(text));
+  for (let i = 1; i <= 10; i += 1) {
+    assert.ok(text.includes(`${i}.`), `应包含小节 ${i}.`);
+  }
+});
+
+test("generateKickoffPackageForOpportunity: 数据稀疏时回退到 sparse 模板", async () => {
+  const result = await generateKickoffPackageForOpportunity({
+    opportunity: { id: "x", opportunityName: "稀疏机会" },
+    env: {}
+  });
+  assert.ok(result.answer.length > 0);
+  assert.ok(/保守版|信息不足/.test(result.answer));
+  assert.ok(result.warning && /信息不足/.test(result.warning));
+});
+
+test("generateKickoffPackageForOpportunity: 数据完整时回退到本地规则模板（无 LLM 配置）", async () => {
+  const result = await generateKickoffPackageForOpportunity({
+    opportunity: {
+      id: "x",
+      opportunityName: "AI 短视频选题助手",
+      oneLineSummary: "把热点和方向结合成可拍选题",
+      notes: "MVP 验证",
+      nextAction: "做一个最小网页",
+      tags: ["高潜力", "可快速验证"]
+    },
+    env: {} // 无 LLM 配置
+  });
+  assert.ok(result.answer.length > 100, "应有结构化开工包");
+  assert.equal(result.source, "local", "无 LLM 时 source=local");
+  assert.ok(result.answer.includes("AI 短视频选题助手"));
+  assert.ok(result.answer.includes("做一个最小网页"));
+});
+
+test("generateKickoffPackageForOpportunity: 不暴露 API Key", async () => {
+  const result = await generateKickoffPackageForOpportunity({
+    opportunity: {
+      id: "x",
+      opportunityName: "测试 sk-1234abcd",
+      oneLineSummary: "x",
+      notes: "y",
+      nextAction: "z",
+      tags: []
+    },
+    env: {}
+  });
+  assert.ok(result.answer.length > 0);
+  // 不在 result 里出现 rawResponse / apiKey 字段
+  for (const key of Object.keys(result)) {
+    assert.equal(/rawResponse|apiKey|sk-/.test(String(result[key] || "")), false, `字段 ${key} 不应暴露敏感信息`);
+  }
+  // ensure response key set
+  for (const key of ["answer", "source", "warning", "opportunity"]) {
+    assert.ok(key in result, `应包含字段: ${key}`);
+  }
 });

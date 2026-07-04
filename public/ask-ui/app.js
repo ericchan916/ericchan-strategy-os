@@ -188,6 +188,10 @@ function normalizeHistoryItem(input) {
       weakReason: typeof searchQualityRaw.weakReason === "string" ? searchQualityRaw.weakReason : "",
       hasHighConfidenceSources: searchQualityRaw.hasHighConfidenceSources === true
     },
+    // V0.3.11：历史项类型 (ask / kickoff-package)
+    type: raw.type === "kickoff-package" ? "kickoff-package" : "ask",
+    opportunityId: typeof raw.opportunityId === "string" ? raw.opportunityId : "",
+    opportunityTitle: typeof raw.opportunityTitle === "string" ? raw.opportunityTitle : "",
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
   };
 }
@@ -603,6 +607,7 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
         ${noteLine}
         ${nextLine}
         <div class="opportunity-actions">
+          <button type="button" class="link-button opportunity-kickoff" data-op-kickoff="${escapeHtml(item.id)}" title="基于此机会生成开工包">生成开工包</button>
           <button type="button" class="link-button opportunity-edit" data-op-edit="${escapeHtml(item.id)}">编辑</button>
           <button type="button" class="link-button opportunity-delete" data-op-delete="${escapeHtml(item.id)}">删除</button>
         </div>
@@ -637,34 +642,50 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
   return { statsHtml: renderOpportunityStats(stats), listHtml };
 }
 
-// V0.3.10：从一次 Ask 回答构建"加入机会池"表单的 HTML
+// V0.3.11：从一次 Ask 回答构建"加入机会池"表单的 HTML
+// 现在接受 deriveOpportunityDraftFromAnswer 输出的 draft，表单预填精炼字段
 function buildAddOpportunityFormMarkup({
   question = "",
   answer = "",
   sourceUrls = [],
-  source = "ask-mode"
+  source = "ask-mode",
+  draft = null
 } = {}) {
   const safeQuestion = String(question || "").trim();
   const safeAnswer = String(answer || "").trim();
-  // 摘要 = 截到最近的句子边界，不超过 300 字
-  function shortAnswer(text, max = 300) {
-    const value = String(text || "").replace(/\s+/g, " ").trim();
-    if (value.length <= max) return value;
-    const slice = value.slice(0, max);
-    const lastStop = Math.max(slice.lastIndexOf("。"), slice.lastIndexOf("."), slice.lastIndexOf("！"), slice.lastIndexOf("!"));
-    return lastStop > max * 0.5 ? `${slice.slice(0, lastStop + 1)}…` : `${slice}…`;
+  // V0.3.11：智能草稿（前端用 deriveOpportunityDraftFromAnswer）
+  // 不重复后端逻辑；这里用同样的规则做一次提取，避免每次打开都要多发一次请求
+  let computedDraft = null;
+  try {
+    const { deriveOpportunityDraftFromAnswer } = require("../../scripts/opportunity-store");
+    computedDraft = deriveOpportunityDraftFromAnswer({
+      question: safeQuestion,
+      answer: safeAnswer,
+      search: source === "search" ? { used: true, sources: sourceUrls } : null
+    });
+  } catch {
+    computedDraft = null;
   }
-  const summary = shortAnswer(safeAnswer, 300);
-  const defaultTitle = safeQuestion
-    ? safeQuestion.replace(/[？?！!。.,，、；;：:]+$/g, "").slice(0, 60)
-    : "";
+  const d = draft || computedDraft || {
+    opportunityName: safeQuestion ? safeQuestion.slice(0, 24) : "",
+    oneLineSummary: "",
+    note: "",
+    nextAction: "",
+    suggestedTags: [],
+    status: "validate",
+    type: "new-project-opportunity",
+    source,
+    sourceQuestion: safeQuestion,
+    sourceAnswerSummary: "",
+    sourceUrls: sourceUrls
+  };
   const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
-    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === "validate" ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === (d.status || "validate") ? " selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
   const typeOptions = Object.entries(OPPORTUNITY_TYPE_LABELS)
-    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === "new-project-opportunity" ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === (d.type || "new-project-opportunity") ? " selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
-  const tagChips = renderPresetTagChips([]);
+  const tagChips = renderPresetTagChips(d.suggestedTags || []);
   const sourceUrlList = Array.isArray(sourceUrls) && sourceUrls.length
     ? `<ul class="opportunity-source-url-list" aria-label="已带入的参考来源">${sourceUrls.map((u) => {
         const t = escapeHtml(String(u.title || "未命名来源"));
@@ -674,7 +695,7 @@ function buildAddOpportunityFormMarkup({
       }).join("")}</ul>`
     : "";
   const sourceUrlChips = Array.isArray(sourceUrls) && sourceUrls.length
-    ? `<div class="opportunity-source-urls">${escapeHtml(`已带入 ${sourceUrls.length} 条参考来源（仅保存标题/链接/域名）`)}${sourceUrlList}</div>`
+    ? `<details class="opportunity-source-urls"><summary>已带入 ${sourceUrls.length} 条参考来源（默认折叠）</summary>${sourceUrlList}</details>`
     : "";
   const sourceBadge = source === "search"
     ? `<span class="opportunity-source">来自搜索</span>`
@@ -684,8 +705,12 @@ function buildAddOpportunityFormMarkup({
       <h3>加入机会池</h3>
       ${sourceBadge}
     </div>
-    <label>机会名称
-      <input name="title" data-op-add-title placeholder="请填写机会名称（必填）" value="${escapeHtml(defaultTitle)}" required maxlength="200" />
+    <p class="opportunity-add-hint">已根据本次回答自动提炼机会卡草稿，请确认或修改后再保存。</p>
+    <label>机会名称（必填）
+      <input name="title" data-op-add-title placeholder="请填写机会名称" value="${escapeHtml(d.opportunityName || "")}" required maxlength="200" />
+    </label>
+    <label>一句话说明
+      <input name="oneLineSummary" data-op-add-one-line placeholder="这个机会是什么" value="${escapeHtml(d.oneLineSummary || "")}" maxlength="300" />
     </label>
     <label>状态
       <select name="status" data-op-add-status>${statusOptions}</select>
@@ -693,11 +718,14 @@ function buildAddOpportunityFormMarkup({
     <label>类型
       <select name="type" data-op-add-type>${typeOptions}</select>
     </label>
-    <label>备注（默认填入本次问题与回答摘要，可编辑）
-      <textarea name="note" data-op-add-note rows="4" maxlength="3000" placeholder="暂无备注">${escapeHtml(summary || safeQuestion || "")}</textarea>
+    <label>备注（精炼，可编辑）
+      <textarea name="note" data-op-add-note rows="4" maxlength="3000" placeholder="暂无备注">${escapeHtml(d.note || "")}</textarea>
+    </label>
+    <label>下一步（可执行动作）
+      <input name="nextAction" data-op-add-next placeholder="如：先做一个最小页面" value="${escapeHtml(d.nextAction || "")}" maxlength="500" />
     </label>
     <fieldset class="opportunity-tags-fieldset">
-      <legend>标签（点击切换）</legend>
+      <legend>标签（点击切换，已自动建议）</legend>
       <div class="opportunity-tag-chips" data-op-add-tags>${tagChips}</div>
     </fieldset>
     ${sourceUrlChips}
@@ -907,6 +935,14 @@ function createApp(deps) {
         deleteOpportunityFromUi(id);
       });
     }
+    // V0.3.11：开工包按钮
+    for (const button of opportunityList.querySelectorAll("[data-op-kickoff]")) {
+      button.addEventListener("click", () => {
+        const id = button.getAttribute("data-op-kickoff");
+        if (!id) return;
+        generateKickoffForOpportunity(id);
+      });
+    }
     for (const form of opportunityList.querySelectorAll("[data-op-form]")) {
       form.addEventListener("submit", (event) => {
         if (event && typeof event.preventDefault === "function") event.preventDefault();
@@ -944,6 +980,81 @@ function createApp(deps) {
     } catch (error) {
       setOpportunityStatus((error && error.message) || "机会删除失败。", "error");
       return { ok: false, reason: (error && error.message) || "unknown" };
+    }
+  }
+
+  // V0.3.11：从机会卡生成开工包
+  async function generateKickoffForOpportunity(id) {
+    if (!fetchImpl) {
+      setOpportunityStatus("无法连接开工包 API。", "error");
+      return { ok: false };
+    }
+    // 在机会池中找到这个 id 对应的机会
+    const op = (state.opportunities || []).find((o) => o.id === id);
+    const titleText = op ? (op.displayTitle || op.opportunityName || id) : id;
+    setInFlight(true);
+    setStatus("正在为「" + titleText + "」生成开工包……");
+    setGlobalStatus("localAnswer");
+    if (questionEcho) {
+      questionEcho.hidden = false;
+      questionEcho.innerHTML = `<strong>为</strong>「${escapeHtml(titleText)}」<strong>生成开工包</strong>`;
+    }
+    if (answerOutput) {
+      answerOutput.classList.remove("empty");
+      answerOutput.hidden = false;
+      answerOutput.textContent = "正在生成开工包……";
+    }
+    try {
+      const response = await fetchImpl(`/api/opportunities/${encodeURIComponent(id)}/kickoff`, {
+        method: "POST",
+        headers: { "content-type": "application/json" }
+      });
+      const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
+      if (!response || !response.ok) throw new Error((payload && payload.error) || "开工包生成失败。");
+      const answer = payload.answer || "";
+      // 显示在回答区
+      if (answerOutput) {
+        answerOutput.classList.remove("empty");
+        answerOutput.innerHTML = renderMarkdown(answer);
+        scrollImpl(answerOutput);
+      }
+      setCurrentAnswer(answer, payload.source || "local", {
+        question: `为「${titleText}」生成开工包`,
+        search: null
+      });
+      setStatus(payload.warning ? payload.warning : "开工包已生成。");
+      // V0.3.11：写入历史 (type: kickoff-package)
+      historyStore.push({
+        type: "kickoff-package",
+        question: `为「${titleText}」生成开工包`,
+        answer,
+        source: payload.source || "local",
+        warning: payload.warning || null,
+        searchUsed: false,
+        searchWarning: null,
+        searchResultCount: 0,
+        searchSources: [],
+        searchIntent: "",
+        searchPlannedQueries: [],
+        searchFreshness: "",
+        searchRecency: null,
+        searchFilters: null,
+        searchQuality: null,
+        opportunityId: id,
+        opportunityTitle: titleText
+      });
+      renderHistory();
+      return { ok: true };
+    } catch (error) {
+      if (answerOutput) {
+        answerOutput.classList.remove("empty");
+        answerOutput.textContent = (error && error.message) || "开工包生成失败。";
+        answerOutput.hidden = false;
+      }
+      setStatus((error && error.message) || "开工包生成失败。", "error");
+      return { ok: false, reason: (error && error.message) || "unknown" };
+    } finally {
+      setInFlight(false);
     }
   }
 
@@ -1134,16 +1245,20 @@ function createApp(deps) {
   function readAddFormPayload() {
     if (!addOpportunityContainer) return null;
     const titleEl = addOpportunityContainer.querySelector("[data-op-add-title]");
+    const oneLineEl = addOpportunityContainer.querySelector("[data-op-add-one-line]");
     const statusEl = addOpportunityContainer.querySelector("[data-op-add-status]");
     const typeEl = addOpportunityContainer.querySelector("[data-op-add-type]");
     const noteEl = addOpportunityContainer.querySelector("[data-op-add-note]");
+    const nextEl = addOpportunityContainer.querySelector("[data-op-add-next]");
     const tagsContainer = addOpportunityContainer.querySelector("[data-op-add-tags]");
     const tags = tagsContainer ? readSelectedTagsFromChips(tagsContainer) : [];
     return {
       title: titleEl ? String(titleEl.value || "").trim() : "",
+      oneLineSummary: oneLineEl ? String(oneLineEl.value || "").trim() : "",
       status: statusEl ? statusEl.value : "validate",
       type: typeEl ? typeEl.value : "new-project-opportunity",
       note: noteEl ? String(noteEl.value || "").trim() : "",
+      nextAction: nextEl ? String(nextEl.value || "").trim() : "",
       tags
     };
   }
@@ -1169,10 +1284,12 @@ function createApp(deps) {
       : [];
     const body = {
       title: payload.title,
+      oneLineSummary: payload.oneLineSummary,
       status: payload.status,
       type: payload.type,
       tags: payload.tags,
       note: payload.note,
+      nextAction: payload.nextAction,
       source,
       sourceQuestion: state.currentQuestion || "",
       sourceAnswerSummary: state.currentAnswer.slice(0, 600),
@@ -1226,12 +1343,14 @@ function createApp(deps) {
         "local-fallback": "已回退"
       };
       src.dataset.source = entry.source;
-      src.textContent = labelMap[entry.source] || "回答";
+      // V0.3.11：开工包类型显示"开工包"
+      src.textContent = entry.type === "kickoff-package" ? "开工包" : (labelMap[entry.source] || "回答");
       const searchBadge = documentRef.createElement("span");
       searchBadge.className = "history-source";
       searchBadge.dataset.source = entry.searchWarning ? "local-fallback" : "llm";
       searchBadge.textContent = entry.searchWarning ? "搜索失败" : "已搜索";
-      searchBadge.hidden = !(entry.searchUsed || entry.searchWarning);
+      // V0.3.11：开工包类型不显示搜索徽标
+      searchBadge.hidden = !(entry.searchUsed || entry.searchWarning) || entry.type === "kickoff-package";
 
       const time = documentRef.createElement("span");
       time.className = "history-time";

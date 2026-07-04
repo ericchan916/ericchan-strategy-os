@@ -3,12 +3,13 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { askStrategyOsAsync } = require("./ask-strategy-os");
+const { askStrategyOsAsync, generateKickoffPackageForOpportunity } = require("./ask-strategy-os");
 const {
   loadOpportunityPool,
   updateOpportunity,
   addOpportunity,
-  deleteOpportunity
+  deleteOpportunity,
+  isValidOpportunityId
 } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
@@ -166,6 +167,43 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
       } catch (error) {
         const status = error.statusCode || 400;
         sendJson(res, status, { error: String(error.message || "机会删除失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+      }
+      return;
+    }
+
+    // V0.3.11：POST /api/opportunities/:id/kickoff - 从机会卡生成开工包
+    // 安全约束：
+    //  - id 必须是路径最后一段，不接受 .. / 路径分隔符（isValidOpportunityId 校验）
+    //  - 不联网：默认 useSearch=false
+    //  - 不调用真实 Codex / WorkBuddy / MiniMax
+    //  - 不接受 body 控制 filePath / apiKey
+    //  - 404 / 400 返回中文错误
+    if (req.method === "POST" && /^\/api\/opportunities\/[^/]+\/kickoff$/.test(url.pathname)) {
+      try {
+        const id = opportunityIdFromPath(url.pathname.replace(/\/kickoff$/, ""));
+        if (!isValidOpportunityId(id)) {
+          sendJson(res, 400, { error: "请提供合法的机会 id（不能包含路径分隔符或控制字符）。" });
+          return;
+        }
+        const loaded = loadOpportunityPool({ rootDir });
+        const target = loaded.opportunities.find((o) => o.id === id);
+        if (!target) {
+          sendJson(res, 404, { error: "没有找到这个机会，可能已被删除。" });
+          return;
+        }
+        const result = await generateKickoffPackageForOpportunity({ opportunity: target, env: process.env });
+        const body = {
+          answer: result.answer,
+          source: result.source,
+          opportunity: target,
+          warning: result.warning || null
+        };
+        if (result.warning) body.warning = result.warning;
+        sendJson(res, 200, body);
+      } catch (error) {
+        const status = error.statusCode || 400;
+        const safeMessage = String(error.message || "开工包生成失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        sendJson(res, status, { error: safeMessage });
       }
       return;
     }

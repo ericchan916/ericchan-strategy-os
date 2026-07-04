@@ -1108,6 +1108,100 @@ V0.3.10-hotfix 验证：
 - 不修改 `start-ask-ui.js` 的双 loopback 监听。
 - 不修改 `opportunity-pool.json`（被 `.gitignore` 包含，hotfix 不会提交历史数据）。
 
+## V0.3.11 智能机会收录与机会开工包
+
+V0.3.10-hotfix 已把机会池变成可编辑的中文工具，但用户反馈两件事：
+
+1. "加入机会池"只是把用户问题当机会名 + 整段回答当备注，**不是机会卡**。
+2. 开工包应该能从机会池里直接生成，**而不是让用户重新描述**。
+
+V0.3.11 仍然只动机会池和 Ask UI 的相关路径，不动后端 search / LLM / loading / 端口。
+
+### 功能 1：智能机会卡草稿（deriveOpportunityDraftFromAnswer）
+
+新增 `deriveOpportunityDraftFromAnswer({ question, answer, search })`，纯规则型摘要（不调用 LLM）：
+
+- **opportunityName**：从 answer 抽"做/做一个 X"的核心短语（≤ 24 字），不会直接拿 question 当机会名。
+- **oneLineSummary**：从 answer 提炼一句话中文（≤ 80 字），明确"这个机会是什么"。
+- **note**：从 answer 拆 2-4 个关键短句（每句 ≤ 60 字），用换行分隔；总长 ≤ 300 字。**不会复制整段 answer**。
+- **nextAction**：从 answer 找"做 X / MVP 步骤"等可执行动词开头的句子（≤ 500 字）。
+- **suggestedTags**：从 `PRESET_TAGS` 推断（基于关键词，如"agent / 大模型 / 独立开发者 / 可快速验证"等）。
+- **sourceUrls**：自动截到 5 条，只保留 `title / url / source`。
+- **信息不足兜底**：当 question/answer 不像"机会"上下文（如问天气），返回 `opportunityName = "没有识别到明确机会，请手动补充名称。"` 并附中文 nextAction 引导。
+- **脱敏**：所有进入 draft 的字段先过 `sk-xxx / API_KEY` 脱敏，绝不把 API Key 串写入机会池。
+
+### 功能 2：表单新结构
+
+`buildAddOpportunityFormMarkup` 现在预填精炼字段：
+
+- 机会名称
+- **一句话说明**（oneLineSummary）
+- 状态 / 类型
+- 备注（精炼版）
+- **下一步**（nextAction，可执行动作）
+- 标签 chips（已自动勾选 suggestedTags）
+- 来源问题（只读）
+- 来源列表（最多 5 条，默认折叠）
+
+提交时 POST body 一次性发送：
+```json
+{
+  "title": "...",
+  "oneLineSummary": "...",
+  "note": "...",
+  "nextAction": "...",
+  "tags": [...],
+  "status": "...",
+  "type": "...",
+  "source": "ask-mode",
+  "sourceQuestion": "...",
+  "sourceAnswerSummary": "...",
+  "sourceUrls": [...]
+}
+```
+
+服务端 `addOpportunity` 白名单新增 `oneLineSummary`，`oneLineSummary` 超过 300 字自动截断，`nextAction` 超过 500 字自动截断。
+
+### 功能 3：机会开工包（POST /api/opportunities/:id/kickoff）
+
+每个机会项新增"生成开工包"按钮（墨绿实心边，视觉上比删除更正向）。
+
+点击后：
+
+1. 不要求用户重新输入问题。
+2. 调 `POST /api/opportunities/:id/kickoff`。
+3. 回答区显示开工包（10 小节结构：项目一句话 / 为什么值得做 / 目标用户 / 最小 MVP / 第一版功能边界 / 不要做什么 / 推荐执行工具 / 第一轮验证路径 / 风险与卡点 / 下一步提示词草稿）。
+4. 复制按钮可复制开工包正文。
+5. 自动进入历史记录（`type: "kickoff-package"`），点击历史可恢复，不重新请求。
+6. questionEcho 显示"为「机会名」生成开工包"。
+
+服务端 `generateKickoffPackageForOpportunity` 行为：
+
+- 数据稀疏时（oneLineSummary / note / nextAction / tags 全空）回退到"保守版开工包"，返回中文 warning `当前机会信息不足，以下是保守版开工包，建议先补充备注或标签。`
+- 数据完整时优先调 LLM client（无 LLM 配置则回退到本地规则模板）。
+- 严格中文输出；不调用 Codex / WorkBuddy / MiniMax；不主动开启联网搜索。
+- 防御：所有进入 prompt 的字段先脱敏 `sk-xxx / API_KEY`。
+- 失败时返回中文 error；id 不存在 → 404；id 含路径分隔符 → 400。
+
+### 功能 4：上下文同步
+
+`buildOpportunityContextForPrompt` 注入新字段：
+
+- `一句话：...`
+- `下一步：...`
+- 缺字段时给中文兜底"暂无一句话说明" / "暂无下一步"，不出现 `null / undefined`。
+- 下一轮 Ask Mode 提问时（如"今天适合做什么？"）会自动带上 oneLineSummary + nextAction。
+- 不出现 raw JSON / 英文内部枚举 / API Key。
+
+### 不动的部分
+
+- 不修改后端 search / LLM / loading / 端口监听。
+- 不引入数据库 / 账号系统。
+- 不暴露 API Key。
+- 不修改 `start-ask-ui.js` 的双 loopback 监听。
+- 不保存 raw answer 全文 / raw search response。
+- 开工包生成**不**真实调用 Codex / WorkBuddy / OpenDesign / MiniMax；只做"虚拟开工包"。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

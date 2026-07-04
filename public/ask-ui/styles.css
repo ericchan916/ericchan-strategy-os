@@ -522,6 +522,23 @@ h2 {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+/* V0.3.11：开工包按钮视觉上更正向：墨绿实心边 */
+.opportunity-kickoff {
+  color: var(--accent-dark, #1e6b4d);
+  border: 1px solid rgba(30, 107, 77, 0.45);
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: rgba(30, 107, 77, 0.06);
+  font-weight: 500;
+}
+.opportunity-kickoff:hover,
+.opportunity-kickoff:focus-visible {
+  color: #ffffff;
+  background: var(--accent-dark, #1e6b4d);
+  border-color: var(--accent-dark, #1e6b4d);
 }
 
 /* V0.3.10-hotfix：删除按钮视觉上更克制：低饱和红色 + 虚线边 */
@@ -606,6 +623,18 @@ h2 {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   color: var(--accent-dark);
+}
+
+.opportunity-add-hint {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  background: rgba(30, 107, 77, 0.06);
+  border-left: 3px solid var(--accent, #2a8a5f);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .opportunity-source-urls {

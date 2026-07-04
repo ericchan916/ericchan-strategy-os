@@ -13,10 +13,12 @@ const {
   addOpportunity,
   deleteOpportunity,
   buildOpportunityContextForPrompt,
+  deriveOpportunityDraftFromAnswer,
   TYPE_LABELS,
   SCORE_LABELS,
   PRESET_TAGS,
   OPPORTUNITY_TITLE_OVERRIDES,
+  OPPORTUNITY_PERSIST_FIELDS,
   getDisplayTitle
 } = require("../scripts/opportunity-store");
 
@@ -566,3 +568,207 @@ test("buildOpportunityContextForPrompt: 不输出未识别乱码", () => {
   // 仍应有中文兜底
   assert.ok(ctx.includes("独立 AI") || ctx.includes("未命名机会") || ctx.length > 0);
 });
+
+// ============== V0.3.11 智能机会草稿 deriveOpportunityDraftFromAnswer ==============
+
+test("deriveOpportunityDraftFromAnswer: 不直接把 question 当 opportunityName", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我推荐你做一个 AI 短视频选题助手，方向是结合近期 AI 趋势和你的能力，做一个把热点转成可拍选题的工具。MVP 可以用提示词和简单网页跑通，先验证效果。"
+  });
+  assert.notEqual(draft.opportunityName, "最近有什么适合独立开发者做的小型 AI 项目？", "不应把问题原句作为机会名");
+  assert.ok(draft.opportunityName.length > 0, "应提炼出名称");
+  assert.ok(draft.opportunityName.length <= 30, "机会名应 ≤ 30 字");
+});
+
+test("deriveOpportunityDraftFromAnswer: opportunityName 命中回答里显式提到的产品方向", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做一个 AI 短视频选题助手。MVP 用提示词工程加一个简单的网页，每天产出 5 条选题，验证 EricChan 能否用起来。"
+  });
+  assert.ok(/短视频|选题/.test(draft.opportunityName), `机会名应反映回答里的核心方向: ${draft.opportunityName}`);
+});
+
+test("deriveOpportunityDraftFromAnswer: note 不复制整段 answer（应短于 300 字）", () => {
+  const longAnswer = "推荐做一个 AI 短视频选题助手。" + "这句话重复填充。".repeat(80);
+  const draft = deriveOpportunityDraftFromAnswer({ question: "q", answer: longAnswer });
+  assert.ok(draft.note.length <= 300, `note 应 ≤ 300 字, 实际 ${draft.note.length}`);
+  assert.notEqual(draft.note, longAnswer, "note 不应等于完整 answer");
+});
+
+test("deriveOpportunityDraftFromAnswer: sourceAnswerSummary ≤ 600 字", () => {
+  const longAnswer = "短答：做 AI 短视频选题助手。" + "细节。".repeat(200);
+  const draft = deriveOpportunityDraftFromAnswer({ question: "q", answer: longAnswer });
+  assert.ok(draft.sourceAnswerSummary.length <= 600, `sourceAnswerSummary 应 ≤ 600 字, 实际 ${draft.sourceAnswerSummary.length}`);
+});
+
+test("deriveOpportunityDraftFromAnswer: nextAction 是可执行句子", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI 短视频选题助手，MVP 步骤：做一个输入框页面，输入方向，输出 5 个选题 + 标题 + 口播角度，2-3 天内可上线。"
+  });
+  assert.ok(draft.nextAction.length > 0, "应生成 nextAction");
+  assert.ok(draft.nextAction.length <= 500, `nextAction 应 ≤ 500 字`);
+  // 应是"做 / 验证 / 写 / 选 / 跑"等动词开头
+  assert.ok(/^(做|验证|写|选|跑|列|找|出一个|尝试|最小|输入|输出|搭建|上线)/.test(draft.nextAction) || draft.nextAction.length >= 4, "应包含可执行动词");
+});
+
+test("deriveOpportunityDraftFromAnswer: suggestedTags 来自 PRESET_TAGS 白名单", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI Agent 类工具，独立开发者可做，AI 大模型应用方向，可快速验证。"
+  });
+  for (const t of draft.suggestedTags) {
+    assert.ok(PRESET_TAGS.includes(t), `建议标签应来自预设: ${t}`);
+  }
+  assert.ok(draft.suggestedTags.length > 0, "至少应建议一个标签");
+});
+
+test("deriveOpportunityDraftFromAnswer: sourceUrls 最多 5 条且只保留 title/url/source", () => {
+  const search = {
+    used: true,
+    sources: Array.from({ length: 10 }, (_, i) => ({ title: `T${i}`, url: `https://e.com/${i}`, source: "e.com" }))
+  };
+  const draft = deriveOpportunityDraftFromAnswer({ question: "q", answer: "a", search });
+  assert.ok(draft.sourceUrls.length <= 5, "sourceUrls ≤ 5");
+  for (const u of draft.sourceUrls) {
+    assert.ok(typeof u.title === "string" && typeof u.url === "string" && typeof u.source === "string");
+  }
+});
+
+test("deriveOpportunityDraftFromAnswer: 无法识别机会时给出中文提示", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "今天天气怎么样",
+    answer: "今天多云转晴，最高温度 25 度，东南风 3 级。"
+  });
+  assert.ok(/没有识别|手动补充|未命名/.test(draft.opportunityName) || /手动|补充/.test(draft.note), "无明确机会时给中文兜底");
+});
+
+test("deriveOpportunityDraftFromAnswer: 不保存 raw answer / raw search response / API Key", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI 选题助手，strat-os-sk-1234abcd 应当被忽略",
+    search: { used: true, rawResponse: { secret: true }, sources: [] }
+  });
+  const json = JSON.stringify(draft);
+  assert.equal(json.includes("strat-os-sk-1234abcd"), false, "不应包含 API Key 字符串");
+  assert.equal(json.includes("rawResponse"), false, "不应包含 rawResponse 字段");
+  assert.equal(json.includes("secret"), false, "不应包含 raw search response 内部字段");
+});
+
+test("deriveOpportunityDraftFromAnswer: 默认 status=validate, type=new-project-opportunity", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI 短视频选题助手"
+  });
+  assert.equal(draft.status, "validate");
+  assert.equal(draft.type, "new-project-opportunity");
+});
+
+test("deriveOpportunityDraftFromAnswer: oneLineSummary 是一句话中文（≤ 80 字）", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI 短视频选题助手，把热点和方向结合成可拍选题。"
+  });
+  assert.ok(draft.oneLineSummary.length > 0, "应有一句话说明");
+  assert.ok(draft.oneLineSummary.length <= 80, "一句话说明应 ≤ 80 字");
+});
+
+test("deriveOpportunityDraftFromAnswer: sourceQuestion 保留用户原始问题", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "我想做 AI 选题",
+    answer: "推荐 AI 短视频选题助手"
+  });
+  assert.equal(draft.sourceQuestion, "我想做 AI 选题");
+});
+
+test("deriveOpportunityDraftFromAnswer: 来源标识 source = 'ask-mode' 或 'search'", () => {
+  const d1 = deriveOpportunityDraftFromAnswer({ question: "q", answer: "推荐做 AI 助手" });
+  const d2 = deriveOpportunityDraftFromAnswer({ question: "q", answer: "推荐做 AI 助手", search: { used: true, sources: [{ title: "T", url: "u", source: "s" }] } });
+  assert.equal(d1.source, "ask-mode");
+  assert.equal(d2.source, "search");
+});
+
+test("deriveOpportunityDraftFromAnswer: source 不接受 body 控制的 filePath / apiKey", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "推荐做 AI 助手",
+    // 尝试注入敏感字段
+    filePath: "data/secret.json",
+    apiKey: "sk-1234"
+  });
+  const json = JSON.stringify(draft);
+  assert.equal(json.includes("filePath"), false);
+  assert.equal(json.includes("sk-1234"), false);
+});
+
+// ============== V0.3.11 oneLineSummary 持久化 + 上下文注入 ==============
+
+test("OPPORTUNITY_PERSIST_FIELDS: 包含 oneLineSummary", () => {
+  assert.ok(OPPORTUNITY_PERSIST_FIELDS.includes("oneLineSummary"), "白名单应包含 oneLineSummary");
+});
+
+test("addOpportunity: 支持保存 oneLineSummary 与 nextAction (中文)", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-0311-"));
+  const result = addOpportunity({
+    rootDir,
+    input: {
+      title: "AI 短视频选题助手",
+      oneLineSummary: "把热点和方向结合，生成可拍的短视频选题。",
+      note: "适合独立开发者 MVP 验证。",
+      nextAction: "做一个最小网页：输入方向 → 输出 5 个选题。",
+      tags: ["高潜力", "可快速验证"],
+      source: "ask-mode"
+    }
+  });
+  assert.equal(result.opportunity.opportunityName, "AI 短视频选题助手");
+  assert.equal(result.opportunity.oneLineSummary, "把热点和方向结合，生成可拍的短视频选题。");
+  assert.equal(result.opportunity.nextAction, "做一个最小网页：输入方向 → 输出 5 个选题。");
+  // 持久化
+  const saved = loadOpportunityPool({ rootDir });
+  assert.equal(saved.opportunities[0].oneLineSummary, "把热点和方向结合，生成可拍的短视频选题。");
+  assert.equal(saved.opportunities[0].nextAction, "做一个最小网页：输入方向 → 输出 5 个选题。");
+});
+
+test("addOpportunity: oneLineSummary 过长会被截断（不超过 300 字）", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-0311-trunc-"));
+  const long = "细节".repeat(400);
+  const result = addOpportunity({
+    rootDir,
+    input: { title: "测试", oneLineSummary: long, nextAction: long }
+  });
+  assert.ok(result.opportunity.oneLineSummary.length <= 300, "oneLineSummary ≤ 300");
+  assert.ok(result.opportunity.nextAction.length <= 500, "nextAction ≤ 500");
+});
+
+test("buildOpportunityContextForPrompt: 包含 oneLineSummary 与 nextAction", () => {
+  const items = [
+    {
+      id: "1",
+      opportunityName: "AI 短视频选题助手",
+      status: "validate",
+      type: "new-project-opportunity",
+      oneLineSummary: "把热点和方向结合，生成可拍的短视频选题。",
+      nextAction: "做一个最小网页：输入方向 → 输出 5 个选题。",
+      tags: ["高潜力"],
+      notes: "n"
+    }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.ok(ctx.includes("一句话"), "应在 prompt 注入'一句话'说明");
+  assert.ok(ctx.includes("把热点和方向结合"), "应包含一句话摘要正文");
+  assert.ok(ctx.includes("下一步"), "应包含'下一步'字段");
+  assert.ok(ctx.includes("做一个最小网页"), "应包含 nextAction 正文");
+});
+
+test("buildOpportunityContextForPrompt: 缺 oneLineSummary / nextAction 时给中文兜底而不是 null", () => {
+  const items = [
+    { id: "1", opportunityName: "A", status: "validate", type: "new-project-opportunity", notes: "n", tags: [] }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.equal(/>\s*null\s*</.test(ctx), false, "不应出现 null");
+  assert.equal(/>\s*undefined\s*</.test(ctx), false, "不应出现 undefined");
+  // 应有'暂无一句话说明' 或类似兜底
+  assert.ok(/暂无|请补充|待补充/.test(ctx), "缺字段应有中文兜底");
+});
+
