@@ -524,6 +524,21 @@ h2 {
   margin-top: 6px;
 }
 
+/* V0.3.10-hotfix：删除按钮视觉上更克制：低饱和红色 + 虚线边 */
+.opportunity-delete {
+  color: #a04a3a;
+  border: 1px dashed rgba(160, 74, 58, 0.35);
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: transparent;
+}
+.opportunity-delete:hover,
+.opportunity-delete:focus-visible {
+  color: #ffffff;
+  background: #a04a3a;
+  border-color: #a04a3a;
+}
+
 .add-opportunity-button {
   display: inline-flex;
   align-items: center;

@@ -7,7 +7,8 @@ const { askStrategyOsAsync } = require("./ask-strategy-os");
 const {
   loadOpportunityPool,
   updateOpportunity,
-  addOpportunity
+  addOpportunity,
+  deleteOpportunity
 } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
@@ -148,6 +149,23 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
       } catch (error) {
         const status = error.statusCode || 400;
         sendJson(res, status, { error: String(error.message || "机会池保存失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+      }
+      return;
+    }
+
+    // V0.3.10-hotfix：DELETE /api/opportunities/:id - 从机会池移除一个机会
+    // 安全约束：
+    //  - id 必须是路径最后一段，不允许 .. 或路径分隔符（deleteOpportunity 内部校验）
+    //  - 不接受 body / query 控制文件路径
+    //  - 404 / 400 返回中文错误
+    if (req.method === "DELETE" && /^\/api\/opportunities\/[^/]+$/.test(url.pathname)) {
+      try {
+        const id = opportunityIdFromPath(url.pathname);
+        const result = deleteOpportunity({ rootDir, id });
+        sendJson(res, 200, { removed: result.removed, opportunities: result.opportunities, stats: result.stats });
+      } catch (error) {
+        const status = error.statusCode || 400;
+        sendJson(res, status, { error: String(error.message || "机会删除失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
       }
       return;
     }

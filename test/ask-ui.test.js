@@ -225,15 +225,16 @@ test("ask UI opportunities API returns stats and supports whitelisted PATCH", as
     const patchResponse = await request(baseUrl, {
       method: "PATCH",
       path: "/api/opportunities/opp-brief",
-      body: { status: "watch", notes: "网页备注", opportunityName: "不能改名" }
+      body: { status: "watch", notes: "网页备注", opportunityName: "我重命名了" }
     });
     const patchPayload = JSON.parse(patchResponse.body);
 
     assert.equal(patchResponse.status, 200);
     assert.equal(patchPayload.opportunity.status, "watch");
     assert.equal(patchPayload.opportunity.notes, "网页备注");
+    assert.equal(patchPayload.opportunity.opportunityName, "我重命名了"); // V0.3.10-hotfix：现在允许
     const saved = JSON.parse(fs.readFileSync(fixture.poolPath, "utf8"));
-    assert.equal(saved.opportunities[0].opportunityName, "Independent AI opportunity brief MVP");
+    assert.equal(saved.opportunities[0].opportunityName, "我重命名了");
   });
 });
 

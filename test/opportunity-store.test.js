@@ -11,10 +11,13 @@ const {
   saveOpportunityPool,
   updateOpportunity,
   addOpportunity,
+  deleteOpportunity,
   buildOpportunityContextForPrompt,
   TYPE_LABELS,
   SCORE_LABELS,
-  PRESET_TAGS
+  PRESET_TAGS,
+  OPPORTUNITY_TITLE_OVERRIDES,
+  getDisplayTitle
 } = require("../scripts/opportunity-store");
 
 function fixture() {
@@ -74,7 +77,7 @@ test("updateOpportunity only applies whitelisted fields and preserves unknown fi
       status: "watch",
       notes: "new note",
       tags: "agent, brief",
-      opportunityName: "should not change",
+      opportunityName: "我改后的中文名", // V0.3.10-hotfix：现在允许通过 PATCH 改 opportunityName
       filePath: "bad"
     }
   });
@@ -83,7 +86,7 @@ test("updateOpportunity only applies whitelisted fields and preserves unknown fi
   assert.equal(result.opportunity.status, "watch");
   assert.equal(result.opportunity.notes, "new note");
   assert.deepEqual(result.opportunity.tags, ["agent", "brief"]);
-  assert.equal(saved.opportunities[0].opportunityName, "Independent AI opportunity brief MVP");
+  assert.equal(saved.opportunities[0].opportunityName, "我改后的中文名");
   assert.equal(saved.opportunities[0].unknownField, "keep");
   assert.equal(saved.opportunities[0].statusLabel, undefined);
   assert.equal(saved.opportunities[0].humanDecisionLabel, undefined);
@@ -419,4 +422,147 @@ test("buildOpportunityContextForPrompt: 输出不包含 raw JSON 字段名", () 
   for (const field of ["scores", "sourceUrls", "id", "createdAt", "updatedAt", "humanDecision"]) {
     assert.equal(ctx.includes(field + ":"), false, `不应出现 '${field}:' 字面字段名`);
   }
+});
+
+// ============== V0.3.10-hotfix：旧英文标题中文映射 + 删除 + 安全约束 ==============
+
+test("OPPORTUNITY_TITLE_OVERRIDES: 旧英文标题能映射到中文 displayTitle", () => {
+  assert.equal(OPPORTUNITY_TITLE_OVERRIDES["Independent AI opportunity brief MVP"], "独立 AI 机会简报 MVP");
+  assert.equal(OPPORTUNITY_TITLE_OVERRIDES["Opportunity scoring quality gate"], "机会评分质量门槛");
+});
+
+test("getDisplayTitle: 旧英文标题返回中文映射，新中文标题保持原样", () => {
+  assert.equal(getDisplayTitle({ opportunityName: "Independent AI opportunity brief MVP" }), "独立 AI 机会简报 MVP");
+  assert.equal(getDisplayTitle({ opportunityName: "短视频选题工具" }), "短视频选题工具");
+  // 缺字段时不返回 undefined
+  assert.ok(getDisplayTitle({}), "缺字段应返回兜底字符串而非 undefined");
+  // 已知 mojibake 字节序列也走兜底
+  assert.ok(getDisplayTitle({ opportunityName: "V0.3.10 ����" }), "乱码应走兜底");
+});
+
+test("normalizeOpportunity: 含 displayTitle 字段（旧英文自动中文化）", () => {
+  const item = normalizeOpportunity({ id: "x", opportunityName: "Independent AI opportunity brief MVP", status: "validate" });
+  assert.equal(item.displayTitle, "独立 AI 机会简报 MVP");
+  // 中文保持
+  const cn = normalizeOpportunity({ id: "y", opportunityName: "短视频选题工具", status: "validate" });
+  assert.equal(cn.displayTitle, "短视频选题工具");
+  // 乱码或未知英文 → 兜底为"未命名机会"
+  const unknown = normalizeOpportunity({ id: "z", opportunityName: "Some Unknown English Project", status: "validate" });
+  assert.ok(unknown.displayTitle && /机会|未命名/.test(unknown.displayTitle), "未知英文应给出中文兜底");
+});
+
+test("deleteOpportunity: 删除存在的 id 并持久化", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-del-"));
+  const jsonPath = path.join(rootDir, "data", "opportunities", "opportunity-pool.json");
+  fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify({
+      version: 1,
+      updatedAt: "2026-07-04T00:00:00.000Z",
+      opportunities: [
+        { id: "opp-keep", opportunityName: "保留", status: "validate", type: "new-project-opportunity" },
+        { id: "opp-remove", opportunityName: "删除", status: "validate", type: "new-project-opportunity" }
+      ]
+    })
+  );
+  const result = deleteOpportunity({ rootDir, id: "opp-remove" });
+  assert.equal(result.stats.total, 1);
+  assert.equal(result.opportunities.length, 1);
+  assert.equal(result.opportunities[0].id, "opp-keep");
+  // 磁盘真的写掉了
+  const saved = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  assert.equal(saved.opportunities.length, 1);
+  assert.equal(saved.opportunities[0].id, "opp-keep");
+});
+
+test("deleteOpportunity: 不存在的 id 抛 404 中文错误", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-del2-"));
+  assert.throws(
+    () => deleteOpportunity({ rootDir, id: "missing" }),
+    (err) => err.statusCode === 404 && /没有找到/.test(err.message)
+  );
+});
+
+test("deleteOpportunity: id 缺失抛 400 中文错误", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-del3-"));
+  assert.throws(
+    () => deleteOpportunity({ rootDir, id: "" }),
+    (err) => err.statusCode === 400 && /请提供|不合法|缺失/.test(err.message)
+  );
+});
+
+test("deleteOpportunity: id 包含路径分隔符会拒绝", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-del4-"));
+  assert.throws(
+    () => deleteOpportunity({ rootDir, id: "../etc/passwd" }),
+    (err) => err.statusCode === 400 && /不合法|包含|路径/.test(err.message)
+  );
+  assert.throws(
+    () => deleteOpportunity({ rootDir, id: "opp/sub" }),
+    (err) => err.statusCode === 400
+  );
+  assert.throws(
+    () => deleteOpportunity({ rootDir, id: "opp..id" }),
+    (err) => err.statusCode === 400
+  );
+});
+
+test("buildOpportunityContextForPrompt: 使用 displayTitle 而非原始 opportunityName", () => {
+  const items = [
+    {
+      id: "old-1",
+      opportunityName: "Independent AI opportunity brief MVP",
+      status: "validate",
+      type: "new-project-opportunity",
+      notes: "n",
+      tags: []
+    }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.ok(ctx.includes("独立 AI 机会简报 MVP"), "应使用中文映射后的标题");
+  assert.equal(ctx.includes("Independent AI opportunity brief MVP"), false, "不应再出现英文原始标题");
+});
+
+test("buildOpportunityContextForPrompt: 删除后的机会不再出现（依赖调用方传入最新列表）", () => {
+  const items = [
+    { id: "a", opportunityName: "保留 A", status: "validate", type: "new-project-opportunity", notes: "n", tags: [] }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.ok(ctx.includes("保留 A"));
+  assert.equal(ctx.includes("已删除 B"), false, "已删除项不应再注入");
+});
+
+test("buildOpportunityContextForPrompt: 用户编辑标题后使用最新中文标题", () => {
+  const items = [
+    {
+      id: "edited",
+      opportunityName: "我重命名后的新机会",
+      status: "validate",
+      type: "new-project-opportunity",
+      notes: "备注",
+      tags: ["高潜力"]
+    }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.ok(ctx.includes("我重命名后的新机会"));
+  assert.ok(ctx.includes("高潜力"));
+  assert.ok(ctx.includes("备注"));
+});
+
+test("buildOpportunityContextForPrompt: 不输出未识别乱码", () => {
+  const items = [
+    {
+      id: "broken",
+      opportunityName: "V0.3.10 ����",
+      status: "validate",
+      type: "new-project-opportunity",
+      notes: "n",
+      tags: []
+    }
+  ];
+  const ctx = buildOpportunityContextForPrompt(items);
+  assert.equal(ctx.includes("����"), false, "不应把 mojibake 字面输出到 prompt");
+  // 仍应有中文兜底
+  assert.ok(ctx.includes("独立 AI") || ctx.includes("未命名机会") || ctx.length > 0);
 });

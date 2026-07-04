@@ -19,9 +19,13 @@ const {
   renderSearchProcess,
   renderOpportunityPanel,
   buildAddOpportunityFormMarkup,
+  normalizeOpportunityForUi,
+  getDisplayTitleClient,
+  createApp,
   PRESET_TAGS,
   OPPORTUNITY_TYPE_LABELS,
-  OPPORTUNITY_SCORE_LABELS
+  OPPORTUNITY_SCORE_LABELS,
+  OPPORTUNITY_TITLE_OVERRIDES
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -39,24 +43,39 @@ function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false,
 
 // 用于 createApp / restoreHistoryItem 测试：构造最简 fake DOM 节点
 function makeFakeNodes() {
-  const fakeEl = (overrides = {}) => ({
-    value: "",
-    innerHTML: "",
-    textContent: "",
-    classList: { add() {}, remove() {}, contains() { return false; } },
-    hidden: false,
-    disabled: false,
-    appendChild() {},
-    addEventListener() {},
-    setAttribute() {},
-    removeAttribute() {},
-    focus() {},
-    setSelectionRange() {},
-    scrollIntoView() {},
-    dataset: {},
-    children: [],
-    ...overrides
-  });
+  const fakeEl = (overrides = {}) => {
+    const listeners = {};
+    const el = {
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      classList: { add() {}, remove() {}, contains() { return false; } },
+      hidden: false,
+      disabled: false,
+      appendChild() {},
+      addEventListener(event, handler) { (listeners[event] = listeners[event] || []).push(handler); },
+      dispatchEvent(event) {
+        const handlers = listeners[event.type] || [];
+        for (const h of handlers) h(event);
+      },
+      removeEventListener() {},
+      setAttribute() {},
+      removeAttribute() {},
+      focus() {},
+      setSelectionRange() {},
+      scrollIntoView() {},
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      click() {
+        const handlers = listeners.click || [];
+        for (const h of handlers) h({});
+      },
+      dataset: {},
+      children: [],
+      ...overrides
+    };
+    return el;
+  };
   return {
     questionInput: fakeEl(),
     askButton: fakeEl(),
@@ -76,7 +95,9 @@ function makeFakeNodes() {
     opportunityStats: fakeEl(),
     opportunityList: fakeEl(),
     opportunityEmpty: fakeEl(),
-    opportunityStatus: fakeEl()
+    opportunityStatus: fakeEl(),
+    addOpportunityButton: fakeEl(),
+    addOpportunityContainer: fakeEl()
   };
 }
 
@@ -995,10 +1016,14 @@ test("renderOpportunityPanel: 渲染中文状态、统计、编辑表单和空�
   });
 
   assert.ok(html.statsHtml.includes("待验证 1"));
-  assert.ok(html.listHtml.includes("Independent AI opportunity brief MVP"));
+  // V0.3.10-hotfix：旧英文标题会被显示为中文（独立 AI 机会简报 MVP）
+  assert.ok(html.listHtml.includes("独立 AI 机会简报 MVP"), "应显示中文映射");
   assert.ok(html.listHtml.includes("待验证"));
   assert.ok(html.listHtml.includes("编辑"));
   assert.ok(html.listHtml.includes("保存"));
+  assert.ok(html.listHtml.includes("删除"), "V0.3.10-hotfix 应渲染'删除'按钮");
+  // 编辑表单应包含"机会名称"输入
+  assert.ok(/data-op-name="opp-1"/.test(html.listHtml), "编辑表单应含机会名称输入");
   assert.equal(html.listHtml.includes("validate"), true, "select value 可保留内部值，但可见状态应中文");
 });
 
@@ -1360,6 +1385,87 @@ test("buildAddOpportunityFormMarkup: sourceUrls 可选注入", () => {
   assert.ok(html.includes("T1"), "应包含来源标题");
 });
 
+// ============== V0.3.10-hotfix：旧英文标题中文化 + 删除按钮 + 编辑机会名称 ==============
+
+test("OPPORTUNITY_TITLE_OVERRIDES: 旧英文标题中文映射", () => {
+  assert.equal(OPPORTUNITY_TITLE_OVERRIDES["Independent AI opportunity brief MVP"], "独立 AI 机会简报 MVP");
+  assert.equal(OPPORTUNITY_TITLE_OVERRIDES["Opportunity scoring quality gate"], "机会评分质量门槛");
+});
+
+test("getDisplayTitleClient: 旧英文 → 中文 / 中文保持 / 乱码兜底", () => {
+  assert.equal(getDisplayTitleClient({ opportunityName: "Independent AI opportunity brief MVP" }), "独立 AI 机会简报 MVP");
+  assert.equal(getDisplayTitleClient({ opportunityName: "短视频选题工具" }), "短视频选题工具");
+  assert.ok(getDisplayTitleClient({}).length > 0, "缺字段应返回兜底字符串");
+});
+
+test("normalizeOpportunityForUi: 含 displayTitle 字段（旧英文自动中文化）", () => {
+  const item = normalizeOpportunityForUi({ id: "x", opportunityName: "Independent AI opportunity brief MVP", status: "validate" });
+  assert.equal(item.displayTitle, "独立 AI 机会简报 MVP");
+  const cn = normalizeOpportunityForUi({ id: "y", opportunityName: "短视频选题工具", status: "validate" });
+  assert.equal(cn.displayTitle, "短视频选题工具");
+});
+
+test("renderOpportunityPanel: 旧英文标题在 UI 上显示为中文（不显示英文原文）", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      { id: "1", opportunityName: "Independent AI opportunity brief MVP", status: "validate", type: "new-project-opportunity", humanDecision: "accepted" }
+    ],
+    stats: { total: 1 }
+  });
+  assert.ok(listHtml.includes("独立 AI 机会简报 MVP"), "应显示中文映射");
+  assert.equal(listHtml.includes("Independent AI opportunity brief MVP"), false, "不应再显示英文原始标题");
+});
+
+test("renderOpportunityPanel: mojibake 标题走中文兜底（不显示乱码）", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      { id: "1", opportunityName: "V0.3.10 ����", status: "validate", type: "new-project-opportunity" }
+    ],
+    stats: { total: 1 }
+  });
+  assert.equal(listHtml.includes("����"), false, "不应把 mojibake 字节输出到 HTML");
+});
+
+test("renderOpportunityPanel: 每个机会有“删除”按钮 + 编辑表单含“机会名称”输入", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      { id: "1", opportunityName: "测试", status: "validate", type: "new-project-opportunity" }
+    ],
+    stats: { total: 1 }
+  });
+  assert.ok(/data-op-delete="1"/.test(listHtml), "应渲染 data-op-delete 按钮");
+  assert.ok(/删除<\/button>/.test(listHtml), "应渲染'删除'按钮文字");
+  // V0.3.10-hotfix：编辑表单必须含"机会名称"输入
+  assert.ok(/data-op-name="1"/.test(listHtml), "编辑表单应有'机会名称'输入");
+  assert.ok(/机会名称/.test(listHtml), "编辑表单应含'机会名称' label");
+});
+
+test("renderOpportunityPanel: 状态 / 类型 / score 字段全部用中文 label - V0.3.10-hotfix (确认未回归)", () => {
+  const { listHtml } = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "1",
+        opportunityName: "A",
+        status: "validate",
+        type: "new-project-opportunity",
+        scores: { monetizationPotential: 4 }
+      }
+    ],
+    stats: { total: 1 }
+  });
+  // V0.3.10-hotfix：可见 label 必须是中文
+  assert.ok(listHtml.includes("待验证"), "status 应显示中文 label");
+  assert.ok(listHtml.includes("新项目机会"), "type 应显示中文 label");
+  assert.ok(listHtml.includes("变现潜力"), "score 字段应显示中文 label");
+  // V0.3.10-hotfix：option / select / input 的 value 可以保留英文 enum（用于提交），
+  // 但 status badge（可视区域）必须是中文而不直接显示 'validate'。
+  // 这里断言：可见的英文 enum 不会作为纯文本出现在 status / type 徽标上：
+  // 我们用 - 无空白地 - 移除 <option> 标签后再检查。
+  const visibleText = listHtml.replace(/<option[^>]*>[^<]*<\/option>/g, "");
+  assert.equal(/>\s*validate\s*</.test(visibleText), false, "可视文本中不应出现英文 enum 'validate'");
+  assert.equal(/>\s*new-project-opportunity\s*</.test(visibleText), false, "可视文本中不应出现英文 enum 'new-project-opportunity'");
+});
+
 // ============== V0.3.10 HTML / CSS / app.js 静态断言 ==============
 
 test("HTML 顶部状态条 #globalStatusText 默认文案包含'默认不联网'", () => {
@@ -1590,4 +1696,205 @@ test("startAskUiServer: PATCH /api/opportunities/:id 不回归", async () => {
   } finally {
     await new Promise((resolve) => server.close(() => resolve()));
   }
+});
+
+// ============== V0.3.10-hotfix: DELETE /api/opportunities/:id 集成测试 ==============
+
+test("startAskUiServer: DELETE /api/opportunities/:id 可删除存在项并持久化", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-del-"));
+  const server = await startAskUiServer({ rootDir, port: 5301, host: "127.0.0.1" });
+  try {
+    // 先 POST 创建两个
+    const { json: c1 } = await httpRequest({ port: 5301, method: "POST", path: "/api/opportunities", body: { title: "保留项" } });
+    const { json: c2 } = await httpRequest({ port: 5301, method: "POST", path: "/api/opportunities", body: { title: "删除项" } });
+    const removeId = c2.opportunity.id;
+    // DELETE
+    const { status, json: d } = await httpRequest({ port: 5301, method: "DELETE", path: `/api/opportunities/${encodeURIComponent(removeId)}` });
+    assert.equal(status, 200);
+    assert.equal(d.removed.id, removeId);
+    assert.equal(d.stats.total, 1);
+    // GET 确认真的删了
+    const { json: g } = await httpRequest({ port: 5301, method: "GET", path: "/api/opportunities" });
+    assert.equal(g.opportunities.length, 1);
+    assert.equal(g.opportunities[0].id, c1.opportunity.id);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: DELETE 不存在 id 返回 404 中文错误", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-del404-"));
+  const server = await startAskUiServer({ rootDir, port: 5302, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({ port: 5302, method: "DELETE", path: "/api/opportunities/opp-does-not-exist" });
+    assert.equal(status, 404);
+    assert.ok(/没有找到/.test(json.error), "应返回中文错误");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: DELETE 路径含 .. 返回 400 中文错误（路径注入防护）", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-delbad-"));
+  const server = await startAskUiServer({ rootDir, port: 5303, host: "127.0.0.1" });
+  try {
+    // /api/opportunities/../etc/passwd 实际上会被 URL 归一化为 /etc/passwd（不在匹配路径里）
+    // 因此用一个会到达路由但含 . 的 id：
+    // 由于 /api/opportunities/:id 路由要求 [^/]+，需要 encodeURIComponent('opp..id') 让 .. 进入 id
+    const id = encodeURIComponent("opp..id");
+    const { status, json } = await httpRequest({ port: 5303, method: "DELETE", path: `/api/opportunities/${id}` });
+    assert.equal(status, 400, "应拒绝含 .. 的 id");
+    assert.ok(/不合法|包含|路径/.test(json.error), "应返回中文错误");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: PATCH 支持更新 opportunityName (中文标题)", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-rename-"));
+  const server = await startAskUiServer({ rootDir, port: 5304, host: "127.0.0.1" });
+  try {
+    const { json: c } = await httpRequest({
+      port: 5304,
+      method: "POST",
+      path: "/api/opportunities",
+      body: { title: "原名" }
+    });
+    const id = c.opportunity.id;
+    const { status, json: u } = await httpRequest({
+      port: 5304,
+      method: "PATCH",
+      path: `/api/opportunities/${encodeURIComponent(id)}`,
+      body: { opportunityName: "我重命名后的中文机会" }
+    });
+    assert.equal(status, 200);
+    assert.equal(u.opportunity.opportunityName, "我重命名后的中文机会");
+    assert.equal(u.opportunity.displayTitle, "我重命名后的中文机会");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: GET /api/opportunities 返回带 displayTitle 的列表（旧英文自动中文化）", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-ui-disp-"));
+  // 预写入旧英文数据
+  const jsonPath = path.join(rootDir, "data", "opportunities", "opportunity-pool.json");
+  fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify({
+      version: 1,
+      updatedAt: "2026-07-04T00:00:00.000Z",
+      opportunities: [
+        { id: "opp-old-1", opportunityName: "Independent AI opportunity brief MVP", status: "validate", type: "new-project-opportunity" }
+      ]
+    })
+  );
+  const server = await startAskUiServer({ rootDir, port: 5305, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({ port: 5305, method: "GET", path: "/api/opportunities" });
+    assert.equal(status, 200);
+    assert.equal(json.opportunities[0].opportunityName, "Independent AI opportunity brief MVP", "底层数据保留原文");
+    assert.equal(json.opportunities[0].displayTitle, "独立 AI 机会简报 MVP", "服务端应暴露 displayTitle");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+// ============== V0.3.10-hotfix: createApp 真实链路 = "加入机会池" 按钮 ==============
+
+test("createApp: 有回答时加入机会池按钮可见，无回答时隐藏", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  app.mount();
+  // 模拟初始空状态
+  app.setCurrentAnswer("", "");
+  const btn = nodes.addOpportunityButton;
+  assert.equal(btn.hidden, true, "无回答时按钮应隐藏");
+  // 模拟有回答
+  app.setCurrentAnswer("这里有一些回答内容", "llm", { question: "测试" });
+  assert.equal(btn.hidden, false, "有回答时按钮应显示");
+  assert.equal(btn.disabled, false, "不应被 disabled");
+  // 清空回答 → 重新隐藏
+  app.setCurrentAnswer("", "llm");
+  assert.equal(btn.hidden, true, "清空回答后按钮应隐藏");
+});
+
+test("createApp: 点击加入机会池按钮后表单注入到容器", () => {
+  const nodes = makeFakeNodes();
+  const container = nodes.addOpportunityContainer;
+  container.querySelector = (sel) => {
+    if (container.innerHTML && sel === "[data-op-add-form]") return container._form || null;
+    if (container.innerHTML && sel === "[data-op-add-title]") return container._title || null;
+    return null;
+  };
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: {} }) }), storage: null });
+  app.mount();
+  app.setCurrentAnswer("回答内容, 推荐做短视频选题工具", "llm", { question: "适合做短视频选题工具吗" });
+  // 模拟点击
+  nodes.addOpportunityButton.click();
+  // 容器应显示
+  assert.equal(container.hidden, false, "点击后容器应显示");
+  // 注入的 innerHTML 是表单 markup，应当包含 form 与 title input
+  assert.ok(/data-op-add-form/.test(container.innerHTML), "应渲染加入机会池表单 markup");
+  assert.ok(/data-op-add-title/.test(container.innerHTML), "应包含标题输入框");
+  assert.ok(/适合做短视频选题工具/.test(container.innerHTML), "标题应预填问题");
+});
+
+test("createApp: 提交 POST 成功后容器关闭并刷新机会池", async () => {
+  const nodes = makeFakeNodes();
+  // mock form / inputs that respond to querySelector
+  const fakeForm = {
+    addEventListener(event, handler) { if (event === "submit") this._submitHandler = handler; },
+    dispatchEvent() { if (this._submitHandler) { const ev = { preventDefault() {} }; this._submitHandler(ev); } }
+  };
+  const fakeInput = { value: "" };
+  const fakeStatus = { value: "validate" };
+  const fakeType = { value: "new-project-opportunity" };
+  const fakeNote = { value: "note" };
+  const fakeTagsContainer = { querySelectorAll: () => [] };
+  const container = nodes.addOpportunityContainer;
+  container.querySelector = (sel) => {
+    if (sel === "[data-op-add-form]") return fakeForm;
+    if (sel === "[data-op-add-title]") return fakeInput;
+    if (sel === "[data-op-add-status]") return fakeStatus;
+    if (sel === "[data-op-add-type]") return fakeType;
+    if (sel === "[data-op-add-note]") return fakeNote;
+    if (sel === "[data-op-add-tags]") return fakeTagsContainer;
+    return null;
+  };
+  const fetched = [];
+  const fetchImpl = (path, init = {}) => {
+    fetched.push({ path, method: init.method || "GET" });
+    if (init.method === "POST") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          opportunity: { id: "new-1", opportunityName: "新建", statusLabel: "待验证", typeLabel: "新项目机会" },
+          opportunities: [{ id: "new-1", opportunityName: "新建", statusLabel: "待验证", typeLabel: "新项目机会", notes: "", nextAction: "", tags: [], displayTitle: "新建" }],
+          stats: { total: 1 }
+        })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: {} }) });
+  };
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  app.setCurrentAnswer("新建回答", "llm", { question: "新机会" });
+  nodes.addOpportunityButton.click();
+  // 模拟用户在 title 输入框输入
+  fakeInput.value = "新机会名";
+  // 模拟提交
+  fakeForm.dispatchEvent();
+  // 等待 promise
+  await new Promise((r) => setTimeout(r, 30));
+  // POST 应发出
+  assert.ok(fetched.some((f) => f.method === "POST" && f.path === "/api/opportunities"), "应发送 POST /api/opportunities");
+  // 容器应关闭
+  assert.equal(container.hidden, true, "成功提交后表单应关闭");
 });

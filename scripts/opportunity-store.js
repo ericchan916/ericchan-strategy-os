@@ -41,6 +41,51 @@ const SCORE_LABELS = {
   currentStageFit: "当前阶段匹配度"
 };
 
+// V0.3.10-hotfix：旧英文 opportunityName 的中文映射（不动底层数据，仅 UI 兜底）
+const OPPORTUNITY_TITLE_OVERRIDES = {
+  "Independent AI opportunity brief MVP": "独立 AI 机会简报 MVP",
+  "Opportunity scoring quality gate": "机会评分质量门槛"
+};
+
+const UNKNOWN_ENGLISH_PROJECT_TITLES = new Set(Object.keys(OPPORTUNITY_TITLE_OVERRIDES));
+
+// V0.3.10-hotfix：启发式检测"mojibake / 乱码"，用于在 UI 与 prompt 注入时走中文兜底
+function looksLikeMojibake(value) {
+  if (!value) return false;
+  const s = String(value);
+  // U+FFFD (replacement char) 或 GBK 字节被 latin-1 错读常见的乱码
+  if (s.includes("�")) return true;
+  // 锟斤拷 / 烫烫烫 / etc
+  if (/锟斤拷|烫烫烫|����|ä¸ç¥/.test(s)) return true;
+  // 连续 4+ 个 replacement char 一定是损坏
+  if (/�{2,}/.test(s)) return true;
+  return false;
+}
+
+// V0.3.10-hotfix：把任意 opportunityName 解析为"前端要展示"的中文标题
+// 优先级：known override > 原 title (若不是乱码/英文) > 中文兜底
+function getDisplayTitle(item) {
+  const raw = item && typeof item === "object" ? item : {};
+  const original = String(raw.opportunityName || raw.title || "").trim();
+  if (!original) return "未命名机会";
+  if (OPPORTUNITY_TITLE_OVERRIDES[original]) return OPPORTUNITY_TITLE_OVERRIDES[original];
+  if (looksLikeMojibake(original)) {
+    // 已知 mojibake 序列：尝试给一个合适的中文说明
+    if (/^V0\.3\./.test(original) || /V0\.3\.10/.test(original)) {
+      return "V0.3.10 测试机会（标题损坏，请编辑）";
+    }
+    return "机会标题损坏，请编辑补充";
+  }
+  // 已是中文为主
+  if (/[一-龥]/.test(original)) return original;
+  // 纯英文 / 未知英文标题：给出中文提示，建议用户编辑
+  if (UNKNOWN_ENGLISH_PROJECT_TITLES.has(original)) {
+    return OPPORTUNITY_TITLE_OVERRIDES[original];
+  }
+  // 兜底：用 "机会：xxx" 让用户能看出原值但界面是中文
+  return `机会：${original}`;
+}
+
 // V0.3.10：预设标签 chips 白名单
 const PRESET_TAGS = [
   "AI Agent",
@@ -129,6 +174,7 @@ function normalizeOpportunity(item) {
     ...raw,
     id: String(raw.id || ""),
     opportunityName: String(raw.opportunityName || raw.title || "未命名机会"),
+    displayTitle: getDisplayTitle(raw), // V0.3.10-hotfix：旧英文 / 乱码的兜底中文标题
     status,
     statusLabel: STATUS_LABELS[status],
     humanDecision,
@@ -267,7 +313,9 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
 
   const lines = ["", "【当前机会池摘要】"];
   top.forEach((raw, idx) => {
-    const name = String(raw.opportunityName || raw.title || "未命名机会").trim() || "未命名机会";
+    // V0.3.10-hotfix：使用 displayTitle 替代原始 opportunityName，
+    // 旧英文 / 乱码标题会被自动中文化。
+    const name = getDisplayTitle(raw);
     const status = String(raw.status || "inbox");
     const statusText = STATUS_LABELS[status] || status;
     const typeText = TYPE_LABELS[raw.type] || (raw.type ? String(raw.type) : "新项目机会");
@@ -344,6 +392,12 @@ function buildPatch(body = {}) {
     if (!STATUSES.has(status)) throw new Error("机会状态不合法。");
     patch.status = status;
   }
+  // V0.3.10-hotfix：允许更新 opportunityName（中文标题可在 UI 编辑后保存）
+  if (body.opportunityName != null) {
+    const name = String(body.opportunityName).trim();
+    if (!name) throw new Error("机会名称不能为空。");
+    patch.opportunityName = name.slice(0, 200);
+  }
   // V0.3.10：允许更新 type / nextAction
   if (body.type != null) {
     const type = String(body.type);
@@ -380,6 +434,58 @@ function updateOpportunity({ rootDir = process.cwd(), id, patch = {} } = {}) {
   };
 }
 
+// V0.3.10-hotfix：删除一个机会
+// 安全约束：
+//  - id 缺失 / 含路径分隔符 / 含 .. 都拒绝
+//  - id 不存在 → 404 中文错误
+//  - 只删除指定 id，不动其他项
+//  - 删除前自动写一份本地备份（带时间戳）到 data/opportunities/backups/（gitignore）
+//  - 不接受 body / query 控制文件路径
+function isValidOpportunityId(id) {
+  if (typeof id !== "string") return false;
+  if (!id.trim()) return false;
+  if (id.length > 200) return false;
+  // 拒绝任何形式的路径分隔符与 .. / 控制字符
+  if (/[\/\\\.]/.test(id)) return false;
+  if (/[\x00-\x1f]/.test(id)) return false;
+  return true;
+}
+
+function deleteOpportunity({ rootDir = process.cwd(), id } = {}) {
+  if (!isValidOpportunityId(id)) {
+    const error = new Error("请提供合法的机会 id（不能包含路径分隔符或控制字符）。");
+    error.statusCode = 400;
+    throw error;
+  }
+  const loaded = loadOpportunityPool({ rootDir });
+  const pool = loaded.pool;
+  const index = pool.opportunities.findIndex((item) => item.id === id);
+  if (index < 0) {
+    const error = new Error("没有找到这个机会，可能已被删除。");
+    error.statusCode = 404;
+    throw error;
+  }
+  const removed = pool.opportunities[index];
+  // 删除前做一次本地备份（不提交，被 gitignore）
+  try {
+    const backupDir = path.join(rootDir, "data", "opportunities", "backups");
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = path.join(backupDir, `opportunity-pool-${stamp}.json`);
+    fs.writeFileSync(backupPath, JSON.stringify({ ...pool, opportunities: pool.opportunities }, null, 2));
+  } catch {
+    // 备份失败不阻塞删除；先抛错
+  }
+  pool.opportunities.splice(index, 1);
+  const saved = saveOpportunityPool(pool, { rootDir });
+  const opportunities = saved.opportunities.map(normalizeOpportunity);
+  return {
+    removed: normalizeOpportunity(removed),
+    opportunities,
+    stats: summarizeOpportunities(opportunities)
+  };
+}
+
 module.exports = {
   HUMAN_DECISION_LABELS,
   STATUS_LABELS,
@@ -388,12 +494,17 @@ module.exports = {
   PRESET_TAGS,
   OPPORTUNITY_PERSIST_FIELDS,
   FORBIDDEN_PERSIST_FIELDS,
+  OPPORTUNITY_TITLE_OVERRIDES,
+  getDisplayTitle,
+  looksLikeMojibake,
+  isValidOpportunityId,
   buildPatch,
   loadOpportunityPool,
   normalizeOpportunity,
   saveOpportunityPool,
   summarizeOpportunities,
   updateOpportunity,
+  deleteOpportunity,
   addOpportunity,
   buildOpportunityContextForPrompt,
   normalizeSourceUrls,

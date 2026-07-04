@@ -1026,6 +1026,88 @@ AI Agent / 大模型应用 / 独立开发者 / 小型可变现 / 内容产品 / 
 - 不修改 loading 动画（V0.3.4-hotfix-3 深色卡片 + 仓鼠跑轮 / 后续切换的 3D 盒子任一版本都保留）。
 - 默认不联网原则不变；"本次联网搜索"checkbox 仍默认关闭。
 
+## V0.3.10-hotfix 修复机会池乱码、中文化、删除与一键加入
+
+V0.3.10 提交后用户真实打开网页发现三个问题：
+1. 机会池里历史数据是 mojibake（UTF-8 字节被错误编码写入）；
+2. 旧英文 opportunityName 在 UI 上仍是英文，对用户意义不明；
+3. 没有删除按钮，没法从机会池里移除无用机会。
+
+V0.3.10-hotfix 不再动后端 search / LLM / loading / port，只补"机会池中文化 + 删除 + 数据写入防御"。
+
+### 修复 1：mojibake 与编码
+
+- 全部源文件确认是合法 UTF-8，无 `�` / `锟斤拷` / `����` 字面残留。
+- 静态资源全部带 `charset=utf-8`：
+  - `text/html; charset=utf-8`
+  - `text/css; charset=utf-8`
+  - `text/javascript; charset=utf-8`
+  - `application/json; charset=utf-8`
+- HTML `<meta charset="utf-8" />`。
+- 新写入的 JSON 永远是合法 UTF-8（`fs.readFileSync(filePath, "utf8")` + `JSON.stringify`）。
+- 读取 / 渲染时检测 mojibake（包含 U+FFFD / GBK 错读字节序列）并走中文兜底，不会把乱码直接输出到 UI 或 LLM prompt。
+
+### 修复 2：旧机会中文化（displayTitle）
+
+新增 `OPPORTUNITY_TITLE_OVERRIDES` 与 `getDisplayTitle(item)`：
+
+- `Independent AI opportunity brief MVP` → `独立 AI 机会简报 MVP`
+- `Opportunity scoring quality gate` → `机会评分质量门槛`
+
+行为：
+
+- **底层 JSON 保留原值**（不强制改名），用户随时可以编辑。
+- UI / `buildOpportunityContextForPrompt` 输出都用 `displayTitle`（中文）。
+- 任何乱码 / 未知英文标题都会给中文兜底（"机会标题损坏，请编辑补充" / "V0.3.10 测试机会（标题损坏，请编辑）" / "机会：xxx"）。
+- PATCH `/api/opportunities/:id` 现在接受 `opportunityName` 字段，用户在网页编辑后保存中文名会立即进入下次 Ask Mode 上下文。
+
+### 修复 3：删除机会
+
+新增 `DELETE /api/opportunities/:id`：
+
+- 中文 confirm 提示：`确定要删除这个机会吗？此操作会从机会池中移除它。`
+- 删除前自动写本地备份到 `data/opportunities/backups/opportunity-pool-YYYY-MM-DD-HHMMSS.json`（被 `.gitignore` 包含，不提交）。
+- 安全约束：
+  - id 缺失 / 含 `..` / 含 `/` / 含 `\` / 含控制字符 → 400 中文错误。
+  - id 不存在 → 404 中文错误。
+  - 不接受 body / query 控制文件路径。
+  - 不删除整个池，只删指定 id。
+- 前端：每个机会项新增"删除"按钮（红色虚线边），confirm 取消时不调 API。
+- 成功 → 立即刷新机会池区域 + 状态条显示"已删除。"。
+
+### 修复 4：一键加入机会池真实 UI 链路
+
+之前 V0.3.10 已经实现，但用户真实点击仍然不工作——根因是 V0.3.10 时部分数据 POST 走的是错误编码路径，存进去就是 mojibake。
+
+V0.3.10-hotfix 验证：
+
+- `<button id="addOpportunityButton">` 在 HTML 渲染，正常出现在回答区右上角。
+- 回答存在时按钮 `hidden=false`、`disabled=false`。
+- 回答清空时按钮 `hidden=true`。
+- 点击 → `#addOpportunityContainer` 显示，`buildAddOpportunityFormMarkup` 注入表单。
+- 表单预填：
+  - 机会名称（来自问题前 60 字）
+  - 状态默认 `待验证`
+  - 类型默认 `新项目机会`
+  - 备注默认 `问题 + 回答摘要`（≤ 300 字）
+  - 标签 chips 多选
+  - 来源标识（ask-mode / search）
+  - 最多 5 条参考来源
+- 提交 → `POST /api/opportunities` → `applyOpportunityPanel` 立即刷新。
+- 重复标题给中文 warning（不静默）。
+- title 缺失给中文错误。
+- 不保存 raw answer / raw search response / API Key（白名单 + sanitize）。
+- 刷新页面后新机会仍存在。
+- 下一次 Ask Mode prompt 立刻包含新机会（`buildOpportunityContextForPrompt` 每次重新读 `opportunity-pool.json`）。
+
+### 不动的部分（hotfix 继续保留）
+
+- 不改后端 search / LLM / loading / 端口监听。
+- 不引入数据库 / 账号系统。
+- 不暴露 API Key。
+- 不修改 `start-ask-ui.js` 的双 loopback 监听。
+- 不修改 `opportunity-pool.json`（被 `.gitignore` 包含，hotfix 不会提交历史数据）。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

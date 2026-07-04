@@ -105,6 +105,27 @@ const PRESET_TAGS = [
   "噪声较大"
 ];
 
+// V0.3.10-hotfix：旧英文 opportunityName 的中文映射（与服务端 OPPORTUNITY_TITLE_OVERRIDES 保持一致）
+const OPPORTUNITY_TITLE_OVERRIDES = {
+  "Independent AI opportunity brief MVP": "独立 AI 机会简报 MVP",
+  "Opportunity scoring quality gate": "机会评分质量门槛"
+};
+
+// V0.3.10-hotfix：把任意 opportunityName 解析为"前端要展示"的中文标题
+// 与服务端 opportunity-store.getDisplayTitle 行为一致；这里再写一遍避免 fetch 一次 RTT。
+function getDisplayTitleClient(item) {
+  const raw = item && typeof item === "object" ? item : {};
+  const original = String(raw.opportunityName || raw.title || "").trim();
+  if (!original) return "未命名机会";
+  if (OPPORTUNITY_TITLE_OVERRIDES[original]) return OPPORTUNITY_TITLE_OVERRIDES[original];
+  if (/[�锟]/.test(original)) {
+    if (/V0\.3\./.test(original)) return "V0.3.10 测试机会（标题损坏，请编辑）";
+    return "机会标题损坏，请编辑补充";
+  }
+  if (/[一-龥]/.test(original)) return original;
+  return `机会：${original}`;
+}
+
 // 生成稳定的 id：用时间戳 + 随机后缀（同题 push 时区分实例）。
 function makeHistoryId(prefix = "h") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -464,6 +485,8 @@ function normalizeOpportunityForUi(item) {
   return {
     id: String(raw.id || ""),
     opportunityName: String(raw.opportunityName || raw.title || "未命名机会"),
+    // V0.3.10-hotfix：服务端可能已 normalize 出 displayTitle；缺则前端兜底
+    displayTitle: String(raw.displayTitle || getDisplayTitleClient(raw)),
     status: String(raw.status || "inbox"),
     statusLabel: String(raw.statusLabel || statusLabel(raw.status)),
     type,
@@ -542,7 +565,9 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
       const typeOptions = Object.entries(OPPORTUNITY_TYPE_LABELS)
         .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === item.type ? " selected" : ""}>${escapeHtml(label)}</option>`)
         .join("");
-      const isUnclearTitle = !item.opportunityName || item.opportunityName === "未命名机会";
+      // V0.3.10-hotfix：使用 displayTitle 兜底，乱码 / 旧英文都会显示中文
+      const showTitle = item.displayTitle || item.opportunityName || "未命名机会";
+      const isUnclearTitle = !showTitle || showTitle === "未命名机会" || /标题损坏|未命名/.test(showTitle);
       const titleWarning = isUnclearTitle
         ? `<p class="opportunity-title-warning">这个机会缺少清晰标题，建议补充名称。</p>`
         : "";
@@ -567,7 +592,7 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
       const sourceLine = sourceLabel ? `<span>${escapeHtml(sourceLabel)}</span>` : "";
       return `<article class="opportunity-item" data-opportunity-id="${escapeHtml(item.id)}">
         <div class="opportunity-item-head">
-          <h3>${escapeHtml(item.opportunityName)}</h3>
+          <h3>${escapeHtml(showTitle)}</h3>
           <span class="opportunity-badge">${escapeHtml(item.statusLabel)}</span>
         </div>
         ${titleWarning}
@@ -579,8 +604,12 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
         ${nextLine}
         <div class="opportunity-actions">
           <button type="button" class="link-button opportunity-edit" data-op-edit="${escapeHtml(item.id)}">编辑</button>
+          <button type="button" class="link-button opportunity-delete" data-op-delete="${escapeHtml(item.id)}">删除</button>
         </div>
         <form class="opportunity-form" data-op-form="${escapeHtml(item.id)}" hidden>
+          <label>机会名称
+            <input name="opportunityName" data-op-name="${escapeHtml(item.id)}" value="${escapeHtml(item.displayTitle || item.opportunityName)}" maxlength="200" placeholder="请填写机会名称" />
+          </label>
           <label>状态
             <select name="status" data-op-status="${escapeHtml(item.id)}">${statusOptions}</select>
           </label>
@@ -871,6 +900,13 @@ function createApp(deps) {
     for (const button of opportunityList.querySelectorAll("[data-op-cancel]")) {
       button.addEventListener("click", () => toggleOpportunityForm(button.getAttribute("data-op-cancel"), false));
     }
+    for (const button of opportunityList.querySelectorAll("[data-op-delete]")) {
+      button.addEventListener("click", () => {
+        const id = button.getAttribute("data-op-delete");
+        if (!id) return;
+        deleteOpportunityFromUi(id);
+      });
+    }
     for (const form of opportunityList.querySelectorAll("[data-op-form]")) {
       form.addEventListener("submit", (event) => {
         if (event && typeof event.preventDefault === "function") event.preventDefault();
@@ -884,6 +920,30 @@ function createApp(deps) {
         chip.setAttribute("aria-pressed", selected ? "false" : "true");
         chip.classList.toggle("opportunity-tag-chip--selected", !selected);
       });
+    }
+  }
+
+  async function deleteOpportunityFromUi(id) {
+    if (!fetchImpl) {
+      setOpportunityStatus("无法连接机会池 API。", "error");
+      return { ok: false };
+    }
+    if (!confirmImpl("确定要删除这个机会吗？此操作会从机会池中移除它。")) {
+      setOpportunityStatus("");
+      return { ok: false, reason: "cancelled" };
+    }
+    try {
+      const response = await fetchImpl(`/api/opportunities/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
+      if (!response || !response.ok) throw new Error((payload && payload.error) || "机会删除失败。");
+      applyOpportunityPanel(payload);
+      setOpportunityStatus("已删除。");
+      return { ok: true };
+    } catch (error) {
+      setOpportunityStatus((error && error.message) || "机会删除失败。", "error");
+      return { ok: false, reason: (error && error.message) || "unknown" };
     }
   }
 
@@ -906,11 +966,13 @@ function createApp(deps) {
 
   async function saveOpportunity(id) {
     if (!fetchImpl || !opportunityList) return { ok: false, reason: "fetch-unavailable" };
+    const nameNode = opportunityList.querySelector(`[data-op-name="${cssEscape(id)}"]`);
     const statusNode = opportunityList.querySelector(`[data-op-status="${cssEscape(id)}"]`);
     const notesNode = opportunityList.querySelector(`[data-op-notes="${cssEscape(id)}"]`);
     const typeNode = opportunityList.querySelector(`[data-op-type="${cssEscape(id)}"]`);
     const nextNode = opportunityList.querySelector(`[data-op-next="${cssEscape(id)}"]`);
     const tagsContainer = opportunityList.querySelector(`[data-op-tags="${cssEscape(id)}"]`);
+    const nextName = nameNode ? String(nameNode.value || "").trim() : "";
     const nextStatus = statusNode ? statusNode.value : "";
     const nextType = typeNode ? typeNode.value : "";
     const nextNote = notesNode ? notesNode.value : "";
@@ -920,16 +982,18 @@ function createApp(deps) {
       return { ok: false, reason: "cancelled" };
     }
     try {
+      const patch = {
+        status: nextStatus,
+        type: nextType,
+        notes: nextNote,
+        nextAction: nextAction,
+        tags: nextTags
+      };
+      if (nextName) patch.opportunityName = nextName;
       const response = await fetchImpl(`/api/opportunities/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          status: nextStatus,
-          type: nextType,
-          notes: nextNote,
-          nextAction: nextAction,
-          tags: nextTags
-        })
+        body: JSON.stringify(patch)
       });
       const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
       if (!response || !response.ok) throw new Error((payload && payload.error) || "机会池保存失败。");
@@ -1627,7 +1691,10 @@ module.exports = {
   isSafeExternalUrl,
   // V0.3.10 机会池中文化 + chips + 一键加入
   buildAddOpportunityFormMarkup,
+  normalizeOpportunityForUi,
+  getDisplayTitleClient,
   OPPORTUNITY_TYPE_LABELS,
   OPPORTUNITY_SCORE_LABELS,
+  OPPORTUNITY_TITLE_OVERRIDES,
   PRESET_TAGS
 };
