@@ -1357,6 +1357,89 @@ if (hasAnswer && !isLoading && !isKickoff) {
 - 不暴露 API Key / 不提交 .env。
 - 不提交 `data/opportunities/*.json` 或测试机会数据。
 
+## V0.3.11-hotfix-3 优化机会草稿与输入体验
+
+V0.3.11-hotfix-2 完成后用户真实使用反馈 6 个体验问题。本次仍只动 Ask UI 前端 + 后端草稿 API，不改后端 search / LLM API 配置 / 端口。
+
+### 修复 1：机会池按钮精简
+
+按钮只显示 `+` 大加号，aria-label 仍是"加入机会池"（满足无障碍）。删除 `app.js` 里的 `.replace("加入机会池", labelText)` 长文案拼接逻辑。`add-opportunity-icon` 字号 `14px → 18px`；按钮 `padding: 5px 12px 5px 10px → 4px 9px`，`min-width/height: 32px` 保持可点击区域。
+
+### 修复 2：战略回答下方小字合并为单行
+
+- `renderSearchProcess` 改为单行 `<span class="search-process-summary">搜索过程 · 意图 · 搜索词 · 时间范围</span>` + 折叠的 `<details>` 内含完整列表
+- `renderSearchSources` 头/摘要合并为单行 `<span>`，`<ul>` 移到 `<details>` 内
+- CSS `@media (min-width: 900px)` 把两个容器在桌面端 flex 排成单行；details 用 `margin-left: auto` 推到右侧
+
+### 修复 3：draftWarning 误显示
+
+`buildAddOpportunityFormMarkup` 改为 post-guard：
+
+```js
+let protectedName = d.opportunityName || "";
+let warningReason = null;
+if (d.draftWarning) {
+  if (!protectedName) warningReason = d.draftWarning;  // 仅在 protectedName 真的为空时记下
+} else if (titleMatchesQuestion(...)) { ... } 
+  else if (hasUselessPrefix(...)) { ... }
+const formWarning = protectedName ? null : warningReason;  // post-guard
+```
+
+效果：即使后端 / LLM 同时返回 `draftWarning` + 非空 `opportunityName`，也不再显示 warning。
+
+warning 样式也变轻：删除红左边框，改成 `border-radius: 999px` + 透明背景的小 chip。
+
+### 修复 4：智能草稿 API
+
+新增 `POST /api/opportunities/draft`：
+
+- 请求体：`{ question, answer, search, source, answerType }`
+- 响应体：`{ opportunityName, oneLineSummary, note, nextAction, status, type, suggestedTags, draftWarning, sourceQuestion, sourceAnswerSummary, sourceUrls, draftSource }`
+- 优先级：**LLM → 规则 → fallback**
+- `draftSource ∈ { "llm" | "local-rule" | "fallback" }`
+- 响应走 `pickDraftResponse` 字段白名单，丢弃 `filePath` / `apiKey` / `rawAnswer` / `rawSearchResponse`
+- body cap **200KB**
+- 不调用外部搜索 / 不保存 raw answer / raw search
+- 不暴露 API Key（错误消息用 `sk-*` 脱敏）
+- 复用现有 `callChatCompletion` + `isConfigured`
+
+实现文件：
+- `scripts/ask-strategy-os.js`：新增 `generateOpportunityDraft` / `readDraftSystemPrompt` / `buildDraftUserPrompt` / `parseLlmDraftJson` / `pickDraftFields` / `buildDraftByRule`
+- `scripts/start-ask-ui.js`：新增路由 + `pickDraftResponse` + `readBody(req, maxBytes)`
+- 前端 `openAddOpportunityForm` 改 async，先调 draft API，失败时 `draft=null` 走 `buildAddOpportunityFormMarkup` 内嵌的本地规则兜底
+
+### 修复 5：加入机会池表单重新排版
+
+把字段包成 4 个 fieldsets，保留 `data-op-add-*` selectors：
+
+- `opportunity-add-fieldset--core`（边框 accent 色，背景 panel-strong）：机会名称（更大字号 / 加粗）+ 一句话说明
+- `opportunity-add-fieldset--judgment`（桌面端两列 grid，移动端单列）：状态 + 类型
+- `opportunity-add-fieldset--action`：备注 + 下一步
+- `opportunity-add-source-info`（`<details>` 默认折叠）：标签 chips + 参考来源
+
+CSS：grid 间距 10px，fieldsets 圆角边框，warning 改为 chip，移动端不破布局。
+
+### 修复 6：输入框提交后自动清空 + × 清空按钮
+
+- `<textarea>` 包进 `<div class="composer-textarea-wrap">`；textarea `padding-right: 38px` 给 × 留位
+- 新增 `<button id="clearInputButton" aria-label="清空输入" hidden>×</button>`
+- `clearComposerInput()`：`input.value = ""`、`updateClearButtonVisibility()`、`input.focus()`
+- `updateClearButtonVisibility()`：根据 `input.value.trim().length > 0` 切换 `clearInputButton.hidden`
+- `submitAsk()`：捕获问题后立即 `input.value = ""` + `updateClearButtonVisibility()`，fetch body 仍用捕获的 `value`，`questionEcho` 继续显示原问题
+- `mount()`：input 事件 + click 监听都到位
+- 全部保留 Enter 发送 / Shift+Enter 换行 / IME composition / 移动端可点
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）
+- 不恢复仓鼠跑轮
+- 不默认自动联网 / 不默认勾选"本次联网搜索"
+- 不删除 Bocha / Tavily provider
+- 不改 LLM API 配置逻辑
+- 不暴露 API Key / 不提交 .env
+- 不提交 `data/opportunities/*.json` 或测试机会数据
+- 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

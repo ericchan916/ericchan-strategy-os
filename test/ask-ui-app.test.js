@@ -1970,7 +1970,7 @@ test("createApp: 有回答时加入机会池按钮可见，无回答时隐藏", 
   assert.equal(btn.hidden, true, "清空回答后按钮应隐藏");
 });
 
-test("createApp: 点击加入机会池按钮后表单注入到容器", () => {
+test("createApp: 点击加入机会池按钮后表单注入到容器", async () => {
   const nodes = makeFakeNodes();
   const container = nodes.addOpportunityContainer;
   container.querySelector = (sel) => {
@@ -1978,11 +1978,35 @@ test("createApp: 点击加入机会池按钮后表单注入到容器", () => {
     if (container.innerHTML && sel === "[data-op-add-title]") return container._title || null;
     return null;
   };
-  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: {} }) }), storage: null });
+  const app = createApp({
+    nodes,
+    fetchImpl: (path, init = {}) => {
+      // draft API 返回 LLM 风格的完整草稿
+      if (path === "/api/opportunities/draft" && init.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            opportunityName: "AI 短视频选题助手",
+            oneLineSummary: "x",
+            note: "n",
+            nextAction: "na",
+            status: "validate",
+            type: "new-project-opportunity",
+            suggestedTags: ["独立开发者", "内容产品"],
+            draftSource: "llm"
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: {} }) });
+    },
+    storage: null
+  });
   app.mount();
   app.setCurrentAnswer("回答内容, 推荐做短视频选题工具", "llm", { question: "适合做短视频选题工具吗" });
   // 模拟点击
   nodes.addOpportunityButton.click();
+  // 等待 async openAddOpportunityForm 完成
+  await new Promise((r) => setTimeout(r, 30));
   // 容器应显示
   assert.equal(container.hidden, false, "点击后容器应显示");
   // 注入的 innerHTML 是表单 markup，应当包含 form 与 title input
@@ -2037,6 +2061,8 @@ test("createApp: 提交 POST 成功后容器关闭并刷新机会池", async () 
   app.mount();
   app.setCurrentAnswer("新建回答", "llm", { question: "新机会" });
   nodes.addOpportunityButton.click();
+  // 等待 async openAddOpportunityForm 完成（draft API 调用）
+  await new Promise((r) => setTimeout(r, 30));
   // 模拟用户在 title 输入框输入
   fakeInput.value = "新机会名";
   // 模拟提交
@@ -2266,7 +2292,7 @@ test("V0.3.11-hotfix-2: clear/reset 状态后按钮隐藏", () => {
   assert.notEqual(nodes.addOpportunityButton.disabled === true && nodes.addOpportunityButton.hidden === false, true, "清空后不能显示 disabled 灰按钮");
 });
 
-test("V0.3.11-hotfix-2: draftWarning 时主按钮仍可点击，表单内显示 warning", () => {
+test("V0.3.11-hotfix-2: draftWarning 时主按钮仍可点击，表单内显示 warning", async () => {
   // 极端情况：后端 / 前端提炼都失败时，主按钮应仍可点
   const { app, nodes } = makeAskApp();
   app.setCurrentAnswer("今天多云转晴", "llm", { question: "今天天气怎么样" });
@@ -2274,14 +2300,17 @@ test("V0.3.11-hotfix-2: draftWarning 时主按钮仍可点击，表单内显示 
   assert.equal(nodes.addOpportunityButton.disabled, false, "提炼失败时按钮仍应可点");
   // 点击打开表单
   nodes.addOpportunityButton.click();
+  // 等待 async openAddOpportunityForm 完成
+  await new Promise((r) => setTimeout(r, 30));
   // 表单内应显示 warning
   assert.ok(/data-op-add-warning/.test(nodes.addOpportunityContainer.innerHTML), "表单内应显示 warning 节点");
 });
 
-test("V0.3.11-hotfix-2: 点击按钮能打开加入机会池表单", () => {
+test("V0.3.11-hotfix-2: 点击按钮能打开加入机会池表单", async () => {
   const { app, nodes } = makeAskApp();
   app.setCurrentAnswer("回答内容", "llm", { question: "q" });
   nodes.addOpportunityButton.click();
+  await new Promise((r) => setTimeout(r, 30));
   assert.equal(nodes.addOpportunityContainer.hidden, false, "点击后容器应显示");
   assert.ok(/data-op-add-form/.test(nodes.addOpportunityContainer.innerHTML), "应渲染表单 markup");
 });
@@ -2386,5 +2415,384 @@ test("V0.3.11-hotfix-2: buildLoadingMarkup 在 app.js 中暴露（确保前端�
   // 现有 buildLoadingMarkup 使用 WHEEL_SVG；本次不允许改 loading 动画本身
   // 检查 WHEEL_SVG / buildLoadingMarkup 仍存在
   assert.ok(/function\s+buildLoadingMarkup/.test(appJsText), "buildLoadingMarkup 函数应存在");
+});
+
+// ============== V0.3.11-hotfix-3 Phase A: draftWarning 误显示 + warning chip ==============
+
+test("V0.3.11-hotfix-3 A1: draftWarning=true 但 opportunityName 非空时不显示 blocking warning", () => {
+  // 模拟后端 / LLM 同时返回 draftWarning（弱提示）与正常 opportunityName
+  const html = buildAddOpportunityFormMarkup({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合。",
+    draft: {
+      opportunityName: "AI 短视频选题助手",
+      draftWarning: "弱信号，建议补充领域定位。",
+      oneLineSummary: "x",
+      note: "y",
+      nextAction: "z",
+      suggestedTags: ["独立开发者"]
+    }
+  });
+  // protectedName 应保留为 "AI 短视频选题助手"
+  const titleMatch = html.match(/<input[^>]*data-op-add-title[^>]*value="([^"]*)"/);
+  assert.ok(titleMatch);
+  assert.equal(titleMatch[1], "AI 短视频选题助手", "draftWarning 不应清空非空 opportunityName");
+  // 不应显示 blocking warning（因为有非空 name）
+  assert.equal(/data-op-add-warning/.test(html), false, "protectedName 非空时不应显示 warning");
+});
+
+test("V0.3.11-hotfix-3 A2: weather / 无机会问题仍正确显示 warning（回归）", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "今天天气怎么样",
+    answer: "今天多云转晴"
+  });
+  assert.ok(/data-op-add-warning/.test(html), "weather 类应显示 warning");
+  const titleMatch = html.match(/<input[^>]*data-op-add-title[^>]*value="([^"]*)"/);
+  assert.equal(titleMatch[1], "", "weather 类 title 应清空");
+});
+
+test("V0.3.11-hotfix-3 A3: warning chip 样式 - border-radius 999px", () => {
+  const match = stylesCss.match(/\.opportunity-add-warning\s*\{[^}]*\}/);
+  assert.ok(match, "应存在 .opportunity-add-warning 规则");
+  const block = match[0];
+  const radius = block.match(/border-radius\s*:\s*([^;]+);/);
+  assert.ok(radius, ".opportunity-add-warning 应设置 border-radius");
+  assert.equal(/999px/.test(radius[1]), true, `border-radius 应是 999px（chip 形状），实际 ${radius[1]}`);
+});
+
+// ============== V0.3.11-hotfix-3 Phase B: 机会池按钮精简 ==============
+
+test("V0.3.11-hotfix-3 B1: index.html 按钮只含 icon span，不含 add-opportunity-text span", () => {
+  // V0.3.11-hotfix-3：删除 .add-opportunity-text span，按钮只显示 + 图标
+  assert.equal(/class="add-opportunity-text"/.test(indexHtml), false, "不应再有 add-opportunity-text span");
+  assert.ok(/class="add-opportunity-icon"/.test(indexHtml), "应保留 add-opportunity-icon span");
+});
+
+test("V0.3.11-hotfix-3 B2: app.js 不再含 .replace(\"加入机会池\", labelText) 标签拼接逻辑", () => {
+  assert.equal(/\.replace\(["']加入机会池["']/.test(appJsText), false, "应删除 labelText 字符串替换逻辑");
+  assert.equal(/从本次回答创建机会/.test(appJsText), false, "应删除'从本次回答创建机会'文案");
+});
+
+test("V0.3.11-hotfix-3 B3: CSS .add-opportunity-icon font-size ≥ 16px（更大加号）", () => {
+  const match = stylesCss.match(/\.add-opportunity-icon\s*\{[^}]*\}/);
+  assert.ok(match, "应存在 .add-opportunity-icon 规则");
+  const block = match[0];
+  const fs = block.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/);
+  assert.ok(fs, ".add-opportunity-icon 应设置 font-size");
+  const sz = Number(fs[1]);
+  assert.ok(sz >= 16, `font-size 应 ≥ 16px（更大加号），实际 ${sz}px`);
+});
+
+// ============== V0.3.11-hotfix-3 Phase C: 回答下方 meta 单行 ==============
+
+test("V0.3.11-hotfix-3 C1: renderSearchProcess 输出单行 summary + details 折叠", () => {
+  const html = renderSearchProcess({
+    used: true,
+    intent: "ai-opportunity",
+    plannedQueries: ["独立开发者 AI 工具"],
+    freshness: "oneWeek",
+    recency: { filteredOldCount: 0, missingDateCount: 0 },
+    filters: { blockedTopicCount: 0, duplicateCount: 0 },
+    quality: { averageScore: 60, topSourceScore: 70, lowQualityCount: 0, hasHighConfidenceSources: true }
+  });
+  assert.ok(/<span[^>]+class="search-process-summary"/.test(html), "应含 search-process-summary 单行摘要 span");
+  assert.ok(/<details[^>]+class="search-process-details"/.test(html), "应含折叠 details");
+});
+
+test("V0.3.11-hotfix-3 C2: renderSearchSources 输出合并头 + details 折叠", () => {
+  const html = renderSearchSources([
+    { title: "来源 1", url: "https://example.com/1", source: "example.com" },
+    { title: "来源 2", url: "https://example.com/2", source: "example.com" }
+  ]);
+  assert.ok(/<span[^>]+class="search-sources-head"/.test(html), "应含 search-sources-head 头");
+  assert.ok(/<details[^>]+class="search-sources-details"/.test(html), "应含折叠 details");
+  assert.ok(/search-sources-list/.test(html), "应保留 ul 列表（折叠内）");
+});
+
+test("V0.3.11-hotfix-3 C3: styles.css 含 @media (min-width: 900px) 桌面单行规则", () => {
+  assert.ok(/@media\s+\(min-width\s*:\s*900px\)/.test(stylesCss), "应存在桌面单行 media 规则");
+  // 找到 media 块附近有 .search-sources / .search-process 规则
+  const mediaIdx = stylesCss.search(/@media\s+\(min-width\s*:\s*900px\)/);
+  const slice = stylesCss.slice(mediaIdx, mediaIdx + 1500);
+  assert.ok(/\.search-(sources|process)/.test(slice), "桌面 media 块应作用于 search-sources / search-process");
+});
+
+// ============== V0.3.11-hotfix-3 Phase F: 表单字段分组 ==============
+
+test("V0.3.11-hotfix-3 F1: form markup 包含 core / judgment / action 三个字段集", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "建议做一个 AI 短视频选题助手"
+  });
+  assert.ok(/opportunity-add-fieldset--core/.test(html), "应含 core fieldset");
+  assert.ok(/opportunity-add-fieldset--judgment/.test(html), "应含 judgment fieldset");
+  assert.ok(/opportunity-add-fieldset--action/.test(html), "应含 action fieldset");
+});
+
+test("V0.3.11-hotfix-3 F2: tags 在 details 内默认折叠", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "建议做一个 AI 短视频选题助手"
+  });
+  // tags 应在 source-info details 内
+  const sourceInfoMatch = html.match(/<details[^>]+class="opportunity-add-source-info"[\s\S]*?<\/details>/);
+  assert.ok(sourceInfoMatch, "应存在 source-info details 块");
+  assert.ok(/data-op-add-tags/.test(sourceInfoMatch[0]), "tags 节点应在 source-info details 内");
+});
+
+test("V0.3.11-hotfix-3 F3: 机会名称 input 在 core fieldset 内且更突出", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "建议做一个 AI 短视频选题助手"
+  });
+  const coreMatch = html.match(/<fieldset[^>]+class="[^"]*opportunity-add-fieldset--core[\s\S]*?<\/fieldset>/);
+  assert.ok(coreMatch, "应存在 core fieldset");
+  assert.ok(/data-op-add-title/.test(coreMatch[0]), "title 应在 core fieldset 内");
+});
+
+// ============== V0.3.11-hotfix-3 Phase G: 输入框清空 + × 按钮 ==============
+
+test("V0.3.11-hotfix-3 G1: HTML 含 clearInputButton 节点 + composer-textarea-wrap", () => {
+  assert.ok(/id="clearInputButton"/.test(indexHtml), "应含 clearInputButton 节点");
+  assert.ok(/class="composer-textarea-wrap"/.test(indexHtml), "应含 composer-textarea-wrap 包裹");
+  assert.ok(/aria-label="清空输入"/.test(indexHtml), "清空按钮应有 aria-label");
+});
+
+test("V0.3.11-hotfix-3 G8: styles.css .composer-textarea-wrap textarea padding-right ≥ 30px", () => {
+  // 找 .composer-textarea-wrap 块
+  const wrapMatch = stylesCss.match(/\.composer-textarea-wrap\s*\{[^}]*\}/);
+  assert.ok(wrapMatch, "应存在 .composer-textarea-wrap 规则");
+  // 找内含 textarea 的规则
+  const inner = stylesCss.match(/\.composer-textarea-wrap\s+textarea\s*\{[^}]*\}/);
+  assert.ok(inner, "应存在 .composer-textarea-wrap textarea 规则");
+  const pr = inner[0].match(/padding-right\s*:\s*(\d+)px/);
+  assert.ok(pr, "textarea 应设置 padding-right");
+  const val = Number(pr[1]);
+  assert.ok(val >= 30, `padding-right 应 ≥ 30px（给 × 留位），实际 ${val}px`);
+});
+
+// ============== V0.3.11-hotfix-3 Phase D: 智能草稿 API ==============
+
+test("startAskUiServer: POST /api/opportunities/draft 无 LLM 配置时返回 draftSource=fallback", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-draft-api-"));
+  // 确保没有 LLM 配置
+  const env = { ...process.env };
+  delete env.STRATEGY_OS_LLM_API_KEY;
+  delete env.STRATEGY_OS_LLM_ENABLED;
+  delete env.LLM_API_KEY;
+  delete env.OPENAI_API_KEY;
+  delete env.ANTHROPIC_API_KEY;
+  env.STRATEGY_OS_LLM_ENABLED = "false";
+  // 临时设置 process.env 让 isConfigured 返 false
+  const originalEnv = process.env;
+  process.env = env;
+  const server = await startAskUiServer({ rootDir, port: 5292, host: "127.0.0.1" });
+  try {
+    const { status, json } = await httpRequest({
+      port: 5292,
+      method: "POST",
+      path: "/api/opportunities/draft",
+      body: {
+        question: "最近有什么适合独立开发者做的小型 AI 项目？",
+        answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合。"
+      }
+    });
+    assert.equal(status, 200);
+    assert.ok(json, "响应应包含 JSON");
+    assert.equal(json.draftSource, "fallback", "无 LLM 时应为 fallback");
+    assert.equal(typeof json.opportunityName, "string", "opportunityName 应为字符串");
+  } finally {
+    process.env = originalEnv;
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("startAskUiServer: POST /api/opportunities/draft 响应只含白名单字段", async () => {
+  const { startAskUiServer, pickDraftResponse } = require("../scripts/start-ask-ui");
+  // 直接测 pickDraftResponse 纯函数
+  const out = pickDraftResponse({
+    opportunityName: "X 助手",
+    oneLineSummary: "ok",
+    note: "n",
+    nextAction: "na",
+    status: "validate",
+    type: "new-project-opportunity",
+    suggestedTags: ["独立开发者"],
+    draftWarning: null,
+    sourceQuestion: "q",
+    sourceAnswerSummary: "a",
+    sourceUrls: [],
+    draftSource: "llm",
+    // 敏感字段应被过滤
+    filePath: "/etc/passwd",
+    apiKey: "sk-fakefakefakefake",
+    rawAnswer: "secret",
+    rawSearchResponse: "secret"
+  });
+  assert.equal(out.opportunityName, "X 助手");
+  assert.equal(out.draftSource, "llm");
+  assert.equal("filePath" in out, false, "filePath 不应在响应中");
+  assert.equal("apiKey" in out, false, "apiKey 不应在响应中");
+  assert.equal("rawAnswer" in out, false, "rawAnswer 不应在响应中");
+  assert.equal("rawSearchResponse" in out, false, "rawSearchResponse 不应在响应中");
+});
+
+test("startAskUiServer: POST /api/opportunities/draft 响应 draftSource 默认 fallback 当无效", async () => {
+  const { pickDraftResponse } = require("../scripts/start-ask-ui");
+  const out = pickDraftResponse({ opportunityName: "X", draftSource: "INVALID" });
+  assert.equal(out.draftSource, "fallback", "无效 draftSource 应降级为 fallback");
+});
+
+test("startAskUiServer: POST /api/opportunities/draft 响应 suggestedTags 必须是数组", async () => {
+  const { pickDraftResponse } = require("../scripts/start-ask-ui");
+  const out = pickDraftResponse({ opportunityName: "X", suggestedTags: "not-an-array" });
+  assert.deepEqual(out.suggestedTags, [], "非数组 suggestedTags 应降级为 []");
+});
+
+test("startAskUiServer: POST /api/opportunities/draft 注入 fake fetch 模拟 LLM 成功时 draftSource=llm", async () => {
+  const { generateOpportunityDraft } = require("../scripts/ask-strategy-os");
+  // 用 fake fetch + 假 LLM 配置
+  const env = { ...process.env };
+  env.STRATEGY_OS_LLM_ENABLED = "true";
+  env.STRATEGY_OS_LLM_PROVIDER = "openai";
+  env.STRATEGY_OS_LLM_BASE_URL = "https://api.example.com/v1";
+  env.STRATEGY_OS_LLM_MODEL = "gpt-test";
+  env.STRATEGY_OS_LLM_API_KEY = "sk-fakefakefake0123456789";
+  const llmJson = {
+    choices: [{ message: { content: '{"opportunityName":"AI 短视频选题助手","oneLineSummary":"X","note":"n","nextAction":"na","suggestedTags":["独立开发者","内容产品"],"status":"validate","type":"new-project-opportunity","draftWarning":""}' } }]
+  };
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(llmJson),
+    json: async () => llmJson
+  });
+  const result = await generateOpportunityDraft({
+    question: "q",
+    answer: "a",
+    env,
+    deps: { fetch: fakeFetch, AbortController: null }
+  });
+  assert.equal(result.draftSource, "llm");
+  assert.equal(result.opportunityName, "AI 短视频选题助手");
+  assert.ok(Array.isArray(result.suggestedTags));
+  // tags 应在 5 个以内
+  assert.ok(result.suggestedTags.length <= 5);
+});
+
+test("startAskUiServer: generateOpportunityDraft LLM 非法 JSON 时回退 local-rule", async () => {
+  const { generateOpportunityDraft } = require("../scripts/ask-strategy-os");
+  const env = { ...process.env };
+  env.STRATEGY_OS_LLM_ENABLED = "true";
+  env.STRATEGY_OS_LLM_PROVIDER = "openai";
+  env.STRATEGY_OS_LLM_BASE_URL = "https://api.example.com/v1";
+  env.STRATEGY_OS_LLM_MODEL = "gpt-test";
+  env.STRATEGY_OS_LLM_API_KEY = "sk-fakefakefake0123456789";
+  // callChatCompletion 自己 parse 这个 outer JSON，然后从 choices[0].message.content 拿到 "这不是 JSON"
+  const llmJson = { choices: [{ message: { content: "这不是 JSON" } }] };
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(llmJson),
+    json: async () => llmJson
+  });
+  const result = await generateOpportunityDraft({
+    question: "q",
+    answer: "a",
+    env,
+    deps: { fetch: fakeFetch, AbortController: null }
+  });
+  assert.equal(result.draftSource, "local-rule", "非法 JSON 应回退 local-rule");
+});
+
+test("startAskUiServer: generateOpportunityDraft LLM JSON 含 filePath/apiKey 时被 pickDraftFields 过滤", async () => {
+  const { pickDraftFields } = require("../scripts/ask-strategy-os");
+  const out = pickDraftFields({
+    opportunityName: "X 助手",
+    filePath: "/etc/passwd",
+    apiKey: "sk-fakefakefakefake"
+  });
+  assert.equal(out.opportunityName, "X 助手");
+  assert.equal("filePath" in out, false, "filePath 不应被 pickDraftFields 保留");
+  assert.equal("apiKey" in out, false, "apiKey 不应被 pickDraftFields 保留");
+});
+
+test("startAskUiServer: parseLlmDraftJson 抓首个 {...} 块，容忍 JSON 前后多余文本", () => {
+  const { parseLlmDraftJson } = require("../scripts/ask-strategy-os");
+  // 模拟模型在 JSON 外多写几句话
+  const out = parseLlmDraftJson("好的，下面是 JSON：\n{\"opportunityName\":\"X\"}\n谢谢。");
+  assert.ok(out, "应能解析");
+  assert.equal(out.opportunityName, "X");
+});
+
+test("startAskUiServer: parseLlmDraftJson 非法 JSON 时返 null", () => {
+  const { parseLlmDraftJson } = require("../scripts/ask-strategy-os");
+  assert.equal(parseLlmDraftJson("not json"), null);
+  assert.equal(parseLlmDraftJson(""), null);
+  assert.equal(parseLlmDraftJson(null), null);
+  assert.equal(parseLlmDraftJson("{"), null);
+});
+
+// ============== V0.3.11-hotfix-3 Phase E: 前端调用 draft API ==============
+
+test("V0.3.11-hotfix-3 E1: openAddOpportunityForm 调用 /api/opportunities/draft 并把 draft 传给 markup", async () => {
+  const nodes = makeFakeNodes();
+  const fetchCalls = [];
+  const fetchImpl = (path, init = {}) => {
+    fetchCalls.push({ path, method: init.method || "GET", body: init.body || null });
+    if (path === "/api/opportunities/draft" && init.method === "POST") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          opportunityName: "AI 短视频选题助手",
+          oneLineSummary: "X 助手",
+          note: "n",
+          nextAction: "na",
+          status: "validate",
+          type: "new-project-opportunity",
+          suggestedTags: ["独立开发者"],
+          draftSource: "llm"
+        })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+  };
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  app.setCurrentAnswer("我建议你先做一个 AI 短视频选题助手。", "llm", { question: "最近有什么适合独立开发者做的小型 AI 项目？" });
+  nodes.addOpportunityButton.click();
+  // 等待 async
+  await new Promise((r) => setTimeout(r, 30));
+  const draftCall = fetchCalls.find((c) => c.path === "/api/opportunities/draft");
+  assert.ok(draftCall, "应调用 /api/opportunities/draft");
+  assert.equal(draftCall.method, "POST");
+  // body 应含 question 和 answer
+  const body = JSON.parse(draftCall.body);
+  assert.ok(body.question, "body 应含 question");
+  assert.ok(body.answer, "body 应含 answer");
+  // 容器应渲染表单，title 应来自 LLM draft
+  const container = nodes.addOpportunityContainer;
+  assert.equal(container.hidden, false, "点击后容器应显示");
+  assert.ok(/AI 短视频选题助手/.test(container.innerHTML), "表单应使用 LLM draft 的 opportunityName");
+});
+
+test("V0.3.11-hotfix-3 E2: /api/opportunities/draft 失败时仍能渲染（走本地规则）", async () => {
+  const nodes = makeFakeNodes();
+  const fetchImpl = (path, init = {}) => {
+    if (path === "/api/opportunities/draft" && init.method === "POST") {
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: "x" }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+  };
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  app.setCurrentAnswer("建议做一个 AI 短视频选题助手", "llm", { question: "适合做 AI 选题助手吗" });
+  nodes.addOpportunityButton.click();
+  await new Promise((r) => setTimeout(r, 30));
+  // 容器仍应渲染（走 buildAddOpportunityFormMarkup 的本地规则兜底）
+  const container = nodes.addOpportunityContainer;
+  assert.equal(container.hidden, false, "draft 失败时容器仍应显示");
+  assert.ok(/data-op-add-form/.test(container.innerHTML), "应仍渲染表单 markup");
 });
 

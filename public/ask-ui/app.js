@@ -381,10 +381,9 @@ function renderSearchSources(sources, options = {}) {
     return `<li class="search-source-item">${linkHtml}${metaHtml}</li>`;
   });
 
-  const header = `<div class="search-sources-head">参考来源</div>`;
-  const summary = `<p class="search-sources-summary">已参考 ${items.length} 条外部结果。</p>`;
-  const list = `<ul class="search-sources-list">${items.join("")}</ul>`;
-  return `<section class="${escapeHtml(containerClass)}" data-source="search-sources" aria-label="参考来源">${header}${summary}${list}</section>`;
+  const header = `<span class="search-sources-head">参考来源</span><span class="search-sources-summary"> · 已参考 ${items.length} 条外部结果</span>`;
+  const list = `<details class="search-sources-details"><summary>展开来源</summary><ul class="search-sources-list">${items.join("")}</ul></details>`;
+  return `<section class="${escapeHtml(containerClass)}" data-source="search-sources" aria-label="参考来源">${header}${list}</section>`;
 }
 
 function emptySearchSourcesMarkup() {
@@ -450,25 +449,30 @@ function renderSearchProcess(search) {
       ? "一般，部分结果仍需人工判断。"
       : "偏弱，外部搜索仅作参考。";
   const warning = typeof search.warning === "string" ? search.warning : "";
-  const queryHtml = queries.length
-    ? `<ol class="search-process-query-list">${queries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
-    : "";
+  const intentText = intentLabel(search.intent);
+  const queryText = queries.length ? queries.join(" · ") : "（无）";
+  const freshnessText = freshnessLabel(search.freshness);
+  // V0.3.11-hotfix-3：单行摘要 + 折叠的详细 details
+  const summary = `<span class="search-process-summary">搜索过程 · ${escapeHtml(intentText)} · ${escapeHtml(queryText.slice(0, 60))} · ${escapeHtml(freshnessText)}</span>`;
   const warningHtml = /时效性较弱/.test(warning)
     ? `<li class="search-process-warning">搜索结果时效性较弱，请谨慎参考。</li>`
     : "";
-
-  return `<details class="search-process-details">
-  <summary>搜索过程</summary>
-  <ul class="search-process-list">
-    <li><strong>搜索意图：</strong>${escapeHtml(intentLabel(search.intent))}</li>
-    <li><strong>实际搜索词：</strong>${queryHtml || "（无）"}</li>
-    <li><strong>时间范围：</strong>${escapeHtml(freshnessLabel(search.freshness))}</li>
+  const detailList = `<ul class="search-process-list">
+    <li><strong>搜索意图：</strong>${escapeHtml(intentText)}</li>
+    <li><strong>实际搜索词：</strong>${escapeHtml(queries.join("、") || "（无）")}</li>
+    <li><strong>时间范围：</strong>${escapeHtml(freshnessText)}</li>
     <li><strong>来源质量：</strong>${escapeHtml(qualityLabelText)}</li>
     <li><strong>过滤说明：</strong>已过滤 ${blocked} 条无关财经结果，已过滤 ${old} 条过旧结果，去重 ${duplicate} 条，${missing} 条结果缺少发布时间。</li>
     ${recency.reason ? `<li><strong>时效性原因：</strong>${escapeHtml(recency.reason)}</li>` : ""}
     ${warningHtml}
-  </ul>
-</details>`;
+  </ul>`;
+  return `<section class="search-process" data-search-process aria-label="搜索过程">
+    ${summary}
+    <details class="search-process-details">
+      <summary>详细</summary>
+      ${detailList}
+    </details>
+  </section>`;
 }
 
 // ============== Opportunity panel (V0.3.9) ==============
@@ -666,7 +670,12 @@ function buildAddOpportunityFormMarkup({
   } catch {
     computedDraft = null;
   }
-  const d = draft || computedDraft || {
+  // V0.3.11-hotfix-3：draft 缺关键字段（opportunityName/oneLineSummary/note/nextAction/suggestedTags）
+  // 时，回退到 computedDraft 让本地规则接管
+  const hasUsableDraft = draft
+    && typeof draft === "object"
+    && (typeof draft.opportunityName === "string" || typeof draft.oneLineSummary === "string");
+  const d = (hasUsableDraft ? draft : null) || computedDraft || {
     opportunityName: safeQuestion ? safeQuestion.slice(0, 24) : "",
     oneLineSummary: "",
     note: "",
@@ -683,6 +692,8 @@ function buildAddOpportunityFormMarkup({
   // 1) 如果 opportunityName 与 question 几乎一样 → 清空 + 警告
   // 2) 如果 opportunityName 含"我建议你 / 适合做 / 一个面向"等前缀 → 清空 + 警告
   // 3) draftWarning 已存在时，强制清空 opportunityName
+  // V0.3.11-hotfix-3：warning 显示条件收紧为"最终 protectedName 为空"才显示
+  // 即：即使 draftWarning 存在，只要 opportunityName 非空，warning 就不显示
   const titleMatchesQuestion = (title, q) => {
     if (!title || !q) return false;
     const norm = (s) => String(s).replace(/[\s，。、？！；：,.\?!;:]/g, "").toLowerCase();
@@ -700,17 +711,21 @@ function buildAddOpportunityFormMarkup({
     return /^(我建议你|我建议|建议你|适合做|可以做|可以先|先做|做一个|一个面向|面向|最近|今天|当前|有没有|帮我)/.test(String(title).trim());
   };
   let protectedName = d.opportunityName || "";
-  let formWarning = null;
+  let warningReason = null;
   if (d.draftWarning) {
-    protectedName = "";
-    formWarning = d.draftWarning;
+    // LLM / 规则草稿发出"弱信号"时，只在 protectedName 真的为空时才清空
+    if (!protectedName) {
+      warningReason = d.draftWarning;
+    }
   } else if (titleMatchesQuestion(protectedName, safeQuestion)) {
-    formWarning = "没有识别到明确机会，请补充机会名称。";
     protectedName = "";
+    warningReason = "没有识别到明确机会，请补充机会名称。";
   } else if (hasUselessPrefix(protectedName)) {
-    formWarning = "没有识别到明确机会，请补充机会名称。";
     protectedName = "";
+    warningReason = "没有识别到明确机会，请补充机会名称。";
   }
+  // V0.3.11-hotfix-3：post-guard — 仅当 protectedName 最终为空时才显示 blocking warning
+  const formWarning = protectedName ? null : warningReason;
   const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
     .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === (d.status || "validate") ? " selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
@@ -733,35 +748,55 @@ function buildAddOpportunityFormMarkup({
     ? `<span class="opportunity-source">来自搜索</span>`
     : `<span class="opportunity-source">来自 Ask Mode</span>`;
   return `<form class="opportunity-add-form" data-op-add-form>
-    <div class="opportunity-add-head">
+    <header class="opportunity-add-head">
       <h3>加入机会池</h3>
       ${sourceBadge}
-    </div>
+    </header>
     <p class="opportunity-add-hint">已根据本次回答自动提炼机会卡草稿，请确认或修改后再保存。</p>
     ${formWarning ? `<p class="opportunity-add-warning" role="alert" data-op-add-warning>${escapeHtml(formWarning)}</p>` : ""}
-    <label>机会名称（必填）
-      <input name="title" data-op-add-title placeholder="请填写机会名称" value="${escapeHtml(protectedName)}" required maxlength="200" />
-    </label>
-    <label>一句话说明
-      <input name="oneLineSummary" data-op-add-one-line placeholder="这个机会是什么" value="${escapeHtml(d.oneLineSummary || "")}" maxlength="300" />
-    </label>
-    <label>状态
-      <select name="status" data-op-add-status>${statusOptions}</select>
-    </label>
-    <label>类型
-      <select name="type" data-op-add-type>${typeOptions}</select>
-    </label>
-    <label>备注（精炼，可编辑）
-      <textarea name="note" data-op-add-note rows="4" maxlength="3000" placeholder="暂无备注">${escapeHtml(d.note || "")}</textarea>
-    </label>
-    <label>下一步（可执行动作）
-      <input name="nextAction" data-op-add-next placeholder="如：先做一个最小页面" value="${escapeHtml(d.nextAction || "")}" maxlength="500" />
-    </label>
-    <fieldset class="opportunity-tags-fieldset">
-      <legend>标签（点击切换，已自动建议）</legend>
-      <div class="opportunity-tag-chips" data-op-add-tags>${tagChips}</div>
+
+    <fieldset class="opportunity-add-fieldset opportunity-add-fieldset--core">
+      <label class="opportunity-add-field opportunity-add-field--title">
+        <span class="opportunity-add-label">机会名称 <em>必填</em></span>
+        <input name="title" data-op-add-title placeholder="请填写机会名称" value="${escapeHtml(protectedName)}" required maxlength="200" />
+      </label>
+      <label class="opportunity-add-field opportunity-add-field--one-line">
+        <span class="opportunity-add-label">一句话说明</span>
+        <input name="oneLineSummary" data-op-add-one-line placeholder="这个机会是什么" value="${escapeHtml(d.oneLineSummary || "")}" maxlength="300" />
+      </label>
     </fieldset>
-    ${sourceUrlChips}
+
+    <fieldset class="opportunity-add-fieldset opportunity-add-fieldset--judgment">
+      <label class="opportunity-add-field">
+        <span class="opportunity-add-label">状态</span>
+        <select name="status" data-op-add-status>${statusOptions}</select>
+      </label>
+      <label class="opportunity-add-field">
+        <span class="opportunity-add-label">类型</span>
+        <select name="type" data-op-add-type>${typeOptions}</select>
+      </label>
+    </fieldset>
+
+    <fieldset class="opportunity-add-fieldset opportunity-add-fieldset--action">
+      <label class="opportunity-add-field">
+        <span class="opportunity-add-label">备注（精炼，可编辑）</span>
+        <textarea name="note" data-op-add-note rows="3" maxlength="3000" placeholder="暂无备注">${escapeHtml(d.note || "")}</textarea>
+      </label>
+      <label class="opportunity-add-field">
+        <span class="opportunity-add-label">下一步（可执行动作）</span>
+        <input name="nextAction" data-op-add-next placeholder="如：先做一个最小页面" value="${escapeHtml(d.nextAction || "")}" maxlength="500" />
+      </label>
+    </fieldset>
+
+    <details class="opportunity-add-source-info">
+      <summary>来源信息（标签 / 参考来源）</summary>
+      <fieldset class="opportunity-add-fieldset opportunity-add-fieldset--tags">
+        <legend class="opportunity-add-label">标签（点击切换，已自动建议）</legend>
+        <div class="opportunity-tag-chips" data-op-add-tags>${tagChips}</div>
+      </fieldset>
+      ${sourceUrlChips}
+    </details>
+
     <div class="opportunity-form-actions">
       <button type="submit" class="mini-button" data-op-add-submit>加入机会池</button>
       <button type="button" class="link-button" data-op-add-cancel>取消</button>
@@ -838,6 +873,8 @@ function createApp(deps) {
   const opportunityStatus = nodes.opportunityStatus;
   const addOpportunityButton = nodes.addOpportunityButton;
   const addOpportunityContainer = nodes.addOpportunityContainer;
+  // V0.3.11-hotfix-3：输入框右侧 × 清空按钮
+  const clearInputButton = nodes.clearInputButton;
   const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
@@ -1196,6 +1233,21 @@ function createApp(deps) {
     }
   }
 
+  // V0.3.11-hotfix-3：× 清空按钮 - 根据 input.value 切换 hidden
+  function updateClearButtonVisibility() {
+    if (!clearInputButton) return;
+    const has = input && String(input.value || "").trim().length > 0;
+    clearInputButton.hidden = !has;
+  }
+
+  // V0.3.11-hotfix-3：清空 input 文本并 refocus；不触发表单提交
+  function clearComposerInput() {
+    if (!input) return;
+    input.value = "";
+    updateClearButtonVisibility();
+    if (typeof input.focus === "function") input.focus();
+  }
+
   function selectQuestionButton(button) {
     state.selectedButton = button || null;
     for (const btn of state.recommendedButtons) {
@@ -1247,10 +1299,9 @@ function createApp(deps) {
     return /(开工包|项目体检|新项目|新机会|新方向|新工具|新流程|建议尝试|建议尝试做|可以做|做一个小|机会池|试试|先做|趋势|关注)/.test(t);
   }
 
-  function openAddOpportunityForm() {
+  async function openAddOpportunityForm() {
     if (!addOpportunityContainer) return;
-    const isOpportunityLike = isOpportunityLikeAnswer(state.currentAnswer);
-    const labelText = isOpportunityLike ? "加入机会池" : "从本次回答创建机会";
+    // V0.3.11-hotfix-3：按钮只显示 + 图标（aria-label 仍是"加入机会池"），不再做长文案拼接
     const source = state.currentSearch && state.currentSearch.used ? "search" : "ask-mode";
     const sourceUrls = state.currentSearch && Array.isArray(state.currentSearch.sources)
       ? state.currentSearch.sources.slice(0, 5).map((s) => ({
@@ -1259,12 +1310,37 @@ function createApp(deps) {
           source: String(s.source || "").slice(0, 80)
         }))
       : [];
+    // V0.3.11-hotfix-3：先调 /api/opportunities/draft 拿智能草稿；失败 fallback 本地规则
+    let draft = null;
+    if (fetchImpl) {
+      try {
+        const response = await fetchImpl("/api/opportunities/draft", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            question: state.currentQuestion,
+            answer: state.currentAnswer.slice(0, 4000),
+            search: state.currentSearch || null
+          })
+        });
+        const payload = await (response && typeof response.json === "function"
+          ? response.json()
+          : Promise.resolve({})).catch(() => ({}));
+        if (response && response.ok && payload && typeof payload === "object") {
+          draft = payload;
+        }
+      } catch {
+        // 静默回退 - 走本地规则（deriveOpportunityDraftFromAnswer 已在 buildAddOpportunityFormMarkup 内嵌）
+        draft = null;
+      }
+    }
     const markup = buildAddOpportunityFormMarkup({
       question: state.currentQuestion,
       answer: state.currentAnswer,
       sourceUrls,
-      source
-    }).replace("加入机会池", labelText);
+      source,
+      draft
+    });
     addOpportunityContainer.innerHTML = markup;
     addOpportunityContainer.hidden = false;
     bindAddOpportunityForm();
@@ -1512,7 +1588,11 @@ function createApp(deps) {
       if (input && typeof input.focus === "function") input.focus();
       return { submitted: false, reason: v.message };
     }
-    if (input) input.value = value;
+    // V0.3.11-hotfix-3：捕获后立即清空 input；fetch body 仍用 `value` 不变
+    if (input) {
+      input.value = "";
+      updateClearButtonVisibility();
+    }
     const useSearch = Boolean(webSearchToggle && webSearchToggle.checked);
     setInFlight(true);
     setStatus(useSearch ? "正在联网搜索并生成战略判断……" : "正在生成战略判断……");
@@ -1631,8 +1711,11 @@ function createApp(deps) {
   function mount() {
     if (input) {
       input.addEventListener("input", () => {
-        if (state.inFlight) return;
-        if (String(input.value || "").trim()) clearSelectedQuestion();
+        if (!state.inFlight) {
+          if (String(input.value || "").trim()) clearSelectedQuestion();
+        }
+        // V0.3.11-hotfix-3：输入变化时同步 × 按钮显隐
+        updateClearButtonVisibility();
       });
       input.addEventListener("keydown", (event) => {
         const action = handleComposerKeyDown(event);
@@ -1642,6 +1725,14 @@ function createApp(deps) {
         }
         // newline / ignore / noop: 浏览器默认行为（Shift+Enter 换行；composition 不动；其它键不动）
       });
+    }
+    // V0.3.11-hotfix-3：× 清空按钮 - 点击清空 + 焦点回到 input
+    if (clearInputButton) {
+      clearInputButton.addEventListener("click", (event) => {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        clearComposerInput();
+      });
+      updateClearButtonVisibility();
     }
     if (askButton) {
       askButton.addEventListener("click", () => {

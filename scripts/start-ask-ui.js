@@ -3,7 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { askStrategyOsAsync, generateKickoffPackageForOpportunity } = require("./ask-strategy-os");
+const { askStrategyOsAsync, generateKickoffPackageForOpportunity, generateOpportunityDraft } = require("./ask-strategy-os");
 const {
   loadOpportunityPool,
   updateOpportunity,
@@ -37,16 +37,44 @@ function sendJson(res, status, body) {
   send(res, status, JSON.stringify(body), "application/json; charset=utf-8");
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) reject(new Error("请求内容太大。"));
+      if (body.length > maxBytes) reject(new Error("请求内容太大。"));
     });
     req.on("end", () => resolve(body));
     req.on("error", reject);
   });
+}
+
+// V0.3.11-hotfix-3：草稿 API 响应白名单 - 丢弃 filePath / apiKey / rawAnswer 等敏感字段
+const DRAFT_RESPONSE_FIELDS = [
+  "opportunityName",
+  "oneLineSummary",
+  "note",
+  "nextAction",
+  "status",
+  "type",
+  "suggestedTags",
+  "draftWarning",
+  "sourceQuestion",
+  "sourceAnswerSummary",
+  "sourceUrls",
+  "draftSource"
+];
+function pickDraftResponse(result) {
+  const raw = result && typeof result === "object" ? result : {};
+  const out = {};
+  for (const key of DRAFT_RESPONSE_FIELDS) {
+    if (key in raw) out[key] = raw[key];
+  }
+  // 防御：tags 必须是数组
+  if (!Array.isArray(out.suggestedTags)) out.suggestedTags = [];
+  // 防御：draftSource 必须是已知值
+  if (!["llm", "local-rule", "fallback"].includes(out.draftSource)) out.draftSource = "fallback";
+  return out;
 }
 
 function assetPathFor(urlPath, publicDir) {
@@ -136,6 +164,32 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
       } catch (error) {
         const status = error.statusCode || 400;
         const safeMessage = String(error.message || "机会新增失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        sendJson(res, status, { error: safeMessage });
+      }
+      return;
+    }
+
+    // V0.3.11-hotfix-3：智能草稿 API - LLM 优先 → 规则回退
+    if (req.method === "POST" && url.pathname === "/api/opportunities/draft") {
+      try {
+        const raw = JSON.parse((await readBody(req, 200 * 1024)) || "{}");
+        if (!raw || typeof raw !== "object") {
+          sendJson(res, 400, { error: "请求体格式不合法。" });
+          return;
+        }
+        const question = String(raw.question || "").slice(0, 1000);
+        const answer = String(raw.answer || "").slice(0, 4000);
+        const search = raw.search && typeof raw.search === "object" ? raw.search : null;
+        const result = await generateOpportunityDraft({
+          question,
+          answer,
+          search,
+          env: process.env
+        });
+        sendJson(res, 200, pickDraftResponse(result));
+      } catch (error) {
+        const status = error.statusCode || 400;
+        const safeMessage = String(error.message || "草稿生成失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
         sendJson(res, status, { error: safeMessage });
       }
       return;
@@ -318,5 +372,8 @@ module.exports = {
   createAskUiServer,
   startAskUiServer,
   startAskUiServers,
-  closeAskUiServers
+  closeAskUiServers,
+  // V0.3.11-hotfix-3
+  pickDraftResponse,
+  readBody
 };

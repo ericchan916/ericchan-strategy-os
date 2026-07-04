@@ -559,6 +559,7 @@ h2 {
 .add-opportunity-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   border: 1px solid var(--accent);
   border-radius: 999px;
@@ -568,7 +569,9 @@ h2 {
   font: inherit;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12.5px;
-  padding: 5px 12px 5px 10px;
+  padding: 4px 9px;
+  min-width: 32px;
+  min-height: 32px;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
@@ -588,9 +591,10 @@ h2 {
 }
 
 .add-opportunity-icon {
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 600;
   line-height: 1;
+  color: var(--accent-dark);
 }
 
 .add-opportunity-container[hidden] {
@@ -638,15 +642,81 @@ h2 {
 }
 
 .opportunity-add-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 8px;
-  padding: 6px 10px;
-  background: rgba(160, 74, 58, 0.08);
-  border-left: 3px solid #a04a3a;
-  border-radius: 4px;
+  padding: 4px 10px;
+  background: rgba(160, 74, 58, 0.06);
+  border-radius: 999px;
   color: #a04a3a;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* V0.3.11-hotfix-3：加入机会池表单分组排版 */
+.opportunity-add-form {
+  display: grid;
+  gap: 10px;
+}
+.opportunity-add-fieldset {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  padding: 10px 12px 12px;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.opportunity-add-fieldset--core {
+  border-color: var(--accent);
+  background: var(--panel-strong);
+}
+.opportunity-add-fieldset--judgment {
+  grid-template-columns: 1fr 1fr;
+}
+.opportunity-add-field {
+  display: grid;
+  gap: 4px;
+}
+.opportunity-add-field--title input {
+  font-size: 16px;
+  font-weight: 600;
+  border-color: var(--accent);
+}
+.opportunity-add-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 500;
+}
+.opportunity-add-label em {
+  color: var(--danger);
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.opportunity-add-source-info {
+  border: 1px dashed var(--line-soft);
+  border-radius: var(--radius-md);
+  padding: 6px 12px 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.opportunity-add-source-info > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  list-style: none;
+  font-weight: 500;
+}
+.opportunity-add-source-info[open] > summary {
+  margin-bottom: 8px;
+}
+@media (max-width: 640px) {
+  .opportunity-add-fieldset--judgment {
+    grid-template-columns: 1fr;
+  }
 }
 
 .opportunity-source-urls {
@@ -696,6 +766,43 @@ h2 {
   font-size: 15.5px;
   line-height: 1.65;
   transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* V0.3.11-hotfix-3：textarea 包裹层 + × 清空按钮 */
+.composer-textarea-wrap {
+  position: relative;
+  display: flex;
+}
+.composer-textarea-wrap textarea {
+  padding-right: 38px;
+}
+.composer-clear-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.composer-clear-button:hover,
+.composer-clear-button:focus-visible {
+  background: var(--line-soft);
+  color: var(--ink);
+  outline: none;
+}
+.composer-clear-button[hidden] {
+  display: none;
 }
 
 .composer textarea::placeholder {
@@ -1643,6 +1750,40 @@ h2 {
 
 .search-process-warning {
   color: var(--accent-dark);
+}
+
+/* V0.3.11-hotfix-3：桌面端把 search-sources / search-process 折叠为单行 */
+@media (min-width: 900px) {
+  .search-sources:not([hidden]),
+  .search-process:not([hidden]) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 12px;
+  }
+  .search-sources-head,
+  .search-sources-summary,
+  .search-process-summary {
+    display: inline;
+    margin: 0;
+    padding: 0;
+  }
+  .search-sources-details,
+  .search-process-details {
+    margin-left: auto;
+  }
+  .search-sources-details > summary,
+  .search-process-details > summary {
+    font-size: 11.5px;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+  }
+  .search-sources-list,
+  .search-process-list {
+    margin-top: 6px;
+  }
 }
 
 /* ---------------- Uiverse 3D box spinner (by bociKond) ----------------

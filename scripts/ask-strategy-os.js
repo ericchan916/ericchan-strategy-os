@@ -957,6 +957,162 @@ function logLlmError(error) {
   console.warn(`[ask-mode] LLM 调用失败（${code}）：${safeMessage}`);
 }
 
+// ============== V0.3.11-hotfix-3: 智能机会草稿 ==============
+//
+// 优先级：LLM（callChatCompletion）→ deriveOpportunityDraftFromAnswer 规则兜底 → fallback
+// 始终返回 { opportunityName, oneLineSummary, note, nextAction, status, type,
+//           suggestedTags, draftWarning, sourceQuestion, sourceAnswerSummary,
+//           sourceUrls, draftSource }
+//
+// 硬约束：
+// - 不调用外部搜索；不保存 raw answer / raw search
+// - 不暴露 API Key（用 LlmError + sk-* 脱敏）
+// - LLM 输出走 parseLlmDraftJson + pickDraftFields 字段白名单
+// - tags 优先 PRESET_TAGS
+
+const OPPORTUNITY_DRAFT_PRESET_TAGS = [
+  "AI Agent",
+  "大模型应用",
+  "独立开发者",
+  "小型可变现",
+  "内容产品",
+  "自动化工作流",
+  "编程工具",
+  "前端视觉",
+  "个人 OS",
+  "OPC",
+  "需要调研",
+  "可快速验证",
+  "暂缓",
+  "高潜力",
+  "噪声较大"
+];
+
+const OPPORTUNITY_DRAFT_STATUS_WHITELIST = ["inbox", "watch", "validate", "mvp-spec", "building", "archived", "rejected"];
+const OPPORTUNITY_DRAFT_TYPE_WHITELIST = [
+  "new-project-opportunity",
+  "current-project-improvement",
+  "legacy-learning-material",
+  "watch-only"
+];
+
+function readDraftSystemPrompt() {
+  return [
+    "你是 EricChan·战略OS 的中文机会卡提炼助手。",
+    "任务：基于 user 给的 question / answer，输出一个项目机会草稿。",
+    "",
+    "硬性约束：",
+    "1) opportunityName 必须是产品/项目名（≤ 24 字），绝不能直接复述 user 的问题。",
+    "2) status ∈ {inbox, watch, validate, mvp-spec, building, archived, rejected}；type ∈ {new-project-opportunity, current-project-improvement, legacy-learning-material, watch-only}。",
+    "3) suggestedTags 优先从以下预设里挑：AI Agent / 大模型应用 / 独立开发者 / 小型可变现 / 内容产品 / 自动化工作流 / 编程工具 / 前端视觉 / 个人 OS / OPC。预设不够用再写自由词；最多 5 个。",
+    "4) draftWarning 仅当 opportunityName 真的无法识别时填写。",
+    "5) 输出严格 JSON，不要 markdown / 注释 / 解释。",
+    "",
+    "Schema:",
+    "{\"opportunityName\":\"\",\"oneLineSummary\":\"\",\"note\":\"\",\"nextAction\":\"\",\"suggestedTags\":[],\"status\":\"validate\",\"type\":\"new-project-opportunity\",\"draftWarning\":\"\"}"
+  ].join("\n");
+}
+
+function buildDraftUserPrompt({ question, answer, search } = {}) {
+  const q = String(question || "").slice(0, 1000);
+  const a = String(answer || "").slice(0, 2000);
+  const searchUsed = search && search.used ? "本次已联网搜索" : "未使用联网搜索";
+  return `问题：${q}\n回答：${a}\n${searchUsed}\n请按系统提示输出严格 JSON。`;
+}
+
+function parseLlmDraftJson(raw) {
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+  // 抓首个 {...} 块
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function pickDraftFields(parsed) {
+  const p = parsed && typeof parsed === "object" ? parsed : {};
+  const rawTags = Array.isArray(p.suggestedTags)
+    ? p.suggestedTags.map((t) => String(t || "").slice(0, 40)).filter(Boolean)
+    : [];
+  // PRESET 优先，自由词放后面；去重；限 5 个
+  const seen = new Set();
+  const tags = [];
+  for (const t of rawTags) {
+    if (tags.length >= 5) break;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    tags.push(t);
+  }
+  const status = OPPORTUNITY_DRAFT_STATUS_WHITELIST.includes(p.status) ? p.status : "validate";
+  const type = OPPORTUNITY_DRAFT_TYPE_WHITELIST.includes(p.type) ? p.type : "new-project-opportunity";
+  return {
+    opportunityName: String(p.opportunityName || "").slice(0, 24),
+    oneLineSummary: String(p.oneLineSummary || "").slice(0, 300),
+    note: String(p.note || "").slice(0, 500),
+    nextAction: String(p.nextAction || "").slice(0, 500),
+    suggestedTags: tags,
+    status,
+    type,
+    sourceAnswerSummary: String(p.oneLineSummary || p.note || "").slice(0, 600),
+    sourceQuestion: String(p.sourceQuestion || "").slice(0, 1000)
+  };
+}
+
+function buildDraftByRule({ question, answer, search }) {
+  const { deriveOpportunityDraftFromAnswer } = require("./opportunity-store");
+  return deriveOpportunityDraftFromAnswer({ question, answer, search });
+}
+
+async function generateOpportunityDraft({
+  question = "",
+  answer = "",
+  search = null,
+  env = process.env,
+  deps = {}
+} = {}) {
+  const fetchImpl = deps.fetch || (typeof fetch !== "undefined" ? fetch : null);
+  const abortImpl = deps.AbortController || (typeof AbortController !== "undefined" ? AbortController : null);
+  let llmConfig = null;
+  try {
+    llmConfig = readConfig(env);
+  } catch {
+    llmConfig = null;
+  }
+  if (!isConfigured(llmConfig)) {
+    const rule = buildDraftByRule({ question, answer, search }) || {};
+    return { ...rule, draftSource: "fallback" };
+  }
+  try {
+    const userPrompt = buildDraftUserPrompt({ question, answer, search });
+    const raw = await callChatCompletion({
+      config: llmConfig,
+      systemPrompt: readDraftSystemPrompt(),
+      userPrompt,
+      fetchImpl,
+      abortImpl
+    });
+    const parsed = parseLlmDraftJson(raw);
+    if (parsed) {
+      const picked = pickDraftFields(parsed);
+      // 若 LLM 没给出 opportunityName，回退规则
+      if (picked.opportunityName) {
+        return { ...picked, draftSource: "llm" };
+      }
+    }
+  } catch (error) {
+    logLlmError(error);
+  }
+  const rule = buildDraftByRule({ question, answer, search }) || {};
+  return { ...rule, draftSource: "local-rule" };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const dateArgIndex = args.indexOf("--date");
@@ -995,5 +1151,12 @@ module.exports = {
   buildLocalKickoff,
   buildSparseKickoff,
   shouldUseWebSearch,
-  LLM_FALLBACK_WARNING
+  LLM_FALLBACK_WARNING,
+  // V0.3.11-hotfix-3
+  generateOpportunityDraft,
+  readDraftSystemPrompt,
+  buildDraftUserPrompt,
+  parseLlmDraftJson,
+  pickDraftFields,
+  OPPORTUNITY_DRAFT_PRESET_TAGS
 };
