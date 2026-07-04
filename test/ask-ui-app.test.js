@@ -253,6 +253,12 @@ const indexHtml = fs.readFileSync(path.join(ROOT, "public", "ask-ui", "index.htm
 const stylesCss = fs.readFileSync(path.join(ROOT, "public", "ask-ui", "styles.css"), "utf8");
 const appJsText = fs.readFileSync(path.join(ROOT, "public", "ask-ui", "app.js"), "utf8");
 
+function cssRule(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = stylesCss.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{[\\s\\S]*?\\n\\s*\\}`));
+  return match ? match[0] : "";
+}
+
 test("HTML still contains 'EricChan·战略OS' title", () => {
   assert.ok(indexHtml.includes("EricChan·战略OS"));
 });
@@ -317,11 +323,11 @@ test("V0.4.1: CSS layout uses a wider content width (>= 1400px) for desktop", ()
   assert.ok(width >= 1400, `桌面端 --content-width 应 >= 1400px，实际 ${width}px`);
 });
 
-test("CSS reserves padding-bottom on the scrolling area so composer doesn't cover the last paragraph", () => {
-  // 滚动区应有 padding-bottom 避免最后一段被 composer 盖住。
-  // 检查方式：在 body/html/main/shell 规则块附近出现 padding-bottom。
-  const ruleMatch = stylesCss.match(/(?:body|html|main|\.shell)[\s\S]{0,400}?\{[\s\S]{0,800}?padding-bottom\s*:\s*[^;]+;/i);
-  assert.ok(ruleMatch, "滚动区应在 body/html/main/.shell 规则块中包含 padding-bottom");
+test("V0.4.6: desktop shell reserves composer height instead of relying on body scroll padding", () => {
+  const shellRule = cssRule(".shell");
+  const bodyRule = cssRule("body");
+  assert.ok(/height\s*:\s*calc\(100dvh\s*-\s*var\(--composer-height\)\)/i.test(shellRule), ".shell 应扣除 composer 高度");
+  assert.equal(/padding-bottom\s*:\s*var\(--composer-height\)/i.test(bodyRule), false, "桌面 body 不应靠 padding-bottom 形成整页滚动");
 });
 
 test("app.js no longer wires recommended-question button to submitAsk directly", () => {
@@ -3626,15 +3632,14 @@ test("V0.4.1: 历史 click 仍隐藏 kickoff-package 类型按钮（不回归）
 // V0.4.2 三栏日用细节修补
 // =================================================================
 
-// F1：CSS .rail 应在桌面端使用 sticky + max-height + overflow-y 实现独立滚动
-test("V0.4.2 F1a: .rail 桌面端使用 position: sticky 独立滚动", () => {
-  // .rail 主规则应包含 position: sticky + overflow-y
-  const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
-  assert.ok(railRule, "找不到 .rail 主规则");
-  const target = railRule[0];
-  assert.ok(/position\s*:\s*sticky/i.test(target), ".rail 应使用 position: sticky");
+// F1：CSS .rail 应在桌面端作为固定工作台内的局部滚动区
+test("V0.4.6 F1a: .rail 桌面端使用内部滚动而非页面 sticky", () => {
+  const target = cssRule(".rail");
+  assert.ok(target, "找不到 .rail 主规则");
+  assert.ok(/min-height\s*:\s*0/i.test(target), ".rail 应允许在 grid/flex 中收缩");
   assert.ok(/overflow-y\s*:\s*auto|overflow\s*:\s*auto/i.test(target), ".rail 应允许独立纵向滚动");
-  assert.ok(/max-height\s*:\s*calc\(100vh\s*-/i.test(target), ".rail 应限制 max-height 不超过视口");
+  assert.ok(/overscroll-behavior\s*:\s*contain/i.test(target), ".rail 滚动不应串到 body");
+  assert.equal(/position\s*:\s*sticky/i.test(target), false, ".rail 桌面端不应再依赖 sticky 页面滚动");
 });
 
 // F1：移动端 .rail 退化为普通 flow（无 sticky / max-height）
@@ -3960,6 +3965,49 @@ test("V0.4.5: hero 使用 sticky + z-index + background 避免最大化滚动时
   assert.ok(/background\s*:/i.test(target), ".hero 应有背景，避免内容透过标题");
 });
 
+test("V0.4.6: 桌面端 html/body 禁止页面级滚动", () => {
+  const htmlBodyRule = stylesCss.match(/html,\s*\nbody\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(htmlBodyRule, "找不到 html/body 规则");
+  const target = htmlBodyRule[0];
+  assert.ok(/height\s*:\s*100%/i.test(target), "html/body 应占满视口");
+  assert.ok(/overflow\s*:\s*hidden/i.test(target), "桌面端 html/body 应禁止整页滚动");
+});
+
+test("V0.4.6: shell/layout 形成固定视口工作台", () => {
+  const shellRule = cssRule(".shell");
+  const layoutRule = cssRule(".layout");
+  assert.ok(/height\s*:\s*calc\(100dvh\s*-\s*var\(--composer-height\)\)/i.test(shellRule), ".shell 应固定到当前视口高度");
+  assert.ok(/display\s*:\s*flex/i.test(shellRule), ".shell 应用 flex 分配标题和工作区");
+  assert.ok(/overflow\s*:\s*hidden/i.test(shellRule), ".shell 不应把滚动传给 body");
+  assert.ok(/flex\s*:\s*1\s+1\s+auto/i.test(layoutRule), ".layout 应占据剩余高度");
+  assert.ok(/min-height\s*:\s*0/i.test(layoutRule), ".layout 应允许内部滚动区收缩");
+  assert.ok(/overflow\s*:\s*hidden/i.test(layoutRule), ".layout 不应撑出整页滚动");
+});
+
+test("V0.4.6: 战略回答有独立 output-scroll 滚动容器", () => {
+  assert.ok(indexHtml.includes('class="output-scroll"'), "HTML 应包含 output-scroll");
+  const outputPanelRule = cssRule(".output-panel");
+  const outputScrollRule = cssRule(".output-scroll");
+  assert.ok(/display\s*:\s*flex/i.test(outputPanelRule), ".output-panel 应为 flex column");
+  assert.ok(/flex-direction\s*:\s*column/i.test(outputPanelRule), ".output-panel 应纵向布局");
+  assert.ok(/overflow\s*:\s*hidden/i.test(outputPanelRule), ".output-panel 不应撑破 layout");
+  assert.ok(/flex\s*:\s*1\s+1\s+auto/i.test(outputScrollRule), ".output-scroll 应占据回答剩余空间");
+  assert.ok(/min-height\s*:\s*0/i.test(outputScrollRule), ".output-scroll 应允许收缩");
+  assert.ok(/overflow-y\s*:\s*auto/i.test(outputScrollRule), ".output-scroll 应内部滚动");
+});
+
+test("V0.4.6: 移动端恢复自然页面滚动策略", () => {
+  const media = stylesCss.match(/@media\s*\(max-width\s*:\s*900px\)\s*\{[\s\S]*?\n\s*\}\s*\}/);
+  assert.ok(media, "找不到 max-width: 900px media 块");
+  const block = media[0];
+  assert.ok(/html,\s*\n\s*body\s*\{[^}]*overflow\s*:\s*auto/i.test(block), "移动端 html/body 应允许自然滚动");
+  assert.ok(/\.shell\s*\{[^}]*height\s*:\s*auto/i.test(block), "移动端 .shell 应恢复 auto 高度");
+  assert.ok(
+    /@media\s*\(max-width\s*:\s*900px\)[\s\S]*?\.main,\s*\n\s*\.output-panel,\s*\n\s*\.output-scroll\s*\{[^}]*overflow\s*:\s*visible/i.test(stylesCss),
+    "移动端 output-scroll 应恢复自然流"
+  );
+});
+
 // F19：rail 滚动条视觉优化（细滚动条 / 不抢戏）
 test("V0.4.2 F19a: .rail 滚动条弱化（scrollbar-width / scrollbar-color）", () => {
   const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
@@ -3971,18 +4019,11 @@ test("V0.4.2 F19a: .rail 滚动条弱化（scrollbar-width / scrollbar-color）"
   assert.ok(hasThin || hasColor, ".rail 应弱化滚动条（scrollbar-width 或 scrollbar-color）");
 });
 
-// F20：rail max-height 在桌面端与 .composer 高度协调（不挡 footer / composer）
-test("V0.4.2 F20a: .rail max-height 不超过 100vh - composer-height", () => {
-  const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
-  assert.ok(railRule, "找不到 .rail 主规则");
-  const target = railRule[0];
-  const m = target.match(/max-height\s*:\s*calc\(100vh\s*-\s*([^)]+)\)/);
-  assert.ok(m, ".rail 应使用 calc(100vh - ...) 限制高度");
-  // 偏移值至少 80px（足够预留 header + composer 边界）
-  const offsetStr = m[1].trim();
-  // 偏移可能是 "48px" 或 "var(--composer-height) + 48px"
-  // 简化为：检查不含 0 或 px 内紧跟 0
-  assert.ok(/(\d+px|var\()/.test(offsetStr), ".rail max-height 偏移应为 px 或 var()");
+// F20：V0.4.6 桌面端高度由 shell/layout 约束，不再让 rail 自己算 100vh
+test("V0.4.6 F20a: .rail 不再用 max-height 兜页面滚动模型", () => {
+  const target = cssRule(".rail");
+  assert.ok(target, "找不到 .rail 主规则");
+  assert.equal(/max-height\s*:/i.test(target), false, ".rail 桌面端不应再用 max-height 控制页面滚动");
 });
 
 // F21：移动端 layout 单列时 .rail 仍允许最大高度自适应（不强行 sticky）

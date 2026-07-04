@@ -71,26 +71,28 @@
                 <button id="copyClaudeTaskButton" type="button" class="task-copy-button" aria-label="复制适合 Claude Code 执行的前端 UI 任务提示词，偏页面、交互、视觉、真实网页验证" title="Claude Code：偏前端页面、UI、交互、视觉、真实网页验证。" hidden disabled>复制为 Claude Code 任务</button>
               </div>
             </div>
-            <div id="questionEcho" class="question-echo" hidden></div>
-            <div id="answerLoading" class="answer-loading loading-card" hidden aria-live="polite" role="status" aria-label="正在生成战略判断">
-              <div class="loading-inner">
-                <span class="loading-text">正在生成战略判断……</span>
-                <div aria-hidden="true" class="loading-spinner">
-                  <div></div>
-                  <div></div>
-                  <div></div>
-                  <div></div>
-                  <div></div>
-                  <div></div>
+            <div class="output-scroll" aria-label="战略回答内容">
+              <div id="questionEcho" class="question-echo" hidden></div>
+              <div id="answerLoading" class="answer-loading loading-card" hidden aria-live="polite" role="status" aria-label="正在生成战略判断">
+                <div class="loading-inner">
+                  <span class="loading-text">正在生成战略判断……</span>
+                  <div aria-hidden="true" class="loading-spinner">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                  </div>
                 </div>
               </div>
+              <article id="answerOutput" class="answer empty" aria-live="polite">
+                点击下方推荐问题，或在输入框里写下你的问题。
+              </article>
+              <section id="searchProcess" class="search-process" hidden aria-label="搜索过程"></section>
+              <section id="searchSources" class="search-sources" hidden aria-label="参考来源"></section>
+              <section id="addOpportunityContainer" class="add-opportunity-container" hidden aria-label="加入机会池"></section>
             </div>
-            <article id="answerOutput" class="answer empty" aria-live="polite">
-              点击下方推荐问题，或在输入框里写下你的问题。
-            </article>
-            <section id="searchProcess" class="search-process" hidden aria-label="搜索过程"></section>
-            <section id="searchSources" class="search-sources" hidden aria-label="参考来源"></section>
-            <section id="addOpportunityContainer" class="add-opportunity-container" hidden aria-label="加入机会池"></section>
           </section>
         </section>
 
