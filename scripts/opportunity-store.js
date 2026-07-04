@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { renderOpportunityPoolMarkdown, STATUSES } = require("./update-opportunity-pool");
+const { redactSecretLikeText } = require("./secret-redact");
 
 const STATUS_LABELS = {
   inbox: "待处理",
@@ -605,7 +606,9 @@ function deriveOpportunityDraftFromAnswer({
 
 // V0.3.10：新增机会
 function addOpportunity({ rootDir = process.cwd(), input = {} } = {}) {
-  const cleaned = pickPersistFields(input);
+  // V0.3.11-hotfix-4：先统一过 redactSecretLikeText 防止 sk-* 进入持久化
+  const safeInput = redactSecretLikeText(input);
+  const cleaned = pickPersistFields(safeInput);
   const title = String(cleaned.opportunityName || cleaned.title || "").trim();
   if (!title) {
     const error = new Error("请填写机会名称。");
@@ -656,7 +659,11 @@ function addOpportunity({ rootDir = process.cwd(), input = {} } = {}) {
 
 // V0.3.10：构建给 LLM 的中文机会池摘要（不包含 raw JSON / 英文内部字段）
 function buildOpportunityContextForPrompt(opportunities, options = {}) {
-  const list = Array.isArray(opportunities) ? opportunities : [];
+  // V0.3.11-hotfix-4：先统一过 redactSecretLikeText 防止 sk-* 进入 LLM prompt
+  const safeOpportunities = redactSecretLikeText(
+    Array.isArray(opportunities) ? opportunities : []
+  );
+  const list = Array.isArray(safeOpportunities) ? safeOpportunities : [];
   const includeArchived = options.includeArchived === true;
   const maxItems = Number.isFinite(options.maxItems) && options.maxItems > 0
     ? Math.floor(options.maxItems)
@@ -786,6 +793,8 @@ function buildPatch(body = {}) {
 }
 
 function updateOpportunity({ rootDir = process.cwd(), id, patch = {} } = {}) {
+  // V0.3.11-hotfix-4：先统一过 redactSecretLikeText
+  const safePatch = redactSecretLikeText(patch);
   const loaded = loadOpportunityPool({ rootDir });
   const pool = loaded.pool;
   const index = pool.opportunities.findIndex((item) => item.id === id);
@@ -794,7 +803,7 @@ function updateOpportunity({ rootDir = process.cwd(), id, patch = {} } = {}) {
     error.statusCode = 404;
     throw error;
   }
-  const allowed = buildPatch(patch);
+  const allowed = buildPatch(safePatch);
   pool.opportunities[index] = normalizeOpportunity({
     ...pool.opportunities[index],
     ...allowed,

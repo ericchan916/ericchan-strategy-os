@@ -1440,6 +1440,76 @@ CSS：grid 间距 10px，fieldsets 圆角边框，warning 改为 chip，移动�
 - 不提交 `data/opportunities/*.json` 或测试机会数据
 - 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
 
+## V0.3.11-hotfix-4 修复机会池按钮文案与草稿脱敏
+
+V0.3.11-hotfix-3 完成后用户真实使用反馈两个问题：
+
+1. "机会池"按钮只显示加号，缺少右侧的"机会池"三个字。
+2. 真实验证时，draft 响应中出现了用户输入的 `sk-fakefakefake0123456789` 原文（即使 LLM 在 note 中引用了用户的输入）。
+
+本次仍只动前端 + 后端脱敏共享层，不改 LLM provider / search / 端口。
+
+### 修复 1：机会池按钮文案
+
+按钮可见内容恢复为 `＋ 机会池`（加号 + 三字文案）：
+
+```html
+<button id="addOpportunityButton" class="add-opportunity-button"
+        aria-label="加入机会池" title="把当前回答加入机会池" hidden disabled>
+  <span class="add-opportunity-icon" aria-hidden="true">＋</span>
+  <span class="add-opportunity-label">机会池</span>
+</button>
+```
+
+CSS：
+
+- `.add-opportunity-icon` `font-size: 18px`（加号更大）
+- `.add-opportunity-label` `font-size: 13px`（文字小一号，弱于加号）
+- 加号 `color: var(--accent-dark)` 与文字一致
+- `aria-label="加入机会池"` + `title="把当前回答加入机会池"` 保留无障碍文本
+
+### 修复 2：统一 sk-* 脱敏
+
+新增 `scripts/secret-redact.js`，提供纯函数 `redactSecretLikeText(value)`：
+
+- 字符串中匹配 `/sk-[A-Za-z0-9_-]+/g` 的内容，全部替换为 `[redacted]`
+- 递归处理对象 / 数组
+- 保留 null / undefined / number / boolean 原值
+- 不改变正常中文内容，不改变普通 URL（除非 URL 自身含 sk-*）
+
+应用链路（**所有进入 prompt / 响应 / 持久化前的输入都要先过 redactSecretLikeText**）：
+
+| 链路 | 入口 | 文件 |
+| --- | --- | --- |
+| `/api/opportunities/draft` 响应 | `generateOpportunityDraft` 三层（LLM / 规则 / fallback）出口 | `scripts/ask-strategy-os.js` |
+| `POST /api/opportunities` 保存 | `addOpportunity` 入口 | `scripts/opportunity-store.js` |
+| `PATCH /api/opportunities/:id` 更新 | `updateOpportunity` 入口 | `scripts/opportunity-store.js` |
+| Ask Mode LLM context | `buildOpportunityContextForPrompt` 入口 | `scripts/opportunity-store.js` |
+| Kickoff LLM prompt | `buildKickoffUserPrompt` 入口 | `scripts/ask-strategy-os.js` |
+| 本地 Kickoff 兜底 | `buildLocalKickoff` 入口 | `scripts/ask-strategy-os.js` |
+
+新增 `OPPORTUNITY_DRAFT_PRESET_TAGS` 中 `sourceUrls` 字段也参与脱敏，限制 5 条以内、每条字段长度限制。
+
+### 真实验证
+
+- `POST /api/opportunities/draft` body 含 `sk-fakefakefake0123456789`，响应中 `note` / `oneLineSummary` / `sourceAnswerSummary` / `sourceUrls[].title|url|source` 均无 sk-* 原文；含 `[redacted]`
+- `POST /api/opportunities` 保存 `note = "sk-fakefakefake0123456789 in note"`，opportunity-pool.json 持久化字段无 sk-* 原文
+- `PATCH /api/opportunities/:id` 更新 `note`，持久化字段无 sk-* 原文
+- `buildOpportunityContextForPrompt` 输入含 sk-* 的 note，输出字符串无 sk-* 原文
+- `buildKickoffUserPrompt` / `buildLocalKickoff` 输入含 sk-* 的字段，输出字符串无 sk-* 原文
+- 即使是用户输入的假 key，也会被脱敏；不允许"用户输入就回显"
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）
+- 不恢复仓鼠跑轮
+- 不默认自动联网 / 不默认勾选"本次联网搜索"
+- 不删除 Bocha / Tavily provider
+- 不改 LLM API 配置逻辑
+- 不暴露 API Key / 不提交 .env
+- 不提交 `data/opportunities/*.json` 或测试机会数据
+- 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { getDateString } = require("./generate-report");
 const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
+const { redactSecretLikeText } = require("./secret-redact");
 const { searchWeb, toPublicSearchMeta, shouldUseWebSearch } = require("./search-client");
 const { buildOpportunityContextForPrompt } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
@@ -579,15 +580,21 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
 
 function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
   // V0.3.11 安全：脱敏所有可能含 API Key 的字段
+  // V0.3.11-hotfix-4：先统一过 redactSecretLikeText（递归脱敏 sk-* 形态）
+  const safeInput = redactSecretLikeText({
+    name, oneLine, note, next, tags, sourceQuestion, sourceUrls
+  });
   const sanitize = (s) => String(s || "")
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
     .replace(/STRATEGY_OS_LLM_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]")
     .replace(/api[_-]?key\s*[=:]\s*\S+/gi, "[已脱敏]");
-  const safeName = sanitize(name);
-  const safeOneLine = sanitize(oneLine);
-  const safeNote = sanitize(note);
-  const safeNext = sanitize(next);
-  const safeQuestion = sanitize(sourceQuestion);
+  const safeName = sanitize(safeInput.name);
+  const safeOneLine = sanitize(safeInput.oneLine);
+  const safeNote = sanitize(safeInput.note);
+  const safeNext = sanitize(safeInput.next);
+  const safeQuestion = sanitize(safeInput.sourceQuestion);
+  const safeTags = Array.isArray(safeInput.tags) ? safeInput.tags.map((t) => sanitize(t)) : [];
+  const safeSourceUrls = Array.isArray(safeInput.sourceUrls) ? safeInput.sourceUrls : [];
   const lines = [];
   lines.push("请基于下面这个机会卡数据，生成一份结构化开工包。");
   lines.push("");
@@ -596,11 +603,11 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   if (oneLine) lines.push(`- 一句话说明：${safeOneLine}`);
   if (note) lines.push(`- 备注：${safeNote}`);
   if (next) lines.push(`- 下一步：${safeNext}`);
-  if (tags.length) lines.push(`- 标签：${tags.join("、")}`);
+  if (safeTags.length) lines.push(`- 标签：${safeTags.join("、")}`);
   if (sourceQuestion) lines.push(`- 原始问题：${safeQuestion}`);
-  if (sourceUrls.length) {
+  if (safeSourceUrls.length) {
     lines.push(`- 参考来源（最多 5 条）：`);
-    for (const u of sourceUrls) {
+    for (const u of safeSourceUrls) {
       lines.push(`  - ${sanitize(u.title || "(无标题)")}${u.source ? `（${sanitize(u.source)}）` : ""}${u.url ? ` ${sanitize(u.url)}` : ""}`);
     }
   }
@@ -648,11 +655,15 @@ function readKickoffSystemPrompt() {
 
 function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
   // V0.3.11 安全：脱敏所有可能含 API Key 的字段
+  // V0.3.11-hotfix-4：先统一过 redactSecretLikeText
+  const safeInput = redactSecretLikeText({
+    name, oneLine, note, next, tags, sourceQuestion, sourceUrls
+  });
   const sanitize = (s) => String(s || "")
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
     .replace(/STRATEGY_OS_LLM_API_KEY\s*[=:]\s*\S+/g, "[已脱敏]")
     .replace(/api[_-]?key\s*[=:]\s*\S+/gi, "[已脱敏]");
-  const safeName = sanitize(name);
+  const safeName = sanitize(safeInput.name);
   const safeOneLine = sanitize(oneLine);
   const safeNote = sanitize(note);
   const safeNext = sanitize(next);
@@ -1052,6 +1063,14 @@ function pickDraftFields(parsed) {
   }
   const status = OPPORTUNITY_DRAFT_STATUS_WHITELIST.includes(p.status) ? p.status : "validate";
   const type = OPPORTUNITY_DRAFT_TYPE_WHITELIST.includes(p.type) ? p.type : "new-project-opportunity";
+  // V0.3.11-hotfix-4：sourceUrls 走脱敏 + 长度限制 + 数量限制
+  const safeSourceUrls = Array.isArray(p.sourceUrls)
+    ? p.sourceUrls.slice(0, 5).map((u) => ({
+        title: String(u && u.title || "").slice(0, 200),
+        url: String(u && u.url || "").slice(0, 500),
+        source: String(u && u.source || "").slice(0, 80)
+      }))
+    : [];
   return {
     opportunityName: String(p.opportunityName || "").slice(0, 24),
     oneLineSummary: String(p.oneLineSummary || "").slice(0, 300),
@@ -1060,6 +1079,7 @@ function pickDraftFields(parsed) {
     suggestedTags: tags,
     status,
     type,
+    sourceUrls: safeSourceUrls,
     sourceAnswerSummary: String(p.oneLineSummary || p.note || "").slice(0, 600),
     sourceQuestion: String(p.sourceQuestion || "").slice(0, 1000)
   };
@@ -1087,7 +1107,7 @@ async function generateOpportunityDraft({
   }
   if (!isConfigured(llmConfig)) {
     const rule = buildDraftByRule({ question, answer, search }) || {};
-    return { ...rule, draftSource: "fallback" };
+    return { ...redactSecretLikeText(rule), draftSource: "fallback" };
   }
   try {
     const userPrompt = buildDraftUserPrompt({ question, answer, search });
@@ -1103,14 +1123,15 @@ async function generateOpportunityDraft({
       const picked = pickDraftFields(parsed);
       // 若 LLM 没给出 opportunityName，回退规则
       if (picked.opportunityName) {
-        return { ...picked, draftSource: "llm" };
+        // V0.3.11-hotfix-4：脱敏 LLM 输出（防御 sk-* 回显）
+        return { ...redactSecretLikeText(picked), draftSource: "llm" };
       }
     }
   } catch (error) {
     logLlmError(error);
   }
   const rule = buildDraftByRule({ question, answer, search }) || {};
-  return { ...rule, draftSource: "local-rule" };
+  return { ...redactSecretLikeText(rule), draftSource: "local-rule" };
 }
 
 function main() {
@@ -1158,5 +1179,7 @@ module.exports = {
   buildDraftUserPrompt,
   parseLlmDraftJson,
   pickDraftFields,
-  OPPORTUNITY_DRAFT_PRESET_TAGS
+  OPPORTUNITY_DRAFT_PRESET_TAGS,
+  // V0.3.11-hotfix-4
+  redactSecretLikeText
 };

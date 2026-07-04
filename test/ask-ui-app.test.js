@@ -2796,3 +2796,271 @@ test("V0.3.11-hotfix-3 E2: /api/opportunities/draft 失败时仍能渲染（走�
   assert.ok(/data-op-add-form/.test(container.innerHTML), "应仍渲染表单 markup");
 });
 
+// ============== V0.3.11-hotfix-4: 按钮文案 + sk-* 脱敏 ==============
+
+test("V0.3.11-hotfix-4: 按钮可见文本为「+ 机会池」且不显示长文案", () => {
+  // HTML 应包含 .add-opportunity-label span，内容为「机会池」
+  assert.ok(/id="addOpportunityButton"/.test(indexHtml), "应保留 addOpportunityButton 节点");
+  assert.ok(/class="add-opportunity-icon"/.test(indexHtml), "应含 add-opportunity-icon");
+  assert.ok(/class="add-opportunity-label"/.test(indexHtml), "应含 add-opportunity-label");
+  // 抓 .add-opportunity-label 块
+  const labelMatch = indexHtml.match(/<span[^>]+class="add-opportunity-label"[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(labelMatch, "应能找到 .add-opportunity-label span");
+  assert.equal(labelMatch[1].trim(), "机会池", ".add-opportunity-label 文本应为「机会池」");
+  // 不应再出现"加入机会池"长文案作为可见内容
+  // 可见内容 = icon span + label span，不应含"加入机会池"四个字
+  // aria-label="加入机会池" 是允许的，但可见 span 内容不能是它
+  const buttonMatch = indexHtml.match(/<button[^>]+id="addOpportunityButton"[\s\S]*?<\/button>/);
+  assert.ok(buttonMatch, "应能找到 addOpportunityButton 块");
+  // 去除 aria-label / title 后检查可见文本
+  const visibleText = buttonMatch[0]
+    .replace(/aria-label="[^"]*"/g, "")
+    .replace(/title="[^"]*"/g, "");
+  assert.equal(/加入机会池/.test(visibleText), false, "可见文本不应含「加入机会池」");
+  assert.equal(/从本次回答创建机会/.test(visibleText), false, "可见文本不应含「从本次回答创建机会」");
+  // 可见文本应含"机会池"
+  assert.ok(/机会池/.test(visibleText), "可见文本应含「机会池」");
+});
+
+test("V0.3.11-hotfix-4: CSS .add-opportunity-label 与 .add-opportunity-icon 字号区分（加号更大）", () => {
+  // 验证 add-opportunity-label 有自己的 font-size 规则
+  const labelRule = stylesCss.match(/\.add-opportunity-label\s*\{[^}]*\}/);
+  assert.ok(labelRule, "应存在 .add-opportunity-label CSS 规则");
+  // 验证 icon 字号 ≥ label 字号
+  const iconRule = stylesCss.match(/\.add-opportunity-icon\s*\{[^}]*\}/);
+  assert.ok(iconRule, "应存在 .add-opportunity-icon CSS 规则");
+  const iconFs = Number((iconRule[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/) || [])[1] || 0);
+  const labelFs = Number((labelRule[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/) || [])[1] || 0);
+  assert.ok(iconFs >= 16, `.add-opportunity-icon font-size 应 ≥ 16px，实际 ${iconFs}px`);
+  assert.ok(labelFs >= 11, `.add-opportunity-label font-size 应 ≥ 11px，实际 ${labelFs}px`);
+  assert.ok(iconFs > labelFs, `加号字号 (${iconFs}px) 应大于文字 (${labelFs}px)`);
+});
+
+// ============== V0.3.11-hotfix-4: sk-* 脱敏 ==============
+
+test("V0.3.11-hotfix-4: redactSecretLikeText 纯函数 - 字符串中 sk-* 被替换为 [redacted]", () => {
+  // V0.3.11-hotfix-4：redactSecretLikeText 在 secret-redact.js 定义，
+  // 并由 ask-strategy-os / opportunity-store / start-ask-ui re-export
+  const { redactSecretLikeText } = require("../scripts/ask-strategy-os");
+  assert.ok(redactSecretLikeText, "应暴露 redactSecretLikeText 纯函数");
+  assert.equal(redactSecretLikeText("hello sk-fakefakefake0123456789 world"), "hello [redacted] world");
+  assert.equal(redactSecretLikeText("sk-proj-abc_123"), "[redacted]");
+  // 非 sk-* 字符串不变
+  assert.equal(redactSecretLikeText("这是普通中文，没有 key"), "这是普通中文，没有 key");
+  // 非字符串安全返回
+  assert.equal(redactSecretLikeText(123), 123);
+  assert.equal(redactSecretLikeText(null), null);
+  assert.equal(redactSecretLikeText(undefined), undefined);
+});
+
+test("V0.3.11-hotfix-4: redactSecretLikeText 递归处理对象与数组", () => {
+  const { redactSecretLikeText } = require("../scripts/ask-strategy-os");
+  const input = {
+    a: "sk-fakefakefake0123456789",
+    b: ["x sk-fakefakefake0123456789 y", { c: "sk-fakefakefake0123456789" }],
+    d: 42,
+    e: null,
+    f: { g: "sk-proj-abc" }
+  };
+  const out = redactSecretLikeText(input);
+  assert.equal(out.a, "[redacted]");
+  assert.equal(out.b[0], "x [redacted] y");
+  assert.equal(out.b[1].c, "[redacted]");
+  assert.equal(out.d, 42);
+  assert.equal(out.e, null);
+  assert.equal(out.f.g, "[redacted]");
+});
+
+test("V0.3.11-hotfix-4: generateOpportunityDraft LLM note 含 sk-* 时响应脱敏", async () => {
+  const { generateOpportunityDraft } = require("../scripts/ask-strategy-os");
+  const env = { ...process.env };
+  env.STRATEGY_OS_LLM_ENABLED = "true";
+  env.STRATEGY_OS_LLM_PROVIDER = "openai";
+  env.STRATEGY_OS_LLM_BASE_URL = "https://api.example.com/v1";
+  env.STRATEGY_OS_LLM_MODEL = "gpt-test";
+  env.STRATEGY_OS_LLM_API_KEY = "sk-fakefakefake0123456789";
+  const llmJson = {
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          opportunityName: "X 助手",
+          oneLineSummary: "ok",
+          note: "leaked key sk-fakefakefake0123456789 in note",
+          nextAction: "na",
+          suggestedTags: ["独立开发者"],
+          status: "validate",
+          type: "new-project-opportunity"
+        })
+      }
+    }]
+  };
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(llmJson),
+    json: async () => llmJson
+  });
+  const result = await generateOpportunityDraft({
+    question: "q",
+    answer: "a",
+    env,
+    deps: { fetch: fakeFetch, AbortController: null }
+  });
+  assert.equal(/sk-fakefakefake0123456789/.test(result.note), false, "note 不应含 sk-fakefakefake0123456789 原文");
+  assert.equal(result.note.includes("[redacted]"), true, "note 应含 [redacted]");
+});
+
+test("V0.3.11-hotfix-4: generateOpportunityDraft sourceUrls 含 sk-* 时响应脱敏", async () => {
+  const { generateOpportunityDraft } = require("../scripts/ask-strategy-os");
+  const env = { ...process.env };
+  env.STRATEGY_OS_LLM_ENABLED = "true";
+  env.STRATEGY_OS_LLM_PROVIDER = "openai";
+  env.STRATEGY_OS_LLM_BASE_URL = "https://api.example.com/v1";
+  env.STRATEGY_OS_LLM_MODEL = "gpt-test";
+  env.STRATEGY_OS_LLM_API_KEY = "sk-fakefakefake0123456789";
+  const llmJson = {
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          opportunityName: "X 助手",
+          oneLineSummary: "ok",
+          note: "n",
+          nextAction: "na",
+          suggestedTags: [],
+          status: "validate",
+          type: "new-project-opportunity",
+          sourceUrls: [
+            { title: "leak sk-fakefakefake0123456789 title", url: "https://example.com/sk-fakefakefake0123456789" }
+          ]
+        })
+      }
+    }]
+  };
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(llmJson),
+    json: async () => llmJson
+  });
+  const result = await generateOpportunityDraft({
+    question: "q",
+    answer: "a",
+    env,
+    deps: { fetch: fakeFetch, AbortController: null }
+  });
+  assert.equal(/sk-fakefakefake0123456789/.test(JSON.stringify(result.sourceUrls)), false, "sourceUrls 不应含 sk-fakefakefake0123456789 原文");
+  assert.equal(result.sourceUrls[0].title.includes("[redacted]"), true);
+  assert.equal(result.sourceUrls[0].url.includes("[redacted]"), true);
+});
+
+test("V0.3.11-hotfix-4: POST /api/opportunities 保存前 note 含 sk-* 时持久化脱敏", async () => {
+  const { startAskUiServer, addOpportunity } = require("../scripts/start-ask-ui");
+  const rootDir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "strategy-os-redact-save-"));
+  const server = await startAskUiServer({ rootDir, port: 5391, host: "127.0.0.1" });
+  try {
+    const fetched = await httpRequest({
+      port: 5391,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "测试 sk-fakefakefake0123456789 title",
+        status: "validate",
+        type: "new-project-opportunity",
+        tags: ["独立开发者", "sk-fakefakefake0123456789 in tag"],
+        note: "用户备注：sk-fakefakefake0123456789 嵌入 note",
+        oneLineSummary: "sk-fakefakefake0123456789 summary",
+        nextAction: "sk-fakefakefake0123456789 next",
+        sourceAnswerSummary: "sk-fakefakefake0123456789 source",
+        source: "ask-mode"
+      }
+    });
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.json.opportunity.notes.includes("sk-fakefakefake0123456789"), false, "保存后 notes 不应含 sk-fakefakefake0123456789");
+    assert.equal(fetched.json.opportunity.notes.includes("[redacted]"), true, "notes 应含 [redacted]");
+    // 验证持久化的 opportunity-pool.json 也不含
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const poolPath = path.join(rootDir, "data", "opportunities", "opportunity-pool.json");
+    const poolText = fs.readFileSync(poolPath, "utf8");
+    assert.equal(/sk-fakefakefake0123456789/.test(poolText), false, "opportunity-pool.json 不应含 sk-fakefakefake0123456789 原文");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("V0.3.11-hotfix-4: PATCH /api/opportunities/:id 更新前 note 含 sk-* 时持久化脱敏", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "strategy-os-redact-patch-"));
+  const server = await startAskUiServer({ rootDir, port: 5392, host: "127.0.0.1" });
+  try {
+    // 先建一条
+    const create = await httpRequest({
+      port: 5392,
+      method: "POST",
+      path: "/api/opportunities",
+      body: { title: "orig", status: "validate", type: "new-project-opportunity" }
+    });
+    assert.equal(create.status, 200);
+    const id = create.json.opportunity.id;
+    // 再 PATCH 含 sk-* 的 note
+    const patch = await httpRequest({
+      port: 5392,
+      method: "PATCH",
+      path: `/api/opportunities/${id}`,
+      body: { note: "patched sk-fakefakefake0123456789 note" }
+    });
+    assert.equal(patch.status, 200);
+    assert.equal(patch.json.opportunity.notes.includes("sk-fakefakefake0123456789"), false, "PATCH 后 notes 不应含 sk-*");
+    assert.equal(patch.json.opportunity.notes.includes("[redacted]"), true);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("V0.3.11-hotfix-4: buildOpportunityContextForPrompt 输入机会 note 含 sk-* 时输出脱敏", () => {
+  const { buildOpportunityContextForPrompt } = require("../scripts/opportunity-store");
+  const ctx = buildOpportunityContextForPrompt([
+    {
+      id: "x1",
+      opportunityName: "机会 sk-fakefakefake0123456789",
+      notes: "note 含 sk-fakefakefake0123456789",
+      nextAction: "next 含 sk-fakefakefake0123456789",
+      status: "inbox",
+      type: "new-project-opportunity",
+      tags: ["sk-fakefakefake0123456789 tag"]
+    }
+  ]);
+  // ctx 是 string
+  assert.equal(typeof ctx, "string", "ctx 应是 string");
+  assert.equal(/sk-fakefakefake0123456789/.test(ctx), false, "context 输出不应含 sk-fakefakefake0123456789 原文");
+  assert.equal(ctx.includes("[redacted]"), true, "context 输出应含 [redacted]");
+});
+
+test("V0.3.11-hotfix-4: buildKickoffUserPrompt 输入机会 note 含 sk-* 时输出脱敏", () => {
+  const { buildKickoffUserPrompt } = require("../scripts/ask-strategy-os");
+  const out = buildKickoffUserPrompt({
+    name: "name sk-fakefakefake0123456789",
+    oneLine: "oneLine sk-fakefakefake0123456789",
+    note: "note sk-fakefakefake0123456789",
+    next: "next sk-fakefakefake0123456789",
+    tags: ["sk-fakefakefake0123456789 tag"],
+    sourceQuestion: "q sk-fakefakefake0123456789"
+  });
+  assert.equal(/sk-fakefakefake0123456789/.test(out), false, "kickoff prompt 不应含 sk-fakefakefake0123456789 原文");
+  assert.equal(out.includes("[redacted]"), true);
+});
+
+test("V0.3.11-hotfix-4: buildLocalKickoff 输入机会 note 含 sk-* 时输出脱敏", () => {
+  const { buildLocalKickoff } = require("../scripts/ask-strategy-os");
+  const out = buildLocalKickoff({
+    name: "name sk-fakefakefake0123456789",
+    oneLine: "oneLine sk-fakefakefake0123456789",
+    note: "note sk-fakefakefake0123456789",
+    next: "next sk-fakefakefake0123456789",
+    tags: ["独立开发者"],
+    sourceQuestion: "q sk-fakefakefake0123456789"
+  });
+  assert.equal(/sk-fakefakefake0123456789/.test(out), false, "buildLocalKickoff 输出不应含 sk-fakefakefake0123456789 原文");
+  assert.equal(out.includes("[redacted]"), true);
+});
+
