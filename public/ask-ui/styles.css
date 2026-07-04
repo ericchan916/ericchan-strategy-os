@@ -264,6 +264,128 @@ h2 {
   color: var(--ink-soft);
 }
 
+/* ---------------- Opportunity Pool panel (V0.3.9) ---------------- */
+
+.opportunity-panel {
+  padding: 18px 20px;
+}
+
+.opportunity-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+}
+
+.opportunity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.opportunity-item {
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+}
+
+.opportunity-item-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.opportunity-item h3 {
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.opportunity-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11px;
+}
+
+.opportunity-meta,
+.opportunity-source,
+.opportunity-note,
+.opportunity-empty,
+.opportunity-status {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.opportunity-note {
+  color: var(--ink-soft);
+}
+
+.opportunity-status[data-tone="error"] {
+  color: var(--danger);
+}
+
+.opportunity-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.opportunity-form[hidden] {
+  display: none;
+}
+
+.opportunity-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+}
+
+.opportunity-form select,
+.opportunity-form textarea,
+.opportunity-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 7px 8px;
+}
+
+.opportunity-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-button {
+  border: 1px solid var(--accent-dark);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
 /* ---------------- Composer (sticky bottom) ---------------- */
 
 .composer {

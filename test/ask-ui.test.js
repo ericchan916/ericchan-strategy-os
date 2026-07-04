@@ -195,7 +195,9 @@ test("ask UI API returns public search metadata when useSearch=true", async () =
       assert.equal(payload.search.freshness, "oneMonth");
       assert.equal(payload.search.recency.required, true);
       assert.ok(payload.search.filters);
+      assert.ok(payload.search.quality);
       assert.equal(payload.search.sources[0].source, "example.com");
+      assert.ok(payload.search.sources[0].quality.label);
       assert.equal(JSON.stringify(payload).includes("sk-search-ui"), false);
     });
   } finally {
@@ -207,6 +209,47 @@ test("ask UI API returns public search metadata when useSearch=true", async () =
     if (oldEnv.key === undefined) delete process.env.STRATEGY_OS_SEARCH_API_KEY;
     else process.env.STRATEGY_OS_SEARCH_API_KEY = oldEnv.key;
   }
+});
+
+test("ask UI opportunities API returns stats and supports whitelisted PATCH", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const listResponse = await request(baseUrl, { path: "/api/opportunities" });
+    const listPayload = JSON.parse(listResponse.body);
+
+    assert.equal(listResponse.status, 200);
+    assert.equal(listPayload.opportunities.length, 1);
+    assert.equal(listPayload.opportunities[0].statusLabel, "待验证");
+    assert.equal(listPayload.stats.total, 1);
+
+    const patchResponse = await request(baseUrl, {
+      method: "PATCH",
+      path: "/api/opportunities/opp-brief",
+      body: { status: "watch", notes: "网页备注", opportunityName: "不能改名" }
+    });
+    const patchPayload = JSON.parse(patchResponse.body);
+
+    assert.equal(patchResponse.status, 200);
+    assert.equal(patchPayload.opportunity.status, "watch");
+    assert.equal(patchPayload.opportunity.notes, "网页备注");
+    const saved = JSON.parse(fs.readFileSync(fixture.poolPath, "utf8"));
+    assert.equal(saved.opportunities[0].opportunityName, "Independent AI opportunity brief MVP");
+  });
+});
+
+test("ask UI opportunities API returns Chinese 404 for missing id", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "PATCH",
+      path: "/api/opportunities/missing",
+      body: { status: "watch" }
+    });
+    const payload = JSON.parse(response.body);
+
+    assert.equal(response.status, 404);
+    assert.ok(payload.error.includes("没有找到这个机会"));
+  });
 });
 
 test("ask UI API returns Chinese search warning and keeps answering when search is misconfigured", async () => {

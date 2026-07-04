@@ -4,6 +4,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { askStrategyOsAsync } = require("./ask-strategy-os");
+const { loadOpportunityPool, updateOpportunity } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const DEFAULT_PORT = 5177;
@@ -56,6 +57,11 @@ function renderIndex(rootDir, publicDir) {
   return fs.readFileSync(indexPath, "utf8").replace("__RECOMMENDED_QUESTIONS__", JSON.stringify(questions).replace(/</g, "\\u003c"));
 }
 
+function opportunityIdFromPath(urlPath) {
+  const match = String(urlPath || "").match(/^\/api\/opportunities\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__dirname, "..", "public", "ask-ui") } = {}) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -85,6 +91,29 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         );
         console.error(safeMessage);
         sendJson(res, 500, { error: safeMessage });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/opportunities") {
+      try {
+        const result = loadOpportunityPool({ rootDir });
+        sendJson(res, 200, { opportunities: result.opportunities, stats: result.stats });
+      } catch (error) {
+        sendJson(res, 500, { error: String(error.message || "机会池读取失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+      }
+      return;
+    }
+
+    if (req.method === "PATCH" && /^\/api\/opportunities\/[^/]+$/.test(url.pathname)) {
+      try {
+        const id = opportunityIdFromPath(url.pathname);
+        const payload = JSON.parse((await readBody(req)) || "{}");
+        const result = updateOpportunity({ rootDir, id, patch: payload });
+        sendJson(res, 200, { opportunity: result.opportunity, opportunities: result.opportunities, stats: result.stats });
+      } catch (error) {
+        const status = error.statusCode || 400;
+        sendJson(res, status, { error: String(error.message || "机会池保存失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
       }
       return;
     }

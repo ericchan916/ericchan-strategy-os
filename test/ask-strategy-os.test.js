@@ -420,8 +420,9 @@ test("search results are injected into LLM prompt without API key and with trunc
         freshness: "oneMonth",
         recency: { required: true, reason: "新闻与发布信息需要近期结果。", filteredOldCount: 2, missingDateCount: 1 },
         filters: { blockedTopicCount: 0, duplicateCount: 1 },
+        quality: { averageScore: 76, topSourceScore: 88, lowQualityCount: 0, weakReason: "", hasHighConfidenceSources: true },
         warning: null,
-        results: [{ title: "Anthropic update", url: "https://example.com/news", snippet: longSnippet, source: "example.com" }]
+        results: [{ title: "Anthropic update", url: "https://example.com/news", snippet: longSnippet, source: "example.com", quality: { overallScore: 88 } }]
       })
     }
   });
@@ -433,6 +434,8 @@ test("search results are injected into LLM prompt without API key and with trunc
   assert.ok(capturedPrompt.includes("搜索时间范围：oneMonth"));
   assert.ok(capturedPrompt.includes("时效性过滤：过旧 2 条，缺少日期 1 条。"));
   assert.ok(capturedPrompt.includes("相关性过滤：无关财经 0 条，重复 1 条。"));
+  assert.ok(capturedPrompt.includes("搜索质量摘要：平均 76，最高 88，低质来源 0 条。"));
+  assert.ok(capturedPrompt.includes("质量：88 / 100"));
   assert.ok(capturedPrompt.includes("搜索结果只是参考"));
   assert.ok(capturedPrompt.includes("A股、行情、股票、盘面热点"));
   assert.equal(capturedPrompt.includes("sk-llm-key"), false);

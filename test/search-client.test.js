@@ -10,6 +10,8 @@ const {
   readSearchConfig,
   shouldUseWebSearch,
   searchWeb,
+  scoreSearchResultQuality,
+  scoreSearchResultsQuality,
   toPublicSearchMeta
 } = require("../scripts/search-client");
 const { isPlaceholderKey } = require("../scripts/check-search");
@@ -279,6 +281,8 @@ test("wide opportunity search uses planned queries, dedupes urls, and filters fi
   assert.equal(meta.intent, "ai-opportunity");
   assert.equal(meta.freshness, "oneWeek");
   assert.equal(meta.filters.blockedTopicCount, 1);
+  assert.ok(meta.quality.averageScore > 0);
+  assert.ok(meta.sources[0].quality.label);
   assert.ok(meta.plannedQueries.length > 1);
 });
 
@@ -328,13 +332,12 @@ test("bocha real data wrapper response is normalized", async () => {
   assert.equal(result.warning, null);
   assert.equal(result.errorCode, null);
   assert.equal(result.results.length, 2);
-  assert.deepEqual(result.results[0], {
-    title: "真实结构结果",
-    url: "https://example.cn/agent",
-    snippet: "真实结构摘要优先",
-    source: "ExampleCN",
-    publishedAt: "2026-07-04T00:00:00+08:00"
-  });
+  assert.equal(result.results[0].title, "真实结构结果");
+  assert.equal(result.results[0].url, "https://example.cn/agent");
+  assert.equal(result.results[0].snippet, "真实结构摘要优先");
+  assert.equal(result.results[0].source, "ExampleCN");
+  assert.equal(result.results[0].publishedAt, "2026-07-04T00:00:00+08:00");
+  assert.ok(result.results[0].quality.overallScore > 0);
   assert.equal(result.results[1].source, "agent.example");
   assert.equal(JSON.stringify(result.results).includes("log-should-not-leak"), false);
   assert.equal(JSON.stringify(result.results).includes("success"), false);
@@ -381,6 +384,64 @@ test("parseResultDate extracts year and month from title when publishedAt is mis
   const parsed = parseResultDate({ title: "AI Agent 2026年6月产品更新", snippet: "" });
   assert.ok(parsed instanceof Date);
   assert.equal(parsed.toISOString().slice(0, 7), "2026-06");
+});
+
+test("search quality scores relevance, freshness, and credibility", () => {
+  const plan = planSearchQueries("今天有什么趋势？");
+  const ai = scoreSearchResultQuality(
+    {
+      title: "AI Agent workflow automation tools for developers",
+      url: "https://github.com/example/agent-tool",
+      source: "GitHub",
+      snippet: "AI Agent 大模型 工具 独立开发者 workflow product",
+      publishedAt: "2026-07-03T00:00:00Z"
+    },
+    plan,
+    new Date("2026-07-04T00:00:00Z")
+  );
+  const finance = scoreSearchResultQuality(
+    {
+      title: "A股涨停板块资金流入",
+      url: "https://seo.example/a",
+      source: "下载资源网",
+      snippet: "股票 行情 大盘 盘面",
+      publishedAt: "2020-01-01T00:00:00Z"
+    },
+    plan,
+    new Date("2026-07-04T00:00:00Z")
+  );
+  const undated = scoreSearchResultQuality(
+    { title: "AI Agent 产品观察", url: "https://blog.example/agent", source: "Blog", snippet: "AI Agent 工具" },
+    plan,
+    new Date("2026-07-04T00:00:00Z")
+  );
+
+  assert.ok(ai.relevanceScore > 70);
+  assert.ok(ai.freshnessScore > 80);
+  assert.ok(ai.credibilityScore > 80);
+  assert.ok(finance.relevanceScore < 45);
+  assert.ok(finance.freshnessScore < 30);
+  assert.ok(finance.credibilityScore < 50);
+  assert.ok(undated.freshnessScore > 0);
+  assert.ok(undated.reasons.includes("缺少发布时间"));
+});
+
+test("search quality summary sorts by overallScore and never includes API keys", () => {
+  const plan = planSearchQueries("今天有什么趋势？");
+  const scored = scoreSearchResultsQuality(
+    [
+      { title: "A股行情", url: "https://finance.example", source: "财经", snippet: "股票 行情", publishedAt: "2020-01-01T00:00:00Z" },
+      { title: "AI Agent official update", url: "https://openai.com/news", source: "OpenAI", snippet: "AI Agent product release", publishedAt: "2026-07-03T00:00:00Z" }
+    ],
+    plan,
+    new Date("2026-07-04T00:00:00Z")
+  );
+
+  assert.equal(scored.results[0].url, "https://openai.com/news");
+  assert.ok(scored.summary.averageScore > 0);
+  assert.ok(scored.summary.topSourceScore >= scored.summary.averageScore);
+  assert.ok(scored.summary.hasHighConfidenceSources);
+  assert.equal(JSON.stringify(scored).includes("sk-"), false);
 });
 
 test("bocha count is capped at 50", async () => {

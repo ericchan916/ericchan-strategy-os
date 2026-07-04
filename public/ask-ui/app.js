@@ -55,6 +55,15 @@ function applyQuestionToComposer({ text, input, button, state }) {
 
 const HISTORY_KEY = "strategyOsAskHistory";
 const DEFAULT_HISTORY_MAX = 20;
+const OPPORTUNITY_STATUS_LABELS = {
+  inbox: "待处理",
+  watch: "观察中",
+  validate: "待验证",
+  "mvp-spec": "MVP 规格",
+  building: "构建中",
+  archived: "已归档",
+  rejected: "已拒绝"
+};
 
 // 生成稳定的 id：用时间戳 + 随机后缀（同题 push 时区分实例）。
 function makeHistoryId(prefix = "h") {
@@ -85,6 +94,7 @@ function normalizeHistoryItem(input) {
     : [];
   const searchRecencyRaw = raw.searchRecency && typeof raw.searchRecency === "object" ? raw.searchRecency : {};
   const searchFiltersRaw = raw.searchFilters && typeof raw.searchFilters === "object" ? raw.searchFilters : {};
+  const searchQualityRaw = raw.searchQuality && typeof raw.searchQuality === "object" ? raw.searchQuality : {};
   return {
     id: typeof raw.id === "string" && raw.id ? raw.id : makeHistoryId(),
     question,
@@ -109,6 +119,13 @@ function normalizeHistoryItem(input) {
     searchFilters: {
       blockedTopicCount: Number.isFinite(Number(searchFiltersRaw.blockedTopicCount)) ? Number(searchFiltersRaw.blockedTopicCount) : 0,
       duplicateCount: Number.isFinite(Number(searchFiltersRaw.duplicateCount)) ? Number(searchFiltersRaw.duplicateCount) : 0
+    },
+    searchQuality: {
+      averageScore: Number.isFinite(Number(searchQualityRaw.averageScore)) ? Number(searchQualityRaw.averageScore) : 0,
+      topSourceScore: Number.isFinite(Number(searchQualityRaw.topSourceScore)) ? Number(searchQualityRaw.topSourceScore) : 0,
+      lowQualityCount: Number.isFinite(Number(searchQualityRaw.lowQualityCount)) ? Number(searchQualityRaw.lowQualityCount) : 0,
+      weakReason: typeof searchQualityRaw.weakReason === "string" ? searchQualityRaw.weakReason : "",
+      hasHighConfidenceSources: searchQualityRaw.hasHighConfidenceSources === true
     },
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
   };
@@ -361,6 +378,12 @@ function renderSearchProcess(search) {
   const duplicate = Number.isFinite(Number(filters.duplicateCount)) ? Number(filters.duplicateCount) : 0;
   const old = Number.isFinite(Number(recency.filteredOldCount)) ? Number(recency.filteredOldCount) : 0;
   const missing = Number.isFinite(Number(recency.missingDateCount)) ? Number(recency.missingDateCount) : 0;
+  const quality = search.quality && typeof search.quality === "object" ? search.quality : {};
+  const qualityLabelText = quality.hasHighConfidenceSources
+    ? "较高，已优先采用近期且相关的外部结果。"
+    : Number(quality.averageScore || 0) >= 55
+      ? "一般，部分结果仍需人工判断。"
+      : "偏弱，外部搜索仅作参考。";
   const warning = typeof search.warning === "string" ? search.warning : "";
   const queryHtml = queries.length
     ? `<ol class="search-process-query-list">${queries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
@@ -375,11 +398,91 @@ function renderSearchProcess(search) {
     <li><strong>搜索意图：</strong>${escapeHtml(intentLabel(search.intent))}</li>
     <li><strong>实际搜索词：</strong>${queryHtml || "（无）"}</li>
     <li><strong>时间范围：</strong>${escapeHtml(freshnessLabel(search.freshness))}</li>
+    <li><strong>来源质量：</strong>${escapeHtml(qualityLabelText)}</li>
     <li><strong>过滤说明：</strong>已过滤 ${blocked} 条无关财经结果，已过滤 ${old} 条过旧结果，去重 ${duplicate} 条，${missing} 条结果缺少发布时间。</li>
     ${recency.reason ? `<li><strong>时效性原因：</strong>${escapeHtml(recency.reason)}</li>` : ""}
     ${warningHtml}
   </ul>
 </details>`;
+}
+
+// ============== Opportunity panel (V0.3.9) ==============
+
+function statusLabel(status) {
+  return OPPORTUNITY_STATUS_LABELS[status] || "待处理";
+}
+
+function normalizeOpportunityForUi(item) {
+  const raw = item && typeof item === "object" ? item : {};
+  return {
+    id: String(raw.id || ""),
+    opportunityName: String(raw.opportunityName || raw.title || "未命名机会"),
+    status: String(raw.status || "inbox"),
+    statusLabel: String(raw.statusLabel || statusLabel(raw.status)),
+    humanDecisionLabel: String(raw.humanDecisionLabel || ""),
+    notes: String(raw.notes || ""),
+    tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : "",
+    sourceTrend: raw.sourceTrend ? String(raw.sourceTrend) : "",
+    scores: raw.scores && typeof raw.scores === "object" ? raw.scores : {}
+  };
+}
+
+function renderOpportunityStats(stats = {}) {
+  const safe = {
+    total: Number(stats.total || 0),
+    accepted: Number(stats.accepted || 0),
+    validate: Number(stats.validate || 0),
+    watch: Number(stats.watch || 0),
+    archived: Number(stats.archived || 0)
+  };
+  return `<div class="opportunity-stat-grid">
+    <span>全部 ${safe.total}</span>
+    <span>已确认 ${safe.accepted}</span>
+    <span>待验证 ${safe.validate}</span>
+    <span>观察中 ${safe.watch}</span>
+    <span>已归档 ${safe.archived}</span>
+  </div>`;
+}
+
+function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
+  const list = Array.isArray(opportunities) ? opportunities.map(normalizeOpportunityForUi) : [];
+  if (!list.length) return { statsHtml: renderOpportunityStats(stats), listHtml: "" };
+  const listHtml = list
+    .map((item) => {
+      const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
+        .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === item.status ? " selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("");
+      const score = item.scores && item.scores.ericChanFit ? `匹配 ${escapeHtml(item.scores.ericChanFit)}/5` : "";
+      const tags = item.tags.length ? item.tags.join(", ") : "";
+      return `<article class="opportunity-item" data-opportunity-id="${escapeHtml(item.id)}">
+        <div class="opportunity-item-head">
+          <h3>${escapeHtml(item.opportunityName)}</h3>
+          <span class="opportunity-badge">${escapeHtml(item.statusLabel)}</span>
+        </div>
+        <p class="opportunity-meta">${escapeHtml([item.humanDecisionLabel, score, item.updatedAt ? `更新 ${item.updatedAt.slice(0, 10)}` : ""].filter(Boolean).join(" · "))}</p>
+        ${item.sourceTrend ? `<p class="opportunity-source">${escapeHtml(item.sourceTrend)}</p>` : ""}
+        ${item.notes ? `<p class="opportunity-note">${escapeHtml(item.notes)}</p>` : ""}
+        <button type="button" class="link-button opportunity-edit" data-op-edit="${escapeHtml(item.id)}">编辑</button>
+        <form class="opportunity-form" data-op-form="${escapeHtml(item.id)}" hidden>
+          <label>状态
+            <select name="status" data-op-status="${escapeHtml(item.id)}">${statusOptions}</select>
+          </label>
+          <label>备注
+            <textarea name="notes" data-op-notes="${escapeHtml(item.id)}" rows="3">${escapeHtml(item.notes)}</textarea>
+          </label>
+          <label>标签
+            <input name="tags" data-op-tags="${escapeHtml(item.id)}" value="${escapeHtml(tags)}" />
+          </label>
+          <div class="opportunity-form-actions">
+            <button type="submit" class="mini-button">保存</button>
+            <button type="button" class="link-button" data-op-cancel="${escapeHtml(item.id)}">取消</button>
+          </div>
+        </form>
+      </article>`;
+    })
+    .join("");
+  return { statsHtml: renderOpportunityStats(stats), listHtml };
 }
 
 function hideSearchProcess(node) {
@@ -444,6 +547,12 @@ function createApp(deps) {
   const webSearchToggle = nodes.webSearchToggle;
   const searchSourcesNode = nodes.searchSources;
   const searchProcessNode = nodes.searchProcess;
+  const globalStatusText = nodes.globalStatusText;
+  const opportunityStats = nodes.opportunityStats;
+  const opportunityList = nodes.opportunityList;
+  const opportunityEmpty = nodes.opportunityEmpty;
+  const opportunityStatus = nodes.opportunityStatus;
+  const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
   let storage = deps.storage;
@@ -464,7 +573,8 @@ function createApp(deps) {
     inFlight: false,
     selectedButton: null,
     currentAnswer: "",
-    currentSource: ""
+    currentSource: "",
+    opportunities: []
   };
 
   const historyStore = createHistoryStore({ storage, maxSize: 20 });
@@ -504,9 +614,107 @@ function createApp(deps) {
     showSearchSources(searchSourcesNode, renderSearchSources(list));
   }
 
+  function setGlobalStatus(mode) {
+    if (!globalStatusText) return;
+    const messages = {
+      idle: "本地运行 · 中文回答 · 不自动派发智能体 · 默认不联网",
+      readySearch: "本地运行 · 中文回答 · 不自动派发智能体 · 本次将联网搜索",
+      searching: "本地运行 · 中文回答 · 正在联网搜索 · 不自动派发智能体",
+      searchSuccess: "本地运行 · 中文回答 · 已参考外部搜索结果 · 不自动派发智能体",
+      searchFailed: "本地运行 · 中文回答 · 联网搜索失败，已本地回答 · 不自动派发智能体",
+      localAnswer: "本地运行 · 中文回答 · 本地上下文回答 · 不自动派发智能体"
+    };
+    globalStatusText.textContent = messages[mode] || messages.idle;
+  }
+
   function applySearchProcess(search) {
     if (!searchProcessNode) return;
     showSearchProcess(searchProcessNode, renderSearchProcess(search));
+  }
+
+  function setOpportunityStatus(message, tone) {
+    if (!opportunityStatus) return;
+    opportunityStatus.textContent = message || "";
+    if (tone === "error") opportunityStatus.setAttribute("data-tone", "error");
+    else opportunityStatus.removeAttribute("data-tone");
+  }
+
+  function applyOpportunityPanel(data) {
+    const opportunities = Array.isArray(data && data.opportunities) ? data.opportunities : [];
+    const rendered = renderOpportunityPanel({ opportunities, stats: data && data.stats });
+    if (opportunityStats) opportunityStats.innerHTML = rendered.statsHtml;
+    if (opportunityList) opportunityList.innerHTML = rendered.listHtml;
+    if (opportunityEmpty) opportunityEmpty.hidden = opportunities.length > 0;
+    state.opportunities = opportunities;
+    bindOpportunityActions();
+  }
+
+  async function loadOpportunities() {
+    if (!fetchImpl || !opportunityList) return { ok: false, reason: "unavailable" };
+    try {
+      const response = await fetchImpl("/api/opportunities");
+      const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
+      if (!response || !response.ok) throw new Error((payload && payload.error) || "机会池读取失败。");
+      applyOpportunityPanel(payload);
+      setOpportunityStatus("");
+      return { ok: true, opportunities: payload.opportunities || [] };
+    } catch (error) {
+      applyOpportunityPanel({ opportunities: [], stats: {} });
+      setOpportunityStatus((error && error.message) || "机会池读取失败。", "error");
+      return { ok: false, reason: (error && error.message) || "unknown" };
+    }
+  }
+
+  function bindOpportunityActions() {
+    if (!opportunityList || typeof opportunityList.querySelectorAll !== "function") return;
+    for (const button of opportunityList.querySelectorAll("[data-op-edit]")) {
+      button.addEventListener("click", () => toggleOpportunityForm(button.getAttribute("data-op-edit"), true));
+    }
+    for (const button of opportunityList.querySelectorAll("[data-op-cancel]")) {
+      button.addEventListener("click", () => toggleOpportunityForm(button.getAttribute("data-op-cancel"), false));
+    }
+    for (const form of opportunityList.querySelectorAll("[data-op-form]")) {
+      form.addEventListener("submit", (event) => {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        saveOpportunity(form.getAttribute("data-op-form"));
+      });
+    }
+  }
+
+  function toggleOpportunityForm(id, open) {
+    if (!opportunityList || typeof opportunityList.querySelector !== "function") return;
+    const form = opportunityList.querySelector(`[data-op-form="${cssEscape(id)}"]`);
+    if (form) form.hidden = !open;
+  }
+
+  async function saveOpportunity(id) {
+    if (!fetchImpl || !opportunityList) return { ok: false, reason: "fetch-unavailable" };
+    const statusNode = opportunityList.querySelector(`[data-op-status="${cssEscape(id)}"]`);
+    const notesNode = opportunityList.querySelector(`[data-op-notes="${cssEscape(id)}"]`);
+    const tagsNode = opportunityList.querySelector(`[data-op-tags="${cssEscape(id)}"]`);
+    const nextStatus = statusNode ? statusNode.value : "";
+    if ((nextStatus === "archived" || nextStatus === "rejected") && !confirmImpl("确认要归档或忽略这个机会吗？")) {
+      return { ok: false, reason: "cancelled" };
+    }
+    try {
+      const response = await fetchImpl(`/api/opportunities/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: nextStatus,
+          notes: notesNode ? notesNode.value : "",
+          tags: tagsNode ? tagsNode.value : ""
+        })
+      });
+      const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
+      if (!response || !response.ok) throw new Error((payload && payload.error) || "机会池保存失败。");
+      applyOpportunityPanel(payload);
+      setOpportunityStatus("机会已保存。");
+      return { ok: true };
+    } catch (error) {
+      setOpportunityStatus((error && error.message) || "机会池保存失败。", "error");
+      return { ok: false, reason: (error && error.message) || "unknown" };
+    }
   }
 
   function setInFlight(value) {
@@ -650,11 +858,15 @@ function createApp(deps) {
       plannedQueries: Array.isArray(entry.searchPlannedQueries) ? entry.searchPlannedQueries : [],
       freshness: entry.searchFreshness || "",
       recency: entry.searchRecency || null,
-      filters: entry.searchFilters || null
+      filters: entry.searchFilters || null,
+      quality: entry.searchQuality || null
     };
     setStatus(statusFromSource(entry.source, warning, search), warning || search.warning ? "error" : null);
     applySearchSources(search);
     applySearchProcess(search);
+    if (search.warning) setGlobalStatus("searchFailed");
+    else if (search.used) setGlobalStatus("searchSuccess");
+    else setGlobalStatus("localAnswer");
     setCurrentAnswer(entry.answer || "", entry.source || "local");
     state.inFlight = false;
     if (askButton) askButton.disabled = false;
@@ -692,6 +904,7 @@ function createApp(deps) {
     const useSearch = Boolean(webSearchToggle && webSearchToggle.checked);
     setInFlight(true);
     setStatus(useSearch ? "正在联网搜索并生成战略判断……" : "正在生成战略判断……");
+    setGlobalStatus(useSearch ? "searching" : "localAnswer");
     if (answerOutput) {
       answerOutput.classList.remove("empty");
       answerOutput.hidden = true;
@@ -729,6 +942,9 @@ function createApp(deps) {
       const search = payload.search || null;
       state.currentSource = source;
       setStatus(statusFromSource(source, warning, search), warning || (search && search.warning) ? "error" : null);
+      if (search && search.warning) setGlobalStatus("searchFailed");
+      else if (search && search.used) setGlobalStatus("searchSuccess");
+      else setGlobalStatus("localAnswer");
       applySearchSources(search);
       applySearchProcess(search);
       if (copyButton && state.currentAnswer.trim()) {
@@ -750,7 +966,8 @@ function createApp(deps) {
         searchPlannedQueries: search && Array.isArray(search.plannedQueries) ? search.plannedQueries.slice(0, 3) : [],
         searchFreshness: search && typeof search.freshness === "string" ? search.freshness : "",
         searchRecency: search && search.recency && typeof search.recency === "object" ? search.recency : null,
-        searchFilters: search && search.filters && typeof search.filters === "object" ? search.filters : null
+        searchFilters: search && search.filters && typeof search.filters === "object" ? search.filters : null,
+        searchQuality: search && search.quality && typeof search.quality === "object" ? search.quality : null
       });
       renderHistory();
       return { submitted: true, source, warning: warning || null, search: search || null };
@@ -761,6 +978,7 @@ function createApp(deps) {
       }
       applySearchSources(null);
       applySearchProcess(null);
+      setGlobalStatus(useSearch ? "searchFailed" : "idle");
       setStatus((error && error.message) || "回答生成失败。", "error");
       return { submitted: false, reason: (error && error.message) || "unknown" };
     } finally {
@@ -815,6 +1033,12 @@ function createApp(deps) {
         submitAsk();
       });
     }
+    if (webSearchToggle) {
+      webSearchToggle.addEventListener("change", () => {
+        if (state.inFlight) return;
+        setGlobalStatus(webSearchToggle.checked ? "readySearch" : "idle");
+      });
+    }
     if (copyButton) {
       copyButton.addEventListener("click", handleCopy);
     }
@@ -829,6 +1053,8 @@ function createApp(deps) {
     }
     renderQuestions();
     renderHistory();
+    loadOpportunities();
+    setGlobalStatus(webSearchToggle && webSearchToggle.checked ? "readySearch" : "idle");
     // V0.3.6：默认隐藏参考来源；恢复历史或新回答时由 applySearchSources 决定显隐。
     if (searchSourcesNode) hideSearchSources(searchSourcesNode);
     if (searchProcessNode) hideSearchProcess(searchProcessNode);
@@ -839,6 +1065,8 @@ function createApp(deps) {
     fillQuestion,
     renderQuestions,
     renderHistory,
+    loadOpportunities,
+    saveOpportunity,
     restoreHistoryItem,
     clearHistoryNow: () => {
       historyStore.clear();
@@ -847,6 +1075,7 @@ function createApp(deps) {
     handleCopy,
     getStatus: () => (statusText ? statusText.textContent : ""),
     setStatus,
+    setGlobalStatus,
     setInFlight,
     setCurrentAnswer,
     clearSelectedQuestion,
@@ -865,6 +1094,11 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function cssEscape(value) {
+  if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(String(value || ""));
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function applyInlineMarkdown(escaped) {
@@ -949,6 +1183,11 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const webSearchToggle = document.querySelector("#webSearchToggle");
   const searchSourcesNode = document.querySelector("#searchSources");
   const searchProcessNode = document.querySelector("#searchProcess");
+  const globalStatusText = document.querySelector("#globalStatusText");
+  const opportunityStats = document.querySelector("#opportunityStats");
+  const opportunityList = document.querySelector("#opportunityList");
+  const opportunityEmpty = document.querySelector("#opportunityEmpty");
+  const opportunityStatus = document.querySelector("#opportunityStatus");
 
   const app = createApp({
     nodes: {
@@ -965,7 +1204,12 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       answerLoading,
       webSearchToggle,
       searchSources: searchSourcesNode,
-      searchProcess: searchProcessNode
+      searchProcess: searchProcessNode,
+      globalStatusText,
+      opportunityStats,
+      opportunityList,
+      opportunityEmpty,
+      opportunityStatus
     }
   });
   app.mount();
@@ -996,5 +1240,6 @@ module.exports = {
   // V0.3.6 搜索来源展示
   renderSearchSources,
   renderSearchProcess,
+  renderOpportunityPanel,
   isSafeExternalUrl
 };

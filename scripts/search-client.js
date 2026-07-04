@@ -2,7 +2,12 @@
 
 // Ask Mode 按需搜索客户端：只读取 STRATEGY_OS_SEARCH_*，不输出 / 不返回 API Key。
 
-const { filterSearchResultsByRelevance, planSearchQueries } = require("./search-planner");
+const {
+  FINANCE_TERMS,
+  RELEVANCE_TERMS,
+  filterSearchResultsByRelevance,
+  planSearchQueries
+} = require("./search-planner");
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RESULTS = 5;
@@ -160,6 +165,7 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
 
   const relevant = filterSearchResultsByRelevance(deduped.results, plan, MAX_SEARCH_RESULTS);
   const recent = filterSearchResultsByRecency(relevant.results, plan, config.maxResults);
+  const scored = scoreSearchResultsQuality(recent.results, plan);
   const warning = recent.weak
     ? "搜索结果时效性较弱，已保留少量参考来源。"
     : relevant.weak
@@ -167,12 +173,13 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
       : null;
   return {
     ...resultSkeleton(config, q, plan),
-    results: recent.results,
+    results: scored.results,
     recency: buildRecencyMeta(plan, recent.meta),
     filters: {
       blockedTopicCount: relevant.blockedTopicCount || 0,
       duplicateCount: deduped.duplicateCount
     },
+    quality: scored.summary,
     warning,
     errorCode: recent.weak ? "weak-recency" : relevant.weak ? "weak-relevance" : null
   };
@@ -266,6 +273,146 @@ function recencyMetaFor(results, filteredOldCount, missingDateCount) {
     missingDateCount,
     oldestKeptDate: dates[0] ? dates[0].toISOString().slice(0, 10) : null,
     newestKeptDate: dates[dates.length - 1] ? dates[dates.length - 1].toISOString().slice(0, 10) : null
+  };
+}
+
+function hasAny(text, terms) {
+  const value = String(text || "").toLowerCase();
+  return (terms || []).some((term) => value.includes(String(term).toLowerCase()));
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function ageDaysOf(result, now = new Date()) {
+  const date = parseResultDate(result);
+  if (!date) return null;
+  return Math.max(0, Math.floor((now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function scoreRelevance(result, plan) {
+  const text = `${result.title || ""} ${result.snippet || ""} ${result.source || ""}`;
+  const matches = RELEVANCE_TERMS.reduce((count, term) => count + (hasAny(text, [term]) ? 1 : 0), 0);
+  const financeMatches = FINANCE_TERMS.reduce((count, term) => count + (hasAny(text, [term]) ? 1 : 0), 0);
+  let score = 45 + matches * 9 - financeMatches * 22;
+  if (plan && plan.intent === "ai-opportunity") score += matches > 0 ? 10 : -18;
+  if (plan && plan.allowFinance) score += financeMatches * 8;
+  const reasons = [];
+  if (matches > 0) reasons.push("命中 AI / Agent / 工具 / 产品机会相关词");
+  if (financeMatches > 0 && !(plan && plan.allowFinance)) reasons.push("包含财经盘面噪声");
+  if (!matches) reasons.push("与战略OS主线相关性不强");
+  return { score: clampScore(score), reasons };
+}
+
+function scoreFreshness(result, plan, now = new Date()) {
+  const age = ageDaysOf(result, now);
+  const text = `${result.title || ""} ${result.snippet || ""}`;
+  const hasLatestHint = /latest|current|version|release|更新|发布|最新|当前版本/i.test(text);
+  const reasons = [];
+  if (age == null) {
+    reasons.push("缺少发布时间");
+    return { score: hasLatestHint ? 62 : 48, reasons };
+  }
+  reasons.push(`发布时间约 ${age} 天前`);
+  if (plan && plan.intent === "news") {
+    if (age <= 7) return { score: 96, reasons };
+    if (age <= 30) return { score: 84, reasons };
+    if (age <= 180) return { score: 45, reasons };
+    return { score: 18, reasons };
+  }
+  if (plan && plan.intent === "ai-opportunity") {
+    if (age <= 90) return { score: 90, reasons };
+    if (age <= 180) return { score: 70, reasons };
+    if (age <= 365) return { score: 45, reasons };
+    return { score: 20, reasons };
+  }
+  if (plan && plan.intent === "technical-docs") {
+    if (age <= 365) return { score: 88, reasons };
+    return { score: hasLatestHint ? 62 : 32, reasons };
+  }
+  if (age <= 365) return { score: 72, reasons };
+  return { score: 45, reasons };
+}
+
+function scoreCredibility(result) {
+  const source = String(result.source || "").toLowerCase();
+  const url = String(result.url || "").toLowerCase();
+  const title = String(result.title || "");
+  const host = hostFromUrl(url).toLowerCase();
+  const text = `${source} ${host} ${title}`.toLowerCase();
+  const reasons = [];
+  const official = ["github.com", "arxiv.org", "openai.com", "anthropic.com", "deepmind.google", "ai.google", "microsoft.com", "vercel.com", ".edu", ".gov"];
+  const mainstream = ["techcrunch", "theverge", "wired", "mit technology review", "36kr", "huxiu", "虎嗅", "财新", "界面", "腾讯", "新华", "机器之心", "量子位"];
+  const lowQuality = ["下载", "app", "价格套餐", "产品介绍", "资源网", "天晴", "聚合", "导航", "广告", "seo"];
+  if (hasAny(text, official)) {
+    reasons.push("官方 / GitHub / 研究机构来源");
+    return { score: 90, reasons };
+  }
+  if (hasAny(text, mainstream)) {
+    reasons.push("主流科技或行业媒体来源");
+    return { score: 72, reasons };
+  }
+  if (hasAny(text, lowQuality)) {
+    reasons.push("疑似 SEO 聚合或低质转载来源");
+    return { score: 35, reasons };
+  }
+  if (!source && !host) {
+    reasons.push("来源不明确");
+    return { score: 42, reasons };
+  }
+  reasons.push("普通网页来源");
+  return { score: 58, reasons };
+}
+
+function scoreSearchResultQuality(result, plan, now = new Date()) {
+  const relevance = scoreRelevance(result, plan);
+  const freshness = scoreFreshness(result, plan, now);
+  const credibility = scoreCredibility(result);
+  const overallScore = clampScore(relevance.score * 0.45 + freshness.score * 0.3 + credibility.score * 0.25);
+  return {
+    relevanceScore: relevance.score,
+    freshnessScore: freshness.score,
+    credibilityScore: credibility.score,
+    overallScore,
+    reasons: [...relevance.reasons, ...freshness.reasons, ...credibility.reasons].slice(0, 5)
+  };
+}
+
+function qualitySummaryFor(results) {
+  const scores = (Array.isArray(results) ? results : [])
+    .map((item) => item && item.quality && Number(item.quality.overallScore))
+    .filter((score) => Number.isFinite(score));
+  if (!scores.length) {
+    return {
+      averageScore: 0,
+      topSourceScore: 0,
+      lowQualityCount: 0,
+      weakReason: "没有可评分的外部来源。",
+      hasHighConfidenceSources: false
+    };
+  }
+  const averageScore = Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+  const topSourceScore = Math.max(...scores);
+  const lowQualityCount = scores.filter((score) => score < 50).length;
+  return {
+    averageScore,
+    topSourceScore,
+    lowQualityCount,
+    weakReason: averageScore < 55 ? "来源质量偏弱，外部搜索仅作参考。" : lowQualityCount > 0 ? "部分来源质量偏弱，已降低权重。" : "",
+    hasHighConfidenceSources: topSourceScore >= 75
+  };
+}
+
+function scoreSearchResultsQuality(results, plan, now = new Date()) {
+  const scored = (Array.isArray(results) ? results : []).map((item) => ({
+    ...item,
+    quality: scoreSearchResultQuality(item, plan, now)
+  }));
+  scored.sort((a, b) => (b.quality.overallScore || 0) - (a.quality.overallScore || 0));
+  return {
+    results: scored,
+    summary: qualitySummaryFor(scored)
   };
 }
 
@@ -408,10 +555,17 @@ async function searchBocha({ config, plan, query, fetchImpl, abortImpl }) {
 
 function toPublicSearchMeta(search) {
   const result = search && typeof search === "object" ? search : {};
-  const sources = normalizeResults(result.results || [], DEFAULT_MAX_RESULTS).map((item) => ({
+  const rawResults = Array.isArray(result.results) ? result.results : [];
+  const sources = normalizeResults(rawResults, DEFAULT_MAX_RESULTS).map((item, index) => ({
     title: item.title,
     url: item.url,
-    source: item.source
+    source: item.source,
+    quality: rawResults[index] && rawResults[index].quality
+      ? {
+          overallScore: rawResults[index].quality.overallScore,
+          label: qualityLabel(rawResults[index].quality.overallScore)
+        }
+      : undefined
   }));
   return {
     used: sources.length > 0,
@@ -421,10 +575,18 @@ function toPublicSearchMeta(search) {
     freshness: result.freshness || "",
     recency: result.recency || buildRecencyMeta(null),
     filters: result.filters || { blockedTopicCount: 0, duplicateCount: 0 },
+    quality: result.quality || qualitySummaryFor(result.results || []),
     resultCount: sources.length,
     warning: result.warning || null,
     sources
   };
+}
+
+function qualityLabel(score) {
+  const value = Number(score);
+  if (value >= 75) return "较高";
+  if (value >= 55) return "一般";
+  return "偏弱";
 }
 
 module.exports = {
@@ -441,8 +603,11 @@ module.exports = {
   dedupeResults,
   dedupeResultsWithStats,
   filterSearchResultsByRecency,
+  scoreSearchResultQuality,
+  scoreSearchResultsQuality,
   normalizeResults,
   normalizeBochaResults,
   parseResultDate,
+  qualityLabel,
   toPublicSearchMeta
 };

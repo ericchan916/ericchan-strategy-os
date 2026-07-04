@@ -576,10 +576,14 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
     if (search.filters) {
       lines.push(`相关性过滤：无关财经 ${Number(search.filters.blockedTopicCount || 0)} 条，重复 ${Number(search.filters.duplicateCount || 0)} 条。`);
     }
+    if (search.quality) {
+      lines.push(`搜索质量摘要：平均 ${Number(search.quality.averageScore || 0)}，最高 ${Number(search.quality.topSourceScore || 0)}，低质来源 ${Number(search.quality.lowQualityCount || 0)} 条。${trimContext(search.quality.weakReason || "", 120)}`);
+    }
     for (const item of search.results.slice(0, 5)) {
       lines.push(`- 标题：${trimContext(item.title, 120)}`);
       lines.push(`  URL：${trimContext(item.url, 220)}`);
       lines.push(`  来源：${trimContext(item.source, 80)}`);
+      if (item.quality) lines.push(`  质量：${Number(item.quality.overallScore || 0)} / 100`);
       if (item.snippet) lines.push(`  摘要：${trimContext(item.snippet, 280)}`);
     }
     lines.push("");
@@ -590,6 +594,7 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
     lines.push("- 涉及最新信息时提醒它可能随时间变化。");
     lines.push("- 如果外部结果偏向 A股、行情、股票、盘面热点，不要把它当成 EricChan 主方向。");
     lines.push("- 如果外部结果明显过旧，降低权重；如果结果缺少日期，要说明时效性不确定。");
+    lines.push("- 如果搜索质量摘要偏弱，不要把外部搜索当成强证据。");
     lines.push("- 优先判断搜索结果是否服务 AI 工具、Agent、独立开发者、小型可变现项目、OPC / 个人 OS、产品机会。");
     lines.push("- 如果外部搜索结果相关性较弱，要明确说明，并回到本地上下文判断。");
     lines.push("- 回答必须中文，不输出英文 reasoning。");

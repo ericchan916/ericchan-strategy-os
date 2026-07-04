@@ -16,7 +16,8 @@ const {
   buildClipboardPayload,
   handleCopyClick,
   renderSearchSources,
-  renderSearchProcess
+  renderSearchProcess,
+  renderOpportunityPanel
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -66,7 +67,12 @@ function makeFakeNodes() {
     answerLoading: fakeEl(),
     webSearchToggle: fakeEl({ checked: false }),
     searchSources: fakeEl(),
-    searchProcess: fakeEl()
+    searchProcess: fakeEl(),
+    globalStatusText: fakeEl(),
+    opportunityStats: fakeEl(),
+    opportunityList: fakeEl(),
+    opportunityEmpty: fakeEl(),
+    opportunityStatus: fakeEl()
   };
 }
 
@@ -193,6 +199,11 @@ test("HTML still contains 'EricChan·战略OS' title", () => {
   assert.ok(indexHtml.includes("EricChan·战略OS"));
 });
 
+test("HTML top status uses dynamic globalStatusText with default offline wording", () => {
+  assert.ok(indexHtml.includes('id="globalStatusText"'));
+  assert.ok(indexHtml.includes("默认不联网"));
+});
+
 test("HTML / CSS / JS contain 'Enter 发送' shortcut hint", () => {
   const combined = `${indexHtml}\n${appJsText}`;
   assert.ok(combined.includes("Enter 发送"), "缺少 'Enter 发送' 文案");
@@ -212,8 +223,8 @@ test("HTML no longer markets Ctrl + Enter as primary shortcut", () => {
 test("HTML contains web-search disclaimer in Chinese", () => {
   const text = indexHtml;
   assert.ok(
-    text.includes("不自动联网搜索") || text.includes("不联网搜索"),
-    "HTML 缺少 '不自动联网搜索' 联网说明"
+    text.includes("默认不联网"),
+    "HTML 缺少 '默认不联网' 联网说明"
   );
 });
 
@@ -357,8 +368,15 @@ test("HTML loading 容器包含动画结构（wheel-and-hamster 或 loading-spin
   );
 });
 
-test("HTML 仍含'不自动联网搜索'联网说明", () => {
-  assert.ok(indexHtml.includes("不自动联网搜索"), "缺少联网能力说明");
+test("HTML 仍含'默认不联网'联网说明", () => {
+  assert.ok(indexHtml.includes("默认不联网"), "缺少联网能力说明");
+});
+
+test("app.js contains dynamic global search status messages", () => {
+  assert.ok(appJsText.includes("本次将联网搜索"));
+  assert.ok(appJsText.includes("正在联网搜索"));
+  assert.ok(appJsText.includes("已参考外部搜索结果"));
+  assert.ok(appJsText.includes("联网搜索失败，已本地回答"));
 });
 
 test("CSS 包含复制按钮样式（.copy-button / .answer-copy）", () => {
@@ -603,6 +621,13 @@ test("normalizeHistoryItem: preserves safe search summary fields only", () => {
   assert.deepEqual(item.searchSources, [{ title: "A", url: "https://example.com/a", source: "example.com" }]);
   assert.equal(JSON.stringify(item).includes("sk-raw"), false);
   assert.equal(JSON.stringify(item).includes("drop"), false);
+});
+
+test("HTML contains opportunity pool panel", () => {
+  assert.ok(indexHtml.includes("机会池"));
+  assert.ok(indexHtml.includes('id="opportunityList"'));
+  assert.ok(indexHtml.includes('id="opportunityStats"'));
+  assert.ok(indexHtml.includes("还没有可展示的机会"));
 });
 
 test("normalizeHistoryItem: createdAt 缺失时回填当前时间", () => {
@@ -907,6 +932,51 @@ test("renderSearchProcess: 渲染搜索意图、搜索词、时间范围和过�
   assert.ok(html.includes("搜索结果时效性较弱，请谨慎参考"));
 });
 
+test("renderSearchProcess: 显示来源质量摘要但不展示 raw JSON", () => {
+  const html = renderSearchProcess({
+    used: true,
+    intent: "news",
+    plannedQueries: ["Anthropic news"],
+    freshness: "oneMonth",
+    quality: { averageScore: 78, topSourceScore: 92, lowQualityCount: 0, hasHighConfidenceSources: true },
+    recency: {},
+    filters: {}
+  });
+
+  assert.ok(html.includes("来源质量"));
+  assert.ok(html.includes("较高"));
+  assert.equal(html.includes("averageScore"), false);
+});
+
+test("renderOpportunityPanel: 渲染中文状态、统计、编辑表单和空态", () => {
+  const empty = renderOpportunityPanel({ opportunities: [], stats: { total: 0 } });
+  assert.ok(empty.statsHtml.includes("全部 0"));
+  assert.equal(empty.listHtml, "");
+
+  const html = renderOpportunityPanel({
+    stats: { total: 1, accepted: 1, validate: 1, watch: 0, archived: 0 },
+    opportunities: [
+      {
+        id: "opp-1",
+        opportunityName: "Independent AI opportunity brief MVP",
+        status: "validate",
+        statusLabel: "待验证",
+        humanDecisionLabel: "已确认",
+        notes: "备注",
+        tags: ["AI"],
+        scores: { ericChanFit: 5 }
+      }
+    ]
+  });
+
+  assert.ok(html.statsHtml.includes("待验证 1"));
+  assert.ok(html.listHtml.includes("Independent AI opportunity brief MVP"));
+  assert.ok(html.listHtml.includes("待验证"));
+  assert.ok(html.listHtml.includes("编辑"));
+  assert.ok(html.listHtml.includes("保存"));
+  assert.equal(html.listHtml.includes("validate"), true, "select value 可保留内部值，但可见状态应中文");
+});
+
 // ============== V0.3.6 sources panel HTML / CSS 静态断言 ==============
 
 test("HTML 含参考来源容器 #searchSources（默认 hidden）", () => {
@@ -947,6 +1017,11 @@ test("CSS 包含参考来源样式（.search-sources / .search-source-item）", 
     /\.search-sources[\s\S]{0,200}?\{/i.test(stylesCss) ||
     /\.search-source-item[\s\S]{0,200}?\{/i.test(stylesCss);
   assert.ok(hasSources, "缺少参考来源样式");
+});
+
+test("CSS 包含机会池样式（.opportunity-panel / .opportunity-item）", () => {
+  assert.ok(/\.opportunity-panel\s*\{/.test(stylesCss));
+  assert.ok(/\.opportunity-item\s*\{/.test(stylesCss));
 });
 
 test("CSS 包含搜索过程样式（.search-process）", () => {
