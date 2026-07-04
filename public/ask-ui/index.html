@@ -54,7 +54,7 @@
             <div class="panel-head output-head">
               <div>
                 <h2 id="answer-title">战略回答</h2>
-                <p class="panel-hint">基于当前 context / 报告 / 机会池 / Daily Command；默认基于本地上下文与 LLM 回答，可为本次开启搜索。</p>
+                <p class="panel-hint">战略判断会显示在这里。</p>
               </div>
               <div class="answer-toolbar">
                 <button id="addOpportunityButton" type="button" class="add-opportunity-button" aria-label="加入机会池" title="把当前回答加入机会池" hidden disabled>
@@ -67,8 +67,8 @@
                     <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
                   </svg>
                 </button>
-                <button id="copyCodexTaskButton" type="button" class="task-copy-button" hidden disabled>复制为 Codex 任务</button>
-                <button id="copyClaudeTaskButton" type="button" class="task-copy-button" hidden disabled>复制为 Claude Code 任务</button>
+                <button id="copyCodexTaskButton" type="button" class="task-copy-button" aria-label="复制适合 Codex 执行的工程任务提示词，偏代码、测试、Git、安全边界" title="Codex：偏工程代码、后端逻辑、脚本、测试、Git、安全边界。" hidden disabled>复制为 Codex 任务</button>
+                <button id="copyClaudeTaskButton" type="button" class="task-copy-button" aria-label="复制适合 Claude Code 执行的前端 UI 任务提示词，偏页面、交互、视觉、真实网页验证" title="Claude Code：偏前端页面、UI、交互、视觉、真实网页验证。" hidden disabled>复制为 Claude Code 任务</button>
               </div>
             </div>
             <div id="questionEcho" class="question-echo" hidden></div>
@@ -91,14 +91,6 @@
             <section id="searchProcess" class="search-process" hidden aria-label="搜索过程"></section>
             <section id="searchSources" class="search-sources" hidden aria-label="参考来源"></section>
             <section id="addOpportunityContainer" class="add-opportunity-container" hidden aria-label="加入机会池"></section>
-          </section>
-
-          <section class="panel meta-panel" aria-labelledby="meta-title">
-            <h2 id="meta-title" class="visually-hidden">说明</h2>
-            <ul class="meta-list">
-              <li><span class="meta-key">范围</span><span class="meta-val">本地 context + LLM</span></li>
-              <li><span class="meta-key">搜索</span><span class="meta-val">默认不联网，可为本次开启</span></li>
-            </ul>
           </section>
         </section>
 

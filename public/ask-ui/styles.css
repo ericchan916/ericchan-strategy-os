@@ -64,7 +64,14 @@ body {
 /* ---------------- Hero ---------------- */
 
 .hero {
-  margin-bottom: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 24px;
+  padding: 16px 0 14px;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(20, 86, 74, 0.06), transparent 60%),
+    var(--bg);
 }
 
 .eyebrow {
@@ -1279,6 +1286,7 @@ h2 {
   font-size: 0.75rem;
   white-space: nowrap;
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  pointer-events: auto;
 }
 
 .task-copy-button:hover:not(:disabled),

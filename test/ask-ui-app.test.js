@@ -376,11 +376,20 @@ test("HTML 含复制回答按钮 (id 或 aria-label)", () => {
   assert.ok(hasCopy, "缺少复制回答按钮");
 });
 
-test("V0.4.4: HTML 含开工包专属任务复制按钮", () => {
+test("V0.4.5: HTML 含开工包专属任务复制按钮与区别说明", () => {
   assert.ok(/id="copyCodexTaskButton"/.test(indexHtml), "缺少 Codex 任务复制按钮");
   assert.ok(/id="copyClaudeTaskButton"/.test(indexHtml), "缺少 Claude Code 任务复制按钮");
   assert.ok(indexHtml.includes("复制为 Codex 任务"));
   assert.ok(indexHtml.includes("复制为 Claude Code 任务"));
+  assert.ok(indexHtml.includes("偏工程代码、后端逻辑、脚本、测试、Git、安全边界"));
+  assert.ok(indexHtml.includes("偏前端页面、UI、交互、视觉、真实网页验证"));
+});
+
+test("V0.4.5: 战略回答区域不再显示范围 / 搜索冗余 meta 信息块", () => {
+  assert.equal(/class="panel meta-panel"/.test(indexHtml), false, "不应再渲染 meta-panel");
+  assert.equal(indexHtml.includes("本地 context + LLM"), false, "不应再显示范围说明");
+  assert.equal(indexHtml.includes("默认不联网，可为本次开启"), false, "不应再显示搜索 meta 说明");
+  assert.ok(indexHtml.includes("默认不联网"), "顶部默认不联网文案仍应保留");
 });
 
 test("HTML 含 loading 容器", () => {
@@ -898,6 +907,7 @@ test("buildCodexTaskPrompt: 包含开工包正文、测试与 Git 要求，并�
   assert.ok(prompt.includes("# 项目开工包"));
   assert.ok(prompt.includes("测试要求"));
   assert.ok(prompt.includes("Git 要求"));
+  assert.ok(prompt.includes("Codex 工程执行"));
   assert.ok(prompt.includes("[redacted]"));
   assert.equal(prompt.includes("sk-testSecret123456"), false);
 });
@@ -2395,6 +2405,7 @@ test("V0.4.4: 点击 Codex 任务按钮写入脱敏任务提示词", async () =>
   assert.ok(written.includes("Git 要求"));
   assert.ok(written.includes("# 开工包"));
   assert.equal(written.includes("sk-codexSecret123456"), false);
+  assert.equal(nodes.copyCodexTaskButton.textContent, "已复制");
 });
 
 test("V0.4.4: 点击 Claude Code 任务按钮写入脱敏任务提示词", async () => {
@@ -2418,6 +2429,32 @@ test("V0.4.4: 点击 Claude Code 任务按钮写入脱敏任务提示词", async
   assert.ok(written.includes("真实网页验证要求"));
   assert.ok(written.includes("# 开工包"));
   assert.equal(written.includes("sk-claudeSecret123456"), false);
+  assert.equal(nodes.copyClaudeTaskButton.textContent, "已复制");
+});
+
+test("V0.4.5: 任务复制按钮真实 click listener 会写入 clipboard", async () => {
+  const written = [];
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    clipboardImpl: async (text) => {
+      written.push(text);
+    },
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  app.setCurrentAnswer("# 开工包\n配置 sk-clickSecret123456。", "local", {
+    question: "生成开工包",
+    answerType: "kickoff-package"
+  });
+  nodes.copyCodexTaskButton.click();
+  nodes.copyClaudeTaskButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(written.length, 2);
+  assert.ok(written[0].includes("Git 要求"));
+  assert.ok(written[1].includes("真实网页验证要求"));
+  assert.equal(written.join("\n").includes("sk-clickSecret123456"), false);
 });
 
 test("V0.4.4: 任务复制 clipboard 失败时不抛异常", async () => {
@@ -3906,10 +3943,21 @@ test("V0.4.2 F17a: 历史 click 仍恢复回答（不回归）", () => {
   assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
 });
 
-// F18：meta-panel / scope / search 文案不回归
-test("V0.4.2 F18a: meta-list 含 范围 / 搜索 项（不回归）", () => {
-  assert.ok(indexHtml.includes("范围"), "meta 应含 范围");
-  assert.ok(indexHtml.includes("搜索"), "meta 应含 搜索");
+// F18：V0.4.5 删除战略回答下方冗余 meta 信息块
+test("V0.4.5 F18a: meta-list 范围 / 搜索 冗余信息块已删除", () => {
+  assert.equal(/class="meta-list"/.test(indexHtml), false, "不应再含 meta-list");
+  assert.equal(indexHtml.includes("本地 context + LLM"), false, "不应再显示本地 context + LLM");
+  assert.equal(indexHtml.includes("默认不联网，可为本次开启"), false, "不应再显示冗余搜索说明");
+});
+
+test("V0.4.5: hero 使用 sticky + z-index + background 避免最大化滚动时标题被遮住", () => {
+  const heroRule = stylesCss.match(/\.hero\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(heroRule, "找不到 .hero 规则");
+  const target = heroRule[0];
+  assert.ok(/position\s*:\s*sticky/i.test(target), ".hero 应 sticky");
+  assert.ok(/top\s*:\s*0/i.test(target), ".hero 应贴顶部");
+  assert.ok(/z-index\s*:\s*(?:[1-9]\d*)/i.test(target), ".hero 应有正 z-index");
+  assert.ok(/background\s*:/i.test(target), ".hero 应有背景，避免内容透过标题");
 });
 
 // F19：rail 滚动条视觉优化（细滚动条 / 不抢戏）

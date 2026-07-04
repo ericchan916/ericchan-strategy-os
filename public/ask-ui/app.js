@@ -335,6 +335,7 @@ ${title}
 
 任务背景：
 以下是 EricChan·战略OS 生成的开工包，请基于它执行。开工包不足时，先做现状检查，不要凭空扩大需求。
+这份提示词偏 Codex 工程执行，适合代码、脚本、测试、Git 和安全边界类任务。
 
 开工包正文：
 ${kickoff}
@@ -414,6 +415,17 @@ ${kickoff}
 - commit 信息
 - 工作区状态`;
 }
+
+const TASK_COPY_BUTTON_META = {
+  codex: {
+    label: "复制为 Codex 任务",
+    title: "Codex：偏工程代码、后端逻辑、脚本、测试、Git、安全边界。"
+  },
+  claude: {
+    label: "复制为 Claude Code 任务",
+    title: "Claude Code：偏前端页面、UI、交互、视觉、真实网页验证。"
+  }
+};
 
 // ============== Search sources panel (V0.3.6) ==============
 //
@@ -1406,11 +1418,16 @@ function createApp(deps) {
   function syncKickoffTaskCopyState() {
     const hasAnswer = typeof state.currentAnswer === "string" && state.currentAnswer.trim().length > 0;
     const visible = hasAnswer && !state.inFlight && state.currentAnswerType === "kickoff-package";
-    for (const button of [copyCodexTaskButton, copyClaudeTaskButton]) {
+    for (const [kind, button] of [["codex", copyCodexTaskButton], ["claude", copyClaudeTaskButton]]) {
       if (!button) continue;
+      const meta = TASK_COPY_BUTTON_META[kind];
       button.hidden = !visible;
       button.disabled = !visible;
-      if (!visible) button.removeAttribute("data-state");
+      if (!visible) {
+        button.removeAttribute("data-state");
+        button.textContent = meta.label;
+        button.title = meta.title;
+      }
     }
   }
 
@@ -1771,7 +1788,7 @@ function createApp(deps) {
   async function handleTaskPromptCopy(kind) {
     const builder = kind === "claude" ? buildClaudeCodeTaskPrompt : buildCodexTaskPrompt;
     const button = kind === "claude" ? copyClaudeTaskButton : copyCodexTaskButton;
-    const defaultLabel = kind === "claude" ? "复制为 Claude Code 任务" : "复制为 Codex 任务";
+    const meta = TASK_COPY_BUTTON_META[kind] || TASK_COPY_BUTTON_META.codex;
     const prompt = builder({ question: state.currentQuestion, answer: state.currentAnswer });
     const result = await handleCopyClick({ answer: prompt, clipboardImpl });
     if (button) {
@@ -1782,8 +1799,8 @@ function createApp(deps) {
         setTimeout(() => {
           if (button) {
             button.removeAttribute("data-state");
-            button.textContent = defaultLabel;
-            button.title = defaultLabel;
+            button.textContent = meta.label;
+            button.title = meta.title;
           }
         }, 1800);
       }
