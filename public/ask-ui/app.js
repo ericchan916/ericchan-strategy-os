@@ -859,6 +859,7 @@ function createApp(deps) {
     inFlight: false,
     selectedButton: null,
     currentAnswer: "",
+    currentAnswerType: "ask", // V0.3.11-hotfix-2："ask" / "kickoff-package"
     currentSource: "",
     currentSearch: null,
     currentQuestion: "",
@@ -1053,7 +1054,8 @@ function createApp(deps) {
       }
       setCurrentAnswer(answer, payload.source || "local", {
         question: `为「${titleText}」生成开工包`,
-        search: null
+        search: null,
+        answerType: "kickoff-package"
       });
       setStatus(payload.warning ? payload.warning : "开工包已生成。");
       // V0.3.11：写入历史 (type: kickoff-package)
@@ -1164,6 +1166,27 @@ function createApp(deps) {
       }
     }
     if (copyButton && state.inFlight) copyButton.disabled = true;
+    // V0.3.11-hotfix-2：统一按钮状态
+    syncOpportunityActionState();
+  }
+
+  // V0.3.11-hotfix-2：统一决定"加入机会池"按钮的显隐 / disabled。
+  // - hasAnswer = state.currentAnswer.trim() 非空
+  // - isLoading = state.inFlight
+  // - isKickoff = state.currentAnswerType === "kickoff-package"（避免从开工包递归创建机会）
+  // 规则：hasAnswer && !isLoading && !isKickoff → hidden=false disabled=false
+  //       其它：hidden=true（不要显示 disabled 灰按钮）
+  function syncOpportunityActionState() {
+    if (!addOpportunityButton) return;
+    const hasAnswer = typeof state.currentAnswer === "string" && state.currentAnswer.trim().length > 0;
+    const isLoading = state.inFlight === true;
+    const isKickoff = state.currentAnswerType === "kickoff-package";
+    const visible = hasAnswer && !isLoading && !isKickoff;
+    addOpportunityButton.hidden = !visible;
+    addOpportunityButton.disabled = !visible;
+    if (visible) {
+      addOpportunityButton.removeAttribute("data-state");
+    }
   }
 
   function clearSelectedQuestion() {
@@ -1196,6 +1219,11 @@ function createApp(deps) {
     if (meta && typeof meta === "object") {
       if (typeof meta.question === "string") state.currentQuestion = meta.question;
       if (meta.search) state.currentSearch = meta.search;
+      // V0.3.11-hotfix-2：记录当前回答类型
+      if (meta.answerType === "kickoff-package") state.currentAnswerType = "kickoff-package";
+      else state.currentAnswerType = "ask";
+    } else {
+      state.currentAnswerType = "ask";
     }
     if (copyButton) {
       const hasText = state.currentAnswer.trim().length > 0;
@@ -1204,11 +1232,8 @@ function createApp(deps) {
       copyButton.removeAttribute("data-state");
     }
     // V0.3.10：回答存在时显示"加入机会池"按钮
-    if (addOpportunityButton) {
-      const hasAnswer = state.currentAnswer.trim().length > 0;
-      addOpportunityButton.hidden = !hasAnswer;
-      addOpportunityButton.disabled = state.inFlight;
-    }
+    // V0.3.11-hotfix-2：统一由 syncOpportunityActionState 决定
+    syncOpportunityActionState();
     // 关闭之前的"加入机会池"弹层
     if (!state.currentAnswer.trim()) {
       closeAddOpportunityForm();
@@ -1452,7 +1477,8 @@ function createApp(deps) {
     else setGlobalStatus("localAnswer");
     setCurrentAnswer(entry.answer || "", entry.source || "local", {
       question: entry.question || "",
-      search
+      search,
+      answerType: entry.type === "kickoff-package" ? "kickoff-package" : "ask"
     });
     state.inFlight = false;
     if (askButton) askButton.disabled = false;

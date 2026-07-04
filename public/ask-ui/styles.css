@@ -1072,8 +1072,9 @@ h2 {
   display: none;
   align-items: center;
   justify-content: center;
-  min-height: 96px;
-  padding: 16px 22px 18px;
+  /* V0.3.11-hotfix-2：放大外层白色框，让 loading 不再贴边 / 不再拥挤 */
+  min-height: 220px;
+  padding: 36px 32px;
   border-radius: var(--radius-md);
   background: #ffffff;
   border: 1px solid var(--line-soft);
@@ -1090,7 +1091,9 @@ h2 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  /* V0.3.11-hotfix-2：放大图形与文字之间的留白 */
+  gap: 18px;
+  padding: 12px 8px;
 }
 
 .loading-text {

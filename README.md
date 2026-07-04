@@ -1279,6 +1279,84 @@ V0.3.11-hotfix 仍只动机会池与 Ask UI，不改后端 search / LLM / loadin
 - 不保存 raw answer / raw search response / API Key。
 - 开工包生成**不**真实调用 Codex / WorkBuddy / OpenDesign / MiniMax。
 
+## V0.3.11-hotfix-2 修复加入机会池按钮状态与加载卡片留白
+
+V0.3.11-hotfix 上线后用户真实使用反馈两个体验问题：
+
+1. 普通 Ask / 联网搜索回答后，**"加入机会池"按钮又变成不能点击的状态**（可见但 disabled）。
+2. 搜索 loading 所在的**白色框太小**，loading 标识显得很挤，等待状态体验差。
+
+V0.3.11-hotfix-2 仍只动 Ask UI 前端与样式，不改后端 search / LLM / API 配置 / 端口。
+
+### 修复 1：加入机会池按钮状态统一
+
+新增 `syncOpportunityActionState()` 单一入口函数，根据当前 UI 状态统一决定按钮：
+
+```js
+hasAnswer = state.currentAnswer.trim() !== ""
+isLoading = state.inFlight === true
+isKickoff = state.currentAnswerType === "kickoff-package"
+
+if (hasAnswer && !isLoading && !isKickoff) {
+  // 显示 + 可点
+} else {
+  // 隐藏（不是 disabled 灰按钮）
+}
+```
+
+`state.currentAnswerType` 是 V0.3.11-hotfix-2 新增字段，用于记录当前显示的回答是 `ask` 还是 `kickoff-package`：
+
+- 普通 Ask → `ask`
+- 联网搜索 → `ask`（即使 `source=llm` / `search.used=true`）
+- 搜索失败 fallback 但有本地 answer → `ask`
+- 生成开工包 → `kickoff-package`（避免从开工包递归创建机会）
+
+`setCurrentAnswer` / `setInFlight` / `restoreHistoryItem` / `generateKickoffForOpportunity` 末尾都统一调用 `syncOpportunityActionState()`，杜绝多个分支互相覆盖。
+
+### 修复 2：提炼失败不禁用主按钮
+
+`draftWarning` 仍走 V0.3.11-hotfix 的二次保护流程：
+
+- 主按钮**仍然可点**（不为空回答就一定可点）
+- 点击后表单打开
+- 表单内 `data-op-add-warning` 显示「没有识别到明确机会，请补充机会名称。」
+- 提交时若 title 空，POST 返回中文错误「请填写机会名称。」
+
+### 修复 3：loading 白色框放大
+
+只调整外层容器，**不动 loading 动画本体**：
+
+- `.answer-loading` `min-height` 96px → **220px**
+- `.answer-loading` `padding` 16/22/18px → **36px 32px**
+- `.loading-inner` `gap` 8px → **18px**（文字与图形之间更舒展）
+
+保留：
+
+- `@keyframes loading-spinner` 不动
+- 6 个 `<div></div>` 内部结构不动
+- `animation: loading-spinner 1.6s infinite ease` 不动
+- `.loading-spinner` 选择器 + `nth-of-type(1..6)` 不动
+
+### 真实验证
+
+- 普通 Ask 完成后：`addOpportunityButton.hidden=false disabled=false` ✅
+- 联网搜索（`search.used=true`）完成后：按钮仍可点 ✅
+- 搜索失败 fallback 但有本地 answer：按钮仍可点 ✅
+- draftWarning（weather 类）：主按钮可点 + 表单内显示 warning ✅
+- 历史恢复普通 answer：按钮可点 ✅
+- 历史恢复 `kickoff-package`：按钮隐藏（不是 disabled 灰按钮） ✅
+- 加载框：白色框明显变大（220px min-height + 36px/32px padding），loading 标识不再贴边 ✅
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）。
+- 不恢复仓鼠跑轮动画。
+- 不默认自动联网 / 不默认勾选"本次联网搜索"。
+- 不删除 Bocha / Tavily provider。
+- 不改 LLM API 配置逻辑。
+- 不暴露 API Key / 不提交 .env。
+- 不提交 `data/opportunities/*.json` 或测试机会数据。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

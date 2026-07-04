@@ -2145,3 +2145,246 @@ test("V0.3.11-hotfix: note / oneLineSummary / nextAction 三个字段都存在",
   assert.ok(/data-op-add-next/.test(html));
 });
 
+// ============== V0.3.11-hotfix-2: 加入机会池按钮状态统一 ==============
+
+// 工具：根据 createApp + 注入节点构造一个简单 app 容器（与现有 V0.3.11 测试一致）
+function makeAskApp(extraFetch) {
+  const nodes = makeFakeNodes();
+  const baseFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+  const fetchImpl = extraFetch || baseFetch;
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  return { app, nodes };
+}
+
+test("V0.3.11-hotfix-2: 初始无回答时加入机会池按钮隐藏", () => {
+  const { nodes, app } = makeAskApp();
+  const btn = nodes.addOpportunityButton;
+  // 初始 mount 后按钮应隐藏
+  app.setCurrentAnswer("", "");
+  assert.equal(btn.hidden, true, "无回答时按钮应隐藏");
+  // 不应是 disabled 灰按钮（保持 hidden）
+  assert.notEqual(btn.hidden === false && btn.disabled === true, true, "不应显示 disabled 灰按钮");
+});
+
+test("V0.3.11-hotfix-2: 普通 Ask 成功后加入机会池按钮可见可点", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("一些本地回答", "local", { question: "q" });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "有回答时按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "有回答时按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: 联网搜索成功后按钮仍可见可点（即使 source=llm / search.used=true）", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("搜索回答", "llm", {
+    question: "q",
+    search: {
+      used: true,
+      resultCount: 3,
+      sources: [{ title: "外部来源", url: "https://example.com", source: "example.com" }],
+      quality: { averageScore: 60, topSourceScore: 70, lowQualityCount: 0, hasHighConfidenceSources: true }
+    }
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "搜索后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "搜索后按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: 搜索失败 fallback 后（本地仍有 answer）按钮可见可点", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("本地回退回答", "local-fallback", {
+    question: "q",
+    search: { used: true, warning: "搜索超时，已本地回答" }
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "fallback 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "fallback 后按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: 搜索失败且无本地 answer 时按钮隐藏", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("", "local-fallback", {
+    question: "q",
+    search: { used: true, warning: "搜索超时" }
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, true, "无 answer 时按钮应隐藏");
+});
+
+test("V0.3.11-hotfix-2: loading 中按钮 disabled 或隐藏", async () => {
+  const { app, nodes } = makeAskApp();
+  // 模拟 loading 开始（不真正提交）
+  app.setInFlight(true);
+  assert.equal(nodes.addOpportunityButton.disabled, true, "loading 中按钮应 disabled");
+});
+
+test("V0.3.11-hotfix-2: loading 结束且有 answer 后按钮恢复可点", () => {
+  const { app, nodes } = makeAskApp();
+  app.setInFlight(true);
+  app.setCurrentAnswer("loading 结束后的回答", "llm", { question: "q" });
+  app.setInFlight(false);
+  assert.equal(nodes.addOpportunityButton.hidden, false, "loading 结束且有 answer 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "loading 结束且有 answer 后按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: history restore 普通 answer 后按钮可见可点", () => {
+  const { app, nodes } = makeAskApp();
+  app.restoreHistoryItem({
+    id: "h-1",
+    question: "历史问题",
+    answer: "历史回答",
+    source: "llm",
+    searchUsed: true,
+    searchWarning: null,
+    searchSources: [{ title: "src", url: "https://example.com", source: "example.com" }],
+    type: "ask"
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "恢复普通 answer 后按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: history restore 开工包类型（kickoff-package）后按钮应隐藏，不显示 disabled 灰按钮", () => {
+  const { app, nodes } = makeAskApp();
+  app.restoreHistoryItem({
+    id: "h-kick-1",
+    question: "为「X」生成开工包",
+    answer: "## 开工包\n### 项目一句话\n…",
+    source: "local",
+    searchUsed: false,
+    searchWarning: null,
+    type: "kickoff-package"
+  });
+  // 应隐藏，而不是 disabled
+  assert.equal(nodes.addOpportunityButton.hidden, true, "kickoff-package 类型应隐藏按钮");
+  assert.notEqual(nodes.addOpportunityButton.hidden === false && nodes.addOpportunityButton.disabled === true, true, "不应显示 disabled 灰按钮");
+});
+
+test("V0.3.11-hotfix-2: clear/reset 状态后按钮隐藏", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("一些回答", "llm", { question: "q" });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "有回答时按钮可见");
+  // 清空
+  app.setCurrentAnswer("", "");
+  assert.equal(nodes.addOpportunityButton.hidden, true, "清空后按钮隐藏");
+  assert.notEqual(nodes.addOpportunityButton.disabled === true && nodes.addOpportunityButton.hidden === false, true, "清空后不能显示 disabled 灰按钮");
+});
+
+test("V0.3.11-hotfix-2: draftWarning 时主按钮仍可点击，表单内显示 warning", () => {
+  // 极端情况：后端 / 前端提炼都失败时，主按钮应仍可点
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("今天多云转晴", "llm", { question: "今天天气怎么样" });
+  assert.equal(nodes.addOpportunityButton.hidden, false, "提炼失败时按钮仍应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "提炼失败时按钮仍应可点");
+  // 点击打开表单
+  nodes.addOpportunityButton.click();
+  // 表单内应显示 warning
+  assert.ok(/data-op-add-warning/.test(nodes.addOpportunityContainer.innerHTML), "表单内应显示 warning 节点");
+});
+
+test("V0.3.11-hotfix-2: 点击按钮能打开加入机会池表单", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("回答内容", "llm", { question: "q" });
+  nodes.addOpportunityButton.click();
+  assert.equal(nodes.addOpportunityContainer.hidden, false, "点击后容器应显示");
+  assert.ok(/data-op-add-form/.test(nodes.addOpportunityContainer.innerHTML), "应渲染表单 markup");
+});
+
+test("V0.3.11-hotfix-2: submitAsk 普通 Ask 流程后按钮可见可点（end-to-end）", async () => {
+  const fetchImpl = (path, init = {}) => {
+    if (path === "/api/ask" && init.method === "POST") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          answer: "本地回答",
+          source: "local",
+          search: null,
+          warning: null
+        })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+  };
+  const nodes = makeFakeNodes();
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  nodes.questionInput.value = "测试问题";
+  await app.submitAsk();
+  assert.equal(nodes.addOpportunityButton.hidden, false, "submitAsk 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "submitAsk 后按钮应可点");
+});
+
+test("V0.3.11-hotfix-2: submitAsk 联网搜索流程后按钮可见可点（end-to-end）", async () => {
+  const fetchImpl = (path, init = {}) => {
+    if (path === "/api/ask" && init.method === "POST") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          answer: "搜索回答",
+          source: "llm",
+          search: { used: true, sources: [{ title: "x", url: "https://example.com", source: "example.com" }], resultCount: 1 },
+          warning: null
+        })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+  };
+  const nodes = makeFakeNodes();
+  const app = createApp({ nodes, fetchImpl, storage: null });
+  app.mount();
+  nodes.questionInput.value = "测试问题";
+  nodes.webSearchToggle.checked = true;
+  await app.submitAsk();
+  assert.equal(nodes.addOpportunityButton.hidden, false, "搜索 submitAsk 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false, "搜索 submitAsk 后按钮应可点");
+});
+
+// ============== V0.3.11-hotfix-2: loading 容器 ==============
+
+test("V0.3.11-hotfix-2: CSS loading 容器最小高度 ≥ 180px（更大更舒展）", () => {
+  // 抓 .answer-loading 规则块，验证 min-height 在 180~280 范围
+  const match = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(match, "应存在 .answer-loading 规则");
+  const block = match[0];
+  const minH = block.match(/min-height\s*:\s*(\d+)px/);
+  assert.ok(minH, ".answer-loading 应设置 min-height (px)");
+  const h = Number(minH[1]);
+  assert.ok(h >= 180 && h <= 320, `.answer-loading min-height 应在 180~320 范围，实际 ${h}px`);
+});
+
+test("V0.3.11-hotfix-2: CSS loading 容器 padding 充足（>= 28px）", () => {
+  const match = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(match);
+  const block = match[0];
+  const padMatch = block.match(/padding\s*:\s*([^;]+);/);
+  assert.ok(padMatch, ".answer-loading 应设置 padding");
+  const nums = (padMatch[1].match(/\d+/g) || []).map(Number);
+  assert.ok(nums.length >= 1, "padding 至少含 1 个数字");
+  assert.ok(nums.some((n) => n >= 28), `.answer-loading padding 应至少有一个值 >= 28px，实际 ${JSON.stringify(nums)}`);
+});
+
+test("V0.3.11-hotfix-2: loading-spinner 6 个 div 内部结构未变（keyframe 驱动元素仍存在）", () => {
+  // 抓 .loading-spinner > div / nth-of-type 选择器数量
+  const nthMatches = stylesCss.match(/\.loading-spinner\s+div:nth-of-type\(\d+\)/g) || [];
+  assert.ok(nthMatches.length >= 6, `loading-spinner 应有 6 个 div 子元素，实际 ${nthMatches.length}`);
+});
+
+test("V0.3.11-hotfix-2: keyframes 名称未变（loading-spinner / spoke 等仍存在）", () => {
+  // 不能修改 loading 动画 keyframes 本身
+  assert.ok(/@keyframes\s+loading-spinner/.test(stylesCss), "@keyframes loading-spinner 应保留");
+  // 现在的动画有 6 个 div 由 loading-spinner keyframe 驱动
+  const animMatch = stylesCss.match(/\.loading-spinner\s*\{[^}]*animation\s*:\s*loading-spinner\s+([^;]+);/);
+  assert.ok(animMatch, ".loading-spinner 应使用 loading-spinner keyframe 动画");
+});
+
+test("V0.3.11-hotfix-2: HTML loading 容器结构未变（仍含 loading-spinner 6 个 div）", () => {
+  const loadBlock = indexHtml.match(/<div[^>]*id="answerLoading"[\s\S]*?<\/div>\s*<\/div>/);
+  assert.ok(loadBlock, "应存在 answerLoading 容器");
+  const inner = loadBlock[0];
+  // 6 个 div（loading-spinner 子元素）
+  const divCount = (inner.match(/<div><\/div>/g) || []).length;
+  assert.ok(divCount >= 6, `loading-spinner 应有 6 个 <div></div>，实际 ${divCount}`);
+});
+
+test("V0.3.11-hotfix-2: buildLoadingMarkup 在 app.js 中暴露（确保前端知道 SVG 内容）", () => {
+  // 现有 buildLoadingMarkup 使用 WHEEL_SVG；本次不允许改 loading 动画本身
+  // 检查 WHEEL_SVG / buildLoadingMarkup 仍存在
+  assert.ok(/function\s+buildLoadingMarkup/.test(appJsText), "buildLoadingMarkup 函数应存在");
+});
+
