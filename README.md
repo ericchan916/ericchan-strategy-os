@@ -1202,6 +1202,83 @@ V0.3.11 仍然只动机会池和 Ask UI 的相关路径，不动后端 search / 
 - 不保存 raw answer 全文 / raw search response。
 - 开工包生成**不**真实调用 Codex / WorkBuddy / OpenDesign / MiniMax；只做"虚拟开工包"。
 
+## V0.3.11-hotfix 修复机会提炼与开工包生成质量
+
+V0.3.11 提交后用户真实使用时反馈两个核心问题：
+
+1. "一键加入机会池"时，`opportunityName` 经常还是用户的原问题（如「最近有什么适合独立开发者做的小型 AI 项目？」），不是从回答中提炼出的项目机会名。
+2. 生成开工包时，多个小节只输出"信息不足，建议补充 X"，用户需要逐项罗列，体验差。
+
+V0.3.11-hotfix 仍只动机会池与 Ask UI，不改后端 search / LLM / loading / 端口。
+
+### 修复 1：机会名称 = 回答中提炼的项目，不是原问题
+
+重写 `deriveOpportunityDraftFromAnswer`：
+
+- **机会名称优先从 answer 抽产品名**：使用 `PRODUCT_NAME_SUFFIXES`（助手/工具/平台/雷达/简报/看板/生成器/工作流/日历/模板/系统/OS/插件/agent/Agent/bot/Bot/MVP/选题器/分析器/检查器/体检器 等 30+ 后缀）。
+- **剥离无意义前缀**：`NAME_PREFIXES_TO_STRIP` 列表覆盖「我建议你 / 适合做 / 可以先 / 面向 / 一个 / 最近 / 帮我 / 请你」等 30+ 前缀。
+- **智能压缩**：超过 24 字时优先保留含后缀的"X 助手 / X 工具"短语，**避免简单截断**。
+- **疑问句检测**：`isQuestionishQuestion()` 识别"最近有什么 / 怎么 / 为什么 / 帮我 / 给我推荐"等模式，从 question 抽取名字时只对非疑问句生效。
+- **机会信号检测**：`OPPORTUNITY_QUESTION_HINTS` 要求 question/answer 含"做 / 想 / 试试 / 值得 / MVP / 工具 / 助手 / 选题 ..."等信号，否则视为"非机会"。
+- **移除孤悬形容词**：开头"超级 / 无敌 / 最强 / 完美 / 关键 / 基础"等修饰词被剥离。
+- **无法识别时返回空 + `draftWarning`**：当 opportunityName 为空时附中文提示「没有识别到明确机会，请补充机会名称。」
+
+### 修复 2：前端二次保护
+
+`buildAddOpportunityFormMarkup` 在前端做兜底：
+
+- `titleMatchesQuestion(title, q)` 检测去标点后是否包含 / 被包含
+- `hasUselessPrefix(title)` 检测以「我建议你 / 适合做 / 可以先 / 面向 / 最近 / 帮我」开头
+- 任一命中 → `protectedName = ""` + `formWarning` 提示用户
+- `formWarning` 用 `data-op-add-warning` 节点 + 红色左边框样式
+
+### 修复 3：开工包不再"逃避生成"
+
+新增 `inferKickoffFields({ name, oneLine, note, next, tags })`，基于机会名/标签推断：
+
+- **目标用户**：根据 name 关键词（短视频/选题 → 短视频创作者 / 个人 IP；编程/工具 → 独立开发者；大模型/LLM → AI 开发者等）推断。
+- **最小 MVP**：基于 name + next 推断"输入 → 输出"最小流程。
+- **第一版功能边界**：基于 tags 圈定核心功能。
+- **风险与卡点**：5+ 条独立开发者常见风险模板 + 基于 name/oneLine/tags 拼接额外风险：
+  - 需求过宽 → 泛工具
+  - 数据来源 / 搜索质量不稳定
+  - 用户是否愿意付费 / 二次使用未知
+  - MVP 容易演变成"内容生成玩具"
+  - AI 输出不稳定 → 准备"用户反馈兜底 / 退化为模板"
+  - 内容质量主观性强
+  - 开发工具迁移成本高
+
+即使信息完全为空，`buildSparseKickoff` 也会生成完整 10 小节（每节都有具体"暂定 / 推断"内容）。
+
+### 修复 4：LLM prompt 强化
+
+`buildKickoffUserPrompt` 新增"硬约束 V0.3.11-hotfix"段：
+
+- 不要用「信息不足」替代生成
+- 每个小节必须给出具体内容，可以标注"暂定 / 推断 / 保守判断"
+- 风险与卡点必须主动生成 ≥ 3 条具体风险
+- 目标用户 / MVP / 边界即使信息不足也要做"暂定推断"
+
+`readKickoffSystemPrompt` 也同步更新硬约束。
+
+### 真实验证
+
+用户输入 `最近有什么适合独立开发者做的小型 AI 项目？` + 包含「我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合」的 answer：
+
+- 机会名称：`AI 短视频选题助手`（不是原问题）
+- 一句话说明：`AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合，做一个把热点转成可拍选题的工具。`
+- 下一步：`用提示词和简单网页跑通`（可执行动词开头）
+- 标签：`["独立开发者","内容产品","可快速验证"]`
+- 开工包：10 小节齐全，5 条具体风险，仅 1 处"信息不足"且后跟具体"建议补充 X"
+
+### 不动的部分
+
+- 不修改后端 search / LLM / loading / 端口监听。
+- 不引入数据库 / 账号系统。
+- 不暴露 API Key。
+- 不保存 raw answer / raw search response / API Key。
+- 开工包生成**不**真实调用 Codex / WorkBuddy / OpenDesign / MiniMax。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

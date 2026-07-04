@@ -851,3 +851,202 @@ test("generateKickoffPackageForOpportunity: 不暴露 API Key", async () => {
     assert.ok(key in result, `应包含字段: ${key}`);
   }
 });
+
+// ============== V0.3.11-hotfix: 开工包不逃避生成 ==============
+
+test("V0.3.11-hotfix: 开工包 10 个小节都有具体内容（不允许整节只说'信息不足'）", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "把热点和方向结合成可拍选题",
+    note: "MVP 验证",
+    next: "做一个最小网页",
+    tags: ["高潜力"],
+    sourceQuestion: "想做点啥",
+    sourceUrls: []
+  });
+  // 用 1./2./3.... 数字小节切分（保留每节从标题开始）
+  const sectionTitles = [];
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const m = line.match(/^(\d+)\.\s+(.*)/);
+    if (m) sectionTitles.push({ num: Number(m[1]), title: m[2] });
+  }
+  assert.ok(sectionTitles.length >= 10, `应 ≥ 10 个小节标题: ${sectionTitles.length}`);
+  // 检查每节：从该节标题到下一节标题之间的内容
+  for (let i = 0; i < sectionTitles.length; i += 1) {
+    const start = lines.findIndex((l) => new RegExp(`^${i + 1}\\.\\s`).test(l));
+    const end = i + 1 < sectionTitles.length
+      ? lines.findIndex((l) => new RegExp(`^${i + 2}\\.\\s`).test(l))
+      : lines.length;
+    const body = lines.slice(start + 1, end).join("\n").trim();
+    assert.ok(body.length >= 5, `小节 ${i + 1}. ${sectionTitles[i].title} 内容过短: "${body}"`);
+    if (body.length < 60) {
+      assert.equal(/^信息不足[，。、\s]*$/.test(body), false, `小节 ${i + 1}. ${sectionTitles[i].title} 不应只是"信息不足"占位: ${body}`);
+    }
+  }
+});
+
+test("V0.3.11-hotfix: 风险与卡点主动生成至少 3 条具体风险", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "x",
+    note: "y",
+    next: "z",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  assert.ok(riskMatch, "应有'9. 风险与卡点'小节");
+  const riskBody = riskMatch[1];
+  // 至少 3 条 (以 "- " 开头)
+  const bullets = riskBody.split(/\n/).filter((line) => /^\s*[-•]/.test(line));
+  assert.ok(bullets.length >= 3, `风险与卡点应至少 3 条: ${bullets.length}`);
+  // 每条都有具体内容（不是"信息不足"）
+  for (const b of bullets) {
+    assert.equal(/^信息不足/.test(b.trim()), false, `风险条目不应只是"信息不足": ${b}`);
+    assert.ok(b.trim().length > 8, `风险条目过短: ${b}`);
+  }
+});
+
+test("V0.3.11-hotfix: 目标用户在信息不足时给出暂定推断", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "x",
+    note: "y",
+    next: "z",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  // 目标用户小节不应是空
+  const targetMatch = text.match(/3\.\s*目标用户([\s\S]*?)(?=\n4\.)/);
+  assert.ok(targetMatch);
+  const targetBody = targetMatch[1].trim();
+  assert.ok(targetBody.length > 20, `目标用户应有具体内容: ${targetBody.length}`);
+  // 不应只是"信息不足"
+  assert.equal(/^信息不足/.test(targetBody), false, "目标用户小节不应只是'信息不足'");
+  // 允许"暂定 / 推断"等表达
+  // 我们不强求特定文案，只确认有内容
+});
+
+test("V0.3.11-hotfix: 最小 MVP 在信息不足时给出暂定推断", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "x",
+    note: "y",
+    next: "",  // 信息不足
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  const mvpMatch = text.match(/4\.\s*最小 MVP([\s\S]*?)(?=\n5\.)/);
+  assert.ok(mvpMatch);
+  const mvpBody = mvpMatch[1].trim();
+  assert.ok(mvpBody.length > 20, `MVP 应有具体内容: ${mvpBody.length}`);
+  assert.equal(/^信息不足/.test(mvpBody), false, "MVP 小节不应只是'信息不足'");
+  assert.ok(/暂定|推断|MVP|输入|输出/.test(mvpBody), `MVP 应含暂定/推断关键词: ${mvpBody.slice(0, 100)}`);
+});
+
+test("V0.3.11-hotfix: 第一版功能边界在信息不足时给出暂定推断", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "x",
+    note: "y",
+    next: "z",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  const scopeMatch = text.match(/5\.\s*第一版功能边界([\s\S]*?)(?=\n6\.)/);
+  assert.ok(scopeMatch);
+  const scopeBody = scopeMatch[1].trim();
+  assert.ok(scopeBody.length > 20);
+  assert.equal(/^信息不足/.test(scopeBody), false);
+});
+
+test("V0.3.11-hotfix: buildSparseKickoff 也满足'不逃避生成'", () => {
+  const text = buildSparseKickoff({ name: "稀疏机会", sourceQuestion: "q" });
+  const lines = text.split("\n");
+  const titles = [];
+  for (const line of lines) {
+    const m = line.match(/^(\d+)\.\s+(.*)/);
+    if (m) titles.push(Number(m[1]));
+  }
+  assert.ok(titles.length >= 10, `应 ≥ 10 个小节: ${titles.length}`);
+  for (let i = 0; i < titles.length; i += 1) {
+    const start = lines.findIndex((l) => new RegExp(`^${i + 1}\\.\\s`).test(l));
+    const end = i + 1 < titles.length
+      ? lines.findIndex((l) => new RegExp(`^${i + 2}\\.\\s`).test(l))
+      : lines.length;
+    const body = lines.slice(start + 1, end).join("\n").trim();
+    assert.ok(body.length >= 5, `小节 ${i + 1} 内容过短: "${body}"`);
+  }
+  // 风险小节也应有 ≥3 条
+  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  if (riskMatch) {
+    const bullets = riskMatch[1].split(/\n/).filter((line) => /^\s*[-•]/.test(line));
+    assert.ok(bullets.length >= 3, `稀疏模板风险条目 ≥ 3: ${bullets.length}`);
+  }
+});
+
+test("V0.3.11-hotfix: buildKickoffUserPrompt 包含'不要用信息不足替代判断'硬约束", () => {
+  const prompt = buildKickoffUserPrompt({
+    name: "X",
+    oneLine: "y",
+    note: "n",
+    next: "z",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  assert.ok(/不要.*信息不足|不允许.*信息不足|不要用.*信息不足/.test(prompt), "prompt 应明确禁止用'信息不足'占位");
+  assert.ok(/暂定|推断|保守|假设/.test(prompt), "prompt 应允许暂定/推断表达");
+});
+
+test("V0.3.11-hotfix: 风险小节包含通用独立开发者项目风险", () => {
+  const text = buildLocalKickoff({
+    name: "AI 短视频选题助手",
+    oneLine: "x",
+    note: "y",
+    next: "z",
+    tags: [],
+    sourceQuestion: "",
+    sourceUrls: []
+  });
+  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  assert.ok(riskMatch);
+  const riskBody = riskMatch[1];
+  // 至少包含一些独立开发者常见风险关键词
+  const hasCommonRisk = /(需求|泛工具|玩具|付费|数据|搜索|复杂|账号|来源|价值|竞品|内容|质量|稳定|依赖|隐私|合规)/.test(riskBody);
+  assert.ok(hasCommonRisk, `风险小节应含独立开发者常见风险关键词: ${riskBody.slice(0, 200)}`);
+});
+
+test("V0.3.11-hotfix: generateKickoffPackageForOpportunity 数据稀疏时也生成 10 小节具体内容", async () => {
+  const result = await generateKickoffPackageForOpportunity({
+    opportunity: { id: "x", opportunityName: "稀疏机会" },
+    env: {}
+  });
+  const sections = result.answer.split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\.\s/.test(s));
+  assert.ok(sections.length >= 10, `应 ≥10 小节: ${sections.length}`);
+  // 9. 风险与卡点 至少 3 条
+  const riskMatch = result.answer.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  if (riskMatch) {
+    const bullets = riskMatch[1].split(/\n/).filter((line) => /^\s*[-•]/.test(line));
+    assert.ok(bullets.length >= 3, `生成器风险条目 ≥ 3: ${bullets.length}`);
+  }
+});
+
+test("V0.3.11-hotfix: 信息稀疏 kickoff 不应只输出 '信息不足' 占位", async () => {
+  const result = await generateKickoffPackageForOpportunity({
+    opportunity: { id: "x", opportunityName: "稀疏" },
+    env: {}
+  });
+  // 整篇不允许出现连续的"信息不足"
+  const lines = result.answer.split("\n");
+  for (const line of lines) {
+    if (/信息不足/.test(line)) {
+      assert.ok(line.length > 8, `信息不足应跟具体内容: ${line}`);
+    }
+  }
+});

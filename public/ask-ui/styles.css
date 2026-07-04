@@ -637,6 +637,18 @@ h2 {
   line-height: 1.5;
 }
 
+.opportunity-add-warning {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: rgba(160, 74, 58, 0.08);
+  border-left: 3px solid #a04a3a;
+  border-radius: 4px;
+  color: #a04a3a;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .opportunity-source-urls {
   color: var(--muted);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;

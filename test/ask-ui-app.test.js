@@ -1365,8 +1365,10 @@ test("buildAddOpportunityFormMarkup: 默认 status=validate, type=new-project-op
   // 标签默认应带预设选项
   assert.ok(/AI Agent/.test(html), "应包含 AI Agent 预设标签");
   assert.ok(/高潜力/.test(html), "应包含高潜力预设标签");
-  // 备注默认应包含问题摘要（而非 raw 全文）
-  assert.ok(html.includes("适合做短视频选题工具"), "应包含问题摘要");
+  // V0.3.11-hotfix：note 现在是 answer 提炼（不是原问题）
+  // 简单 answer "看起来不错" 提炼不出 note 关键句，应给兜底
+  assert.ok(/data-op-add-note/.test(html), "应包含 note 字段");
+  assert.ok(html.includes("适合做短视频选题工具") || /data-op-add-warning/.test(html), "要么问题相关，要么显示 warning 兜底");
 });
 
 test("buildAddOpportunityFormMarkup: 标题不明时给出占位提示", () => {
@@ -2046,3 +2048,100 @@ test("createApp: 提交 POST 成功后容器关闭并刷新机会池", async () 
   // 容器应关闭
   assert.equal(container.hidden, true, "成功提交后表单应关闭");
 });
+
+// ============== V0.3.11-hotfix: 前端二次保护 ==============
+
+test("V0.3.11-hotfix: 提炼出明确产品名时前端保留 title，不显示 warning（修复后行为）", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合。"
+  });
+  // 不应把原问题当机会名
+  assert.equal(/最近有什么适合独立开发者做的小型 AI 项目？/.test(html), false);
+  // 不应含"我建议你先"
+  assert.equal(/value="我建议你/.test(html), false);
+  // 应有产品名
+  assert.ok(/value="AI 短视频选题助手"/.test(html), "应保留精炼后的产品名");
+  // 不应显示 warning（因为提炼成功）
+  assert.equal(/data-op-add-warning/.test(html), false, "明确产品名时不显示 warning");
+});
+
+test("V0.3.11-hotfix: 极端情况 - 后端仍返回原 question 作为 opportunityName 时前端二次保护", () => {
+  // 模拟 V0.3.11 之前的草稿（手动传入 draft，模拟旧版后端行为）
+  const html = buildAddOpportunityFormMarkup({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手。",
+    draft: {
+      opportunityName: "最近有什么适合独立开发者做的小型 AI 项目？", // 强制等于 question
+      oneLineSummary: "x",
+      note: "y",
+      nextAction: "z",
+      suggestedTags: [],
+      status: "validate",
+      type: "new-project-opportunity"
+    }
+  });
+  // 前端应清空 title 并显示 warning
+  const titleMatch = html.match(/<input[^>]*data-op-add-title[^>]*value="([^"]*)"/);
+  assert.ok(titleMatch);
+  assert.equal(titleMatch[1], "", "前端二次保护：title 等于 question 时应清空");
+  assert.ok(/data-op-add-warning/.test(html), "应显示 warning 节点");
+});
+
+test("V0.3.11-hotfix: weather 类问题前端清空 title 并显示 warning", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "今天天气怎么样",
+    answer: "今天多云转晴，最高温度 25 度。"
+  });
+  assert.ok(/data-op-add-warning/.test(html));
+  // title 应为空
+  const titleMatch = html.match(/<input[^>]*data-op-add-title[^>]*value="([^"]*)"/);
+  assert.ok(titleMatch);
+  assert.equal(titleMatch[1], "", "weather 类 title 应为空");
+});
+
+test("V0.3.11-hotfix: 提炼出明确产品名时前端保留 title，不显示 warning", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合。"
+  });
+  // 应有产品名
+  assert.ok(/value="AI 短视频选题助手"/.test(html), "应保留精炼后的产品名");
+  // 不应显示 warning
+  assert.equal(/data-op-add-warning/.test(html), false, "明确产品名时不显示 warning");
+});
+
+test("V0.3.11-hotfix: 表单备注不展示完整 answer（≤ 300 字）", () => {
+  const longAnswer = "推荐做 AI 短视频选题助手。" + "细节。".repeat(200);
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: longAnswer
+  });
+  const noteMatch = html.match(/<textarea[^>]*data-op-add-note[^>]*>([\s\S]*?)<\/textarea>/);
+  assert.ok(noteMatch);
+  const noteText = noteMatch[1];
+  assert.ok(noteText.length <= 300, `note 字段值应 ≤ 300 字: ${noteText.length}`);
+  // 不应含 markdown 标题
+  assert.equal(/^#+\s/m.test(noteText), false);
+});
+
+test("V0.3.11-hotfix: 表单必填校验 - title 空时不应通过原生 required 校验（输入框 required 属性）", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "今天天气怎么样",
+    answer: "今天多云转晴"
+  });
+  // 必填校验：input 应有 required 属性
+  const titleInput = html.match(/<input[^>]*data-op-add-title[^>]*>/);
+  assert.ok(titleInput && /required/.test(titleInput[0]), "机会名称 input 应有 required 属性");
+});
+
+test("V0.3.11-hotfix: note / oneLineSummary / nextAction 三个字段都存在", () => {
+  const html = buildAddOpportunityFormMarkup({
+    question: "q",
+    answer: "推荐做 AI 选题助手"
+  });
+  assert.ok(/data-op-add-note/.test(html));
+  assert.ok(/data-op-add-one-line/.test(html));
+  assert.ok(/data-op-add-next/.test(html));
+});
+

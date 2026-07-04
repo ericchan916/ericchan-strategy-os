@@ -641,7 +641,9 @@ test("deriveOpportunityDraftFromAnswer: 无法识别机会时给出中文提示"
     question: "今天天气怎么样",
     answer: "今天多云转晴，最高温度 25 度，东南风 3 级。"
   });
-  assert.ok(/没有识别|手动补充|未命名/.test(draft.opportunityName) || /手动|补充/.test(draft.note), "无明确机会时给中文兜底");
+  // V0.3.11-hotfix：无法识别时 opportunityName 为空字符串 + draftWarning
+  assert.equal(draft.opportunityName, "", "无法识别时 opportunityName 应为空");
+  assert.ok(draft.draftWarning && /手动|补充|没有识别|无法/.test(draft.draftWarning), "应有中文 draftWarning");
 });
 
 test("deriveOpportunityDraftFromAnswer: 不保存 raw answer / raw search response / API Key", () => {
@@ -772,3 +774,116 @@ test("buildOpportunityContextForPrompt: 缺 oneLineSummary / nextAction 时给�
   assert.ok(/暂无|请补充|待补充/.test(ctx), "缺字段应有中文兜底");
 });
 
+// ============== V0.3.11-hotfix 智能草稿与开工包质量 ==============
+
+test("V0.3.11-hotfix: 疑问句 question 时 opportunityName 不等于 question", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合，做一个把热点转成可拍选题的工具。MVP 可以用提示词和简单网页跑通。"
+  });
+  assert.notEqual(draft.opportunityName, "最近有什么适合独立开发者做的小型 AI 项目？", "疑问句不应直接当机会名");
+  assert.ok(draft.opportunityName && draft.opportunityName.length > 0, "应能从回答提炼出名字");
+  // 不应包含原问题关键词
+  assert.equal(/最近有什么适合独立开发者/.test(draft.opportunityName), false, "名字不应再带原问题片段");
+});
+
+test("V0.3.11-hotfix: 真实例子「我建议你先做一个 AI 短视频选题助手」→ 名字应是 'AI 短视频选题助手' 或类似", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手，方向是把近期 AI 趋势和你的能力结合。"
+  });
+  assert.ok(/短视频|选题/.test(draft.opportunityName), `名字应反映回答里的核心方向: ${draft.opportunityName}`);
+  // 不应含无意义前缀
+  for (const prefix of ["我建议你", "适合做", "可以先", "做一个", "建议先"]) {
+    assert.equal(draft.opportunityName.startsWith(prefix), false, `名字不应以"${prefix}"开头`);
+  }
+  // 长度合理
+  assert.ok(draft.opportunityName.length <= 24, `名字应 ≤ 24 字: ${draft.opportunityName.length}`);
+});
+
+test("V0.3.11-hotfix: 无法提炼明确机会时 opportunityName 为空并返回 draftWarning", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "最近有什么趋势？",
+    answer: "近期大模型更新比较快，多模态是热点。"
+  });
+  // 应为空 + draftWarning 提示
+  assert.equal(draft.opportunityName, "", "无法识别时 opportunityName 应为空字符串");
+  assert.ok(draft.draftWarning, "应有 draftWarning");
+  assert.ok(/手动|补充|没有识别|无法/.test(draft.draftWarning), `draftWarning 应含中文提示: ${draft.draftWarning}`);
+});
+
+test("V0.3.11-hotfix: weather / 通用问答时返回 draftWarning", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "今天天气怎么样",
+    answer: "今天多云转晴，最高温度 25 度。"
+  });
+  assert.equal(draft.opportunityName, "");
+  assert.ok(draft.draftWarning, "weather 类应给 draftWarning");
+});
+
+test("V0.3.11-hotfix: 多个候选产品时优先选第一个明确的产品名", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "给我点建议",
+    answer: "你可以做 AI 短视频选题助手，也可以做 AI 内容雷达。MVP 都用提示词跑通。"
+  });
+  assert.ok(/短视频|选题/.test(draft.opportunityName), `应选第一个明确产品: ${draft.opportunityName}`);
+});
+
+test("V0.3.11-hotfix: note ≤ 300 字且不等于 answer", () => {
+  const longAnswer = "推荐做 AI 短视频选题助手。" + "细节。".repeat(200);
+  const draft = deriveOpportunityDraftFromAnswer({ question: "q", answer: longAnswer });
+  assert.ok(draft.note.length <= 300, `note ≤ 300: ${draft.note.length}`);
+  assert.notEqual(draft.note, longAnswer);
+  // 不应含 markdown 标题符
+  assert.equal(/^#+\s/m.test(draft.note), false, "note 不应含 markdown 标题");
+});
+
+test("V0.3.11-hotfix: nextAction 包含可执行动词", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "我建议你先做一个 AI 短视频选题助手。"
+  });
+  assert.ok(draft.nextAction.length > 0);
+  assert.ok(/(做|写|跑|选|建|搭|上线|验证|测试|找|列|出|填|输入|输出|用|生成)/.test(draft.nextAction), `nextAction 应含动词: ${draft.nextAction}`);
+  // 不应只写"继续研究"
+  assert.notEqual(draft.nextAction, "继续研究");
+});
+
+test("V0.3.11-hotfix: oneLineSummary 不含 markdown / 不等于 question", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "我建议你先做一个 AI 短视频选题助手。"
+  });
+  assert.notEqual(draft.oneLineSummary, "最近有什么适合独立开发者做的小型 AI 项目？");
+  assert.equal(/^#+\s/m.test(draft.oneLineSummary), false);
+  assert.ok(draft.oneLineSummary.length <= 80, `≤ 80: ${draft.oneLineSummary.length}`);
+});
+
+test("V0.3.11-hotfix: 机会名称长时尝试压缩而非简单截断", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "我建议你做一个超级无敌的 AI 短视频选题助手工具平台产品系统。"
+  });
+  assert.ok(draft.opportunityName.length <= 24);
+  // 不应简单截断成半句（不应有"超级"等形容孤悬）
+  assert.equal(draft.opportunityName.includes("超级"), false, "不应留下孤悬形容词");
+});
+
+test("V0.3.11-hotfix: 移除无意义前缀 '我建议你'/'做一个' 等", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "我建议你先做一个面向独立开发者的 AI 内容雷达。"
+  });
+  for (const prefix of ["我建议你", "适合做", "一个面向", "面向"]) {
+    assert.equal(draft.opportunityName.startsWith(prefix), false);
+  }
+  assert.ok(draft.opportunityName.length > 0);
+});
+
+test("V0.3.11-hotfix: 提炼后含产品名后缀（助手/工具/平台）", () => {
+  const draft = deriveOpportunityDraftFromAnswer({
+    question: "q",
+    answer: "做 AI 短视频选题助手。MVP 用提示词和网页表单跑通。"
+  });
+  assert.ok(/(助手|工具|平台|雷达|简报|看板|生成器|工作流|日历|模板|系统|插件|agent|Agent|bot|Bot|OS|选题器|分析器|检查器|体检器)/.test(draft.opportunityName), `应含产品后缀: ${draft.opportunityName}`);
+});

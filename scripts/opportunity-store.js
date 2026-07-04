@@ -261,6 +261,80 @@ function sanitizeAnswerForDraft(text) {
   return value;
 }
 
+// V0.3.11-hotfix：判断 question 是否为"机会问题"
+const OPPORTUNITY_QUESTION_HINTS = /(做|做一个|想|试试|尝试|值得|能不能|想做一个|做点|做一个\s*X|做一个.*工具|做一个.*助手|做一个.*平台|做一个.*产品|做.*MVP|做.*验证|新项目|新机会|新方向|新工具|新流程|机会池|试试|先做|做一下|方向|建议)/;
+
+// V0.3.11-hotfix：产品名后缀白名单
+const PRODUCT_NAME_SUFFIXES = [
+  "助手", "工具", "平台", "雷达", "简报", "看板", "生成器", "工作流", "日历", "模板",
+  "系统", "OS", "插件", "插件库", "bot", "Bot", "agent", "Agent",
+  "MVP", "小工具", "选题器", "分析器", "检查器", "体检器", "生成机", "适配器", "调度器",
+  "小助手", "评分", "日报", "评估器", "解释器", "翻译器", "转写器"
+];
+
+// V0.3.11-hotfix：剥离无意义前缀（前缀 / 介词 / 句首套话）
+const NAME_PREFIXES_TO_STRIP = [
+  "我建议你先", "我建议你", "我建议", "建议你先", "建议你", "建议先",
+  "可以先", "可以试着", "适合做", "适合先", "可以做", "可以做一个",
+  "做一个面向", "做一个适合", "面向", "适合",
+  "做一个", "做一个最小", "做一个最小可行", "做一个最小可执行",
+  "先做一个", "试做一个", "可以试试做一个",
+  "今天可以", "当前可以", "最近可以",
+  "我看到", "我认为", "我的建议是", "我的建议",
+  "答案是", "结论是", "建议是",
+  "你可以", "你能", "请"
+];
+
+// V0.3.11-hotfix：判断 question 是不是疑问句 / 搜索请求句
+function isQuestionishQuestion(text) {
+  if (!text) return false;
+  const t = String(text);
+  // 1) 以问号结尾
+  if (/[？?]\s*$/.test(t)) return true;
+  // 2) 含疑问词
+  if (/(最近有什么|有什么|有没有|怎么|为什么|如何|是不是|能否|哪些|哪些是)/.test(t)) return true;
+  // 3) 是请求/搜索句
+  if (/(帮我|给我|给我点|请帮我|我想知道|我想了解|我想看|推荐下|推荐一些)/.test(t)) return true;
+  return false;
+}
+
+// V0.3.11-hotfix：从文本中抽取产品名（更严格的递归剥离）
+function extractProductNameFromText(text) {
+  if (!text) return "";
+  let t = String(text).trim();
+  // 1) 找所有候选（含产品后缀的最长短语）
+  const suffixPattern = PRODUCT_NAME_SUFFIXES.map(escapeRegex).join("|");
+  // 候选匹配："X 助手 / X 工具 / X Agent" 等；X 至少含 1 个中文字符
+  const candidateRegex = new RegExp(`([一-龥A-Za-z0-9 ·\\-_]{1,20}(?:${suffixPattern}))`, "g");
+  const candidates = [];
+  let m;
+  while ((m = candidateRegex.exec(t)) !== null) {
+    const cand = String(m[1] || "").trim();
+    if (cand.length < 3) continue;
+    candidates.push(cand);
+  }
+  if (candidates.length === 0) return "";
+  // 选最长（更精确的产品名）
+  candidates.sort((a, b) => b.length - a.length);
+  let best = candidates[0];
+  // 2) 剥离前缀
+  for (const pfx of NAME_PREFIXES_TO_STRIP) {
+    if (best.startsWith(pfx)) {
+      best = best.slice(pfx.length).trim();
+    }
+  }
+  // 3) 去掉无意义的"一个"
+  if (best.startsWith("一个")) best = best.slice(2).trim();
+  if (best.startsWith("一种")) best = best.slice(2).trim();
+  // 4) 长度控制
+  if (best.length > 24) best = best.slice(0, 24);
+  return best.replace(/\s+/g, " ").trim();
+}
+
+function escapeRegex(s) {
+  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function deriveOpportunityDraftFromAnswer({
   question = "",
   answer = "",
@@ -282,39 +356,108 @@ function deriveOpportunityDraftFromAnswer({
     };
   }).filter((u) => u.title || u.url) : [];
 
+  // ---- 0) 启发式判断 question 类型 ----
+  // - question 是疑问句/搜索句/请求句 → 不能直接当机会名
+  // - question 不含"做/想/试试/值得/MVP/工具/助手/选题..."等机会信号 → 视为"非机会"
+  const looksLikeOpportunity = OPPORTUNITY_QUESTION_HINTS.test(a) || OPPORTUNITY_QUESTION_HINTS.test(q);
+  const questionIsQuestionish = isQuestionishQuestion(q);
+
+  // 拆句辅助
+  const splitSentences = (text) => String(text || "")
+    .split(/[\n。！？!?]/)
+    .map((s) => String(s || "").trim())
+    .filter((s) => s.length >= 4);
+
   // ---- 1) 提炼 opportunityName ----
-  // 优先从 answer 第一句里抽取"做/做一个/做一个 X"的关键短语
+  // 策略：从 answer 中抽取产品名（带后缀），失败再尝试从 question 抽取，
+  // 最后从 answer 第一句中按动词短语提取。**绝不**直接拿 question 当 opportunityName。
   let name = "";
-  const firstSentence = a.split(/[\n。！？!]/).map((s) => s.trim()).find((s) => s.length >= 4) || "";
-  // 模式 1: 显式产品 / 工具名
-  //  - "AI 短视频选题助手"、"短视频选题工具"、"ESP32 墨水屏日历"
-  const productNameMatch = a.match(/([一-龥A-Za-z0-9 ]{2,24}(?:助手|工具|平台|产品|机器人|机器人|系统|工作流|工作台|服务|网站|小程序|插件|模板|模板|技能|技能库|看板|代理|机器人|日历|选题|日历))/);
-  if (productNameMatch) name = productNameMatch[1].trim();
-  // 模式 2: 短句压缩
+  // 1a) 从 answer 整体中抽取最长的产品名候选
+  name = extractProductNameFromText(a);
+  // 1b) 拆句后再从首句抽取
   if (!name) {
-    const doMatch = firstSentence.match(/(?:做|做一个|做一个最小|做一个\s*MVP|做\s*MVP|尝试做|做\s*)([一-龥A-Za-z0-9 ·\-]{2,30})/);
-    if (doMatch) name = doMatch[1].trim();
+    const sentences = splitSentences(a);
+    for (const s of sentences.slice(0, 3)) {
+      const cand = extractProductNameFromText(s);
+      if (cand && cand.length >= 3) { name = cand; break; }
+    }
   }
-  // 模式 3: 从 question 里抽取
-  if (!name && q) {
-    const qMatch = q.match(/([一-龥A-Za-z0-9 ·\-]{2,30}(?:工具|助手|平台|产品|项目|方向|机会|主题|选题))/);
-    if (qMatch) name = qMatch[1].trim();
+  // 1c) 从 question 中抽取（仅当 question 不像疑问句时）
+  if (!name && !questionIsQuestionish) {
+    name = extractProductNameFromText(q);
   }
-  // 兜底：从 question 截取到 24 字
+  // 1d) 兜底：从 answer 第一句找"做 X"短语
   if (!name) {
-    name = q ? q.replace(/[？?！!。.,，、；;：:]+$/g, "").slice(0, 24) : "";
+    const sentences = splitSentences(a);
+    for (const s of sentences) {
+      const doMatch = s.match(/(?:做|做一个|做一个最小|做一个\s*MVP|做\s*MVP|尝试做|做\s*)([一-龥A-Za-z0-9 ·\-]{2,30})/);
+      if (doMatch) {
+        let cand = doMatch[1].trim();
+        for (const pfx of NAME_PREFIXES_TO_STRIP) {
+          if (cand.startsWith(pfx)) cand = cand.slice(pfx.length).trim();
+        }
+        if (cand && cand.length >= 2) { name = cand.slice(0, 24); break; }
+      }
+    }
   }
-  // 长度裁剪：≤ 24 字
-  name = name.replace(/\s+/g, " ").trim().slice(0, 24);
-  // ---- 0.5) 检测是否真的像"机会"上下文 ----
-  // 如果问题/回答里都不含"项目/做/工具/助手/选题/MVP/想法/方向/趋势/可做/值得做"等信号，
-  // 那么原始问题/回答很可能不是机会，应当给出中文兜底。
-  const opportunitySignal = /(项目|工具|助手|选题|平台|产品|方向|趋势|想法|MVP|值得做|做\s*一个|尝试|验证|可做|可变现|短视频|内容|博客|写|做一个)/;
-  const looksLikeOpportunity = opportunitySignal.test(a) || opportunitySignal.test(q);
-  if (!looksLikeOpportunity) {
+  // 1e) 最终：仍抽不到 → opportunityName 为空 + draftWarning
+  if (!name) {
     return {
-      opportunityName: "没有识别到明确机会，请手动补充名称。",
-      oneLineSummary: "当前问题/回答里没有明显项目机会线索。建议：换一个更具体的问题，或者在下面手动填写。",
+      opportunityName: "",
+      draftWarning: "没有识别到明确机会，请补充机会名称。",
+      oneLineSummary: "当前问题/回答里没有明显项目机会线索。建议：换个更具体的问题，或者在下面手动填写机会名称。",
+      note: "暂无备注。",
+      nextAction: "先把问题改成「我想做一个 X 工具/项目」这种明确意图，再加入机会池。",
+      suggestedTags: ["需要调研"],
+      status: "validate",
+      type: "new-project-opportunity",
+      source: hasSearch ? "search" : "ask-mode",
+      sourceQuestion: q.slice(0, 1000),
+      sourceAnswerSummary: summarizeAnswer(a, 600),
+      sourceUrls: safeSources
+    };
+  }
+
+  // 1f) 二次保护：如果 name 与 question 完全相同 → 视为"提炼失败"
+  if (name === q || name === question) {
+    return {
+      opportunityName: "",
+      draftWarning: "没有识别到明确机会，请补充机会名称。",
+      oneLineSummary: "当前问题/回答里没有明显项目机会线索。建议：换个更具体的问题，或者在下面手动填写机会名称。",
+      note: "暂无备注。",
+      nextAction: "先把问题改成「我想做一个 X 工具/项目」这种明确意图，再加入机会池。",
+      suggestedTags: ["需要调研"],
+      status: "validate",
+      type: "new-project-opportunity",
+      source: hasSearch ? "search" : "ask-mode",
+      sourceQuestion: q.slice(0, 1000),
+      sourceAnswerSummary: summarizeAnswer(a, 600),
+      sourceUrls: safeSources
+    };
+  }
+
+  // 1g) 长度控制：≤ 24 字
+  if (name.length > 24) {
+    // 智能压缩：优先保留"X 助手 / X 工具"等后缀
+    const suffixed = extractProductNameFromText(name);
+    if (suffixed && suffixed.length <= 24 && suffixed.length >= 3) {
+      name = suffixed;
+    } else {
+      name = name.slice(0, 24);
+    }
+  }
+  name = name.replace(/\s+/g, " ").trim();
+  // 1g2) 移除孤悬形容词（如"超级无敌的"前置的修饰），保留核心名+后缀
+  const ORPHAN_ADJECTIVES = /^(超级|无敌|最强|最佳|超棒|完美|高级|非常|特别|极其|重要|核心|关键|主要|基础|标准|通用|简化|快速|简单|高级|专业|轻量|极简|迷你|小型|新型|多模态|跨平台|可视化|智能)\s*[的]?\s*/;
+  name = name.replace(ORPHAN_ADJECTIVES, "");
+  // 1g3) 移除以"的"开头或结尾的孤立字符
+  name = name.replace(/^的\s*/, "").replace(/\s*的$/, "").trim();
+  // 1h) 如果是 weather 类回答（不强机会信号），也给兜底
+  if (!looksLikeOpportunity && !questionIsQuestionish) {
+    return {
+      opportunityName: "",
+      draftWarning: "当前问题/回答不像项目机会描述，请补充机会名称。",
+      oneLineSummary: "当前问题/回答里没有明显项目机会线索。",
       note: "暂无备注。",
       nextAction: "先在问题里补充「我想做一个 X 工具/项目」等明确意图，再加入机会池。",
       suggestedTags: ["需要调研"],
@@ -326,33 +469,49 @@ function deriveOpportunityDraftFromAnswer({
       sourceUrls: safeSources
     };
   }
-  if (!name) {
-    name = "未命名机会（请手动补充名称）";
-  }
 
   // ---- 2) oneLineSummary ----
-  // 从 answer 里挑出首句或"它/这个 X"开头的一句话
+  // 策略：从 answer 中找"它 / 这个 / X 工具是 / X 是..."的产品定义句；
+  // 找不到则用"基于 answer 提炼的产品定位句"作为兜底。
+  const firstSentence = splitSentences(a)[0] || "";
   let oneLineSummary = "";
-  if (firstSentence) {
-    oneLineSummary = firstSentence.replace(/^(我|我们|现在|让我|可以的|可以的，|我建议|我推荐|我看到|可以的，)/, "").trim();
+  // 2a) 找产品定义句
+  const defRegex = /([一-龥A-Za-z0-9 ·\-]{2,40}(?:助手|工具|平台|雷达|简报|看板|生成器|工作流|系统|OS|插件|bot|Bot|agent|Agent|MVP|选题器|分析器|检查器|体检器))(?:是|为|能|可以|用于|用来|帮你|帮助|旨在|核心|主要)([^。\n!?！？]{4,80})/;
+  const defMatch = a.match(defRegex);
+  if (defMatch) {
+    oneLineSummary = `${defMatch[1].trim()}${defMatch[2].trim().slice(0, 50)}。`;
+  }
+  // 2b) 否则去掉无意义前缀 + 截到 80 字
+  if (!oneLineSummary && firstSentence) {
+    oneLineSummary = firstSentence;
+    for (const pfx of NAME_PREFIXES_TO_STRIP) {
+      if (oneLineSummary.startsWith(pfx)) oneLineSummary = oneLineSummary.slice(pfx.length).trim();
+    }
+    // 去掉句首"答：" / "结论：" 等
+    oneLineSummary = oneLineSummary.replace(/^(答[：:]|结论[：:]|回答[：:]|答案是[：:]?)/, "").trim();
     if (oneLineSummary.length > 80) oneLineSummary = oneLineSummary.slice(0, 80);
   }
+  // 2c) 兜底：基于 name 拼一句产品定位
   if (!oneLineSummary) {
-    // 用 answer 前 80 字
-    oneLineSummary = a.replace(/\s+/g, " ").slice(0, 80);
+    oneLineSummary = `一个面向独立开发者的「${name}」，把回答中的核心方向沉淀为可执行项目。`;
   }
-  // 一句话以标点收尾
   if (oneLineSummary && !/[。.！!？?]$/.test(oneLineSummary)) {
     oneLineSummary = `${oneLineSummary}。`;
   }
-  if (!oneLineSummary) oneLineSummary = "暂无一句话说明，建议补充这个机会是什么。";
+  if (oneLineSummary.length > 80) oneLineSummary = oneLineSummary.slice(0, 80);
 
   // ---- 3) note: 精炼备注（不复制整段 answer）----
-  // 策略：从 answer 中提炼 2-4 个关键短句（每句 ≤ 30 字），用换行分隔；总长 ≤ 300 字
+  // 策略：从 answer 中提炼 2-4 个关键短句（每句 ≤ 60 字，去前缀），用换行分隔；总长 ≤ 300 字
   const keySentences = [];
   const seen = new Set();
-  for (const raw of a.split(/[\n。！？!]/)) {
-    const s = String(raw || "").trim();
+  for (const raw of splitSentences(a)) {
+    let s = raw;
+    // 去前缀
+    for (const pfx of NAME_PREFIXES_TO_STRIP) {
+      if (s.startsWith(pfx)) s = s.slice(pfx.length).trim();
+    }
+    // 去掉 markdown 标题
+    s = s.replace(/^#+\s*/, "").trim();
     if (s.length < 6) continue;
     const norm = s.slice(0, 30);
     if (seen.has(norm)) continue;
@@ -362,25 +521,39 @@ function deriveOpportunityDraftFromAnswer({
   }
   let note = keySentences.join("\n");
   if (note.length > 300) note = note.slice(0, 300);
+  if (!note) note = `基于「${name}」机会的简要说明，建议补充"为什么值得关注 / 当前不确定点"。`;
 
-  // ---- 4) nextAction: 找一个"做 X"开头的可执行句 ----
+  // ---- 4) nextAction: 找一个可执行动作 ----
   let nextAction = "";
-  // 模式 1: "做一个最小..." / "先做 X" / "MVP 步骤..."
-  const actionMatch = a.match(/(?:做一个|做一个最小|做一个\s*MVP|先做|第一步|验证|MVP[：:]|MVP\s*步骤|可以|先跑通|做一个\s*最小可执行)([^。\n!?！？]{4,80})/);
+  // 4a) 找含动词+宾语的具体短句（短匹配，避免贪婪）
+  // 用 [\s\S]{0,30}? 配合非贪婪 + 短上限，避免吞掉整段
+  const actionRegex = /(用\s*[\s\S]{0,30}?\s*跑通|用\s*[\s\S]{0,30}?\s*验证|做\s*[\s\S]{0,30}?\s*最小\s*[\s\S]{0,12}?(?:页面|网页|流程|提示词|MVP)|先做\s*[\s\S]{0,12}?(?=[，。！？\n])|MVP\s*[：:]\s*[\s\S]{0,40}?(?=[，。！？\n]))/;
+  const actionMatch = a.match(actionRegex);
   if (actionMatch) {
-    nextAction = actionMatch[0].replace(/^。|^，|^、|^：/, "").trim();
+    nextAction = actionMatch[0].trim();
   }
-  // 模式 2: 找包含动词的首句
-  if (!nextAction && firstSentence) {
-    if (/(做|写|跑|选|建|搭|上线|验证|测试|找|画|列|出|填|输入|输出)/.test(firstSentence)) {
-      nextAction = firstSentence.slice(0, 80);
+  // 4b) 否则找"做/写/搭/跑/验证/找/出"开头的句
+  if (!nextAction) {
+    for (const s of splitSentences(a)) {
+      if (/^(做|写|搭|跑|验证|找|出|列|搭一个|写一个|做一个|建一个|上线|填|输入|输出|用)/.test(s)) {
+        nextAction = s.slice(0, 200);
+        break;
+      }
     }
   }
+  // 4c) 基于 name 推断一个最小验证动作
   if (!nextAction) {
-    // 兜底：基于类型给一个通用动作
-    nextAction = "先列一个最小 MVP 范围，写 3-5 条下一步动作。";
+    nextAction = `用 1-2 天做一个最小${name}验证：跑通核心 1 个动作 + 1 个判定指标。`;
+  }
+  // 4d) 清理：去前缀
+  for (const pfx of NAME_PREFIXES_TO_STRIP) {
+    if (nextAction.startsWith(pfx)) nextAction = nextAction.slice(pfx.length).trim();
   }
   if (nextAction.length > 500) nextAction = nextAction.slice(0, 500);
+  // 兜底动词检查
+  if (!/(做|写|跑|选|建|搭|上线|验证|测试|找|列|出|填|输入|输出|用|生成)/.test(nextAction)) {
+    nextAction = `先用 1 天做一个最小${name}验证。`;
+  }
 
   // ---- 5) suggestedTags: 从 answer 关键词推断 PRESET_TAGS ----
   const tagHints = {
@@ -395,9 +568,9 @@ function deriveOpportunityDraftFromAnswer({
     "个人 OS": /(个人\s*OS|战略\s*OS|操作系统|个人系统)/,
     "OPC": /OPC|one\s*person|单兵|一人公司/,
     "需要调研": /(调研|考察|研究|看看|了解)/,
-    "可快速验证": /(MVP|可快速|快速验证|原型|快速跑通|先做最小)/,
+    "可快速验证": /(MVP|可快速|快速验证|原型|快速跑通|先做最小|最小验证)/,
     "暂缓": /(暂缓|晚点|不急|之后|延后)/,
-    "高潜力": /(高潜力|潜力大|很值得|值得做|值得做|值得做)/,
+    "高潜力": /(高潜力|潜力大|很值得|值得做)/,
     "噪声较大": /(噪声|噪音|不稳定|风险)/,
   };
   const suggestedTags = [];
@@ -408,7 +581,6 @@ function deriveOpportunityDraftFromAnswer({
     }
   }
   if (suggestedTags.length === 0) {
-    // 至少给一个兜底
     suggestedTags.push("需要调研");
   }
 
@@ -417,9 +589,10 @@ function deriveOpportunityDraftFromAnswer({
 
   return {
     opportunityName: name,
-    oneLineSummary: oneLineSummary.slice(0, 300),
-    note: note || "暂无备注。",
-    nextAction: nextAction || "先列一个最小 MVP 范围。",
+    draftWarning: null,
+    oneLineSummary: oneLineSummary.slice(0, 80),
+    note,
+    nextAction,
     suggestedTags,
     status: "validate",
     type: "new-project-opportunity",

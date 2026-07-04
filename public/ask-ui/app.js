@@ -679,6 +679,38 @@ function buildAddOpportunityFormMarkup({
     sourceAnswerSummary: "",
     sourceUrls: sourceUrls
   };
+  // V0.3.11-hotfix：前端二次保护
+  // 1) 如果 opportunityName 与 question 几乎一样 → 清空 + 警告
+  // 2) 如果 opportunityName 含"我建议你 / 适合做 / 一个面向"等前缀 → 清空 + 警告
+  // 3) draftWarning 已存在时，强制清空 opportunityName
+  const titleMatchesQuestion = (title, q) => {
+    if (!title || !q) return false;
+    const norm = (s) => String(s).replace(/[\s，。、？！；：,.\?!;:]/g, "").toLowerCase();
+    const t = norm(title);
+    const qq = norm(q);
+    if (!t || !qq) return false;
+    if (t === qq) return true;
+    // title 是 question 的子串（含去标点后）
+    if (qq.includes(t) && t.length >= 4) return true;
+    if (t.includes(qq) && qq.length >= 4) return true;
+    return false;
+  };
+  const hasUselessPrefix = (title) => {
+    if (!title) return false;
+    return /^(我建议你|我建议|建议你|适合做|可以做|可以先|先做|做一个|一个面向|面向|最近|今天|当前|有没有|帮我)/.test(String(title).trim());
+  };
+  let protectedName = d.opportunityName || "";
+  let formWarning = null;
+  if (d.draftWarning) {
+    protectedName = "";
+    formWarning = d.draftWarning;
+  } else if (titleMatchesQuestion(protectedName, safeQuestion)) {
+    formWarning = "没有识别到明确机会，请补充机会名称。";
+    protectedName = "";
+  } else if (hasUselessPrefix(protectedName)) {
+    formWarning = "没有识别到明确机会，请补充机会名称。";
+    protectedName = "";
+  }
   const statusOptions = Object.entries(OPPORTUNITY_STATUS_LABELS)
     .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === (d.status || "validate") ? " selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
@@ -706,8 +738,9 @@ function buildAddOpportunityFormMarkup({
       ${sourceBadge}
     </div>
     <p class="opportunity-add-hint">已根据本次回答自动提炼机会卡草稿，请确认或修改后再保存。</p>
+    ${formWarning ? `<p class="opportunity-add-warning" role="alert" data-op-add-warning>${escapeHtml(formWarning)}</p>` : ""}
     <label>机会名称（必填）
-      <input name="title" data-op-add-title placeholder="请填写机会名称" value="${escapeHtml(d.opportunityName || "")}" required maxlength="200" />
+      <input name="title" data-op-add-title placeholder="请填写机会名称" value="${escapeHtml(protectedName)}" required maxlength="200" />
     </label>
     <label>一句话说明
       <input name="oneLineSummary" data-op-add-one-line placeholder="这个机会是什么" value="${escapeHtml(d.oneLineSummary || "")}" maxlength="300" />

@@ -617,9 +617,12 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   lines.push("9. 风险与卡点");
   lines.push("10. 下一步提示词草稿");
   lines.push("");
-  lines.push("要求：");
+  lines.push("【硬约束 V0.3.11-hotfix】");
+  lines.push("- 不要用「信息不足」替代生成。即使信息不完整，也必须输出可执行的保守版开工包。");
+  lines.push("- 每个小节必须给出具体内容，可以标注「暂定 / 推断 / 保守判断」，但不允许整节只说「信息不足」。");
+  lines.push("- 「风险与卡点」必须主动生成至少 3 条具体风险，不能等用户自己罗列。");
+  lines.push("- 「目标用户」、「最小 MVP」、「第一版功能边界」即使信息不足，也要基于机会名/标签/备注做「暂定推断」并写明是推断。");
   lines.push("- 内容必须基于上面机会卡数据生成，不要凭空发明数据。");
-  lines.push("- 数据不足的小节，明确写「信息不足，建议补充 X」。");
   lines.push("- 严格中文输出，不调用任何外部智能体，不真的去执行项目。");
   return lines.join("\n");
 }
@@ -633,7 +636,9 @@ function readKickoffSystemPrompt() {
     "约束：",
     "- 严格中文输出。",
     "- 不要真的执行项目、不要模拟调用任何外部 Agent / API。",
-    "- 不要发明数据：信息不足的地方明确说「信息不足」。",
+    "- V0.3.11-hotfix 硬约束：不要用「信息不足」替代生成。每个小节必须给出具体内容。信息不足时用「暂定 / 推断」给出保守判断。",
+    "- 风险与卡点必须主动生成至少 3 条具体风险（基于机会名/标签/类型推断）。",
+    "- 目标用户、目标 MVP、目标边界即使不确定，也要基于机会名/标签做暂定推断。",
     "- 不要泄露任何 API Key / 内部配置。",
     "- 不要使用 markdown 标题 # / ##，用 1./2. 数字小节即可。",
     "- 不要把「项目」当成「机会」：开工包针对一个具体可执行项目。",
@@ -652,6 +657,10 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   const safeNote = sanitize(note);
   const safeNext = sanitize(next);
   const safeQuestion = sanitize(sourceQuestion);
+  const safeTags = (tags || []).map(sanitize);
+  // V0.3.11-hotfix：根据 name + tags + note 推断目标用户、MVP、边界、风险
+  const inferred = inferKickoffFields({ name: safeName, oneLine: safeOneLine, note: safeNote, next: safeNext, tags: safeTags });
+
   const lines = [];
   lines.push(`# 开工包：${safeName}`);
   lines.push("");
@@ -659,33 +668,31 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   lines.push(safeOneLine || `基于「${safeName}」机会的最小可执行项目。`);
   lines.push("");
   lines.push("2. 为什么值得做");
-  if (note) {
+  if (safeNote) {
     lines.push(safeNote.slice(0, 300));
   } else {
-    lines.push("信息不足，建议补充这个方向为什么值得做。");
+    lines.push(inferred.why);
   }
   lines.push("");
   lines.push("3. 目标用户");
-  lines.push("信息不足，建议补充：谁会用、为什么现在用、为什么不选替代品。");
+  lines.push(inferred.targetUsers);
   lines.push("");
   lines.push("4. 最小 MVP");
-  if (next) {
+  if (safeNext) {
     lines.push(safeNext.slice(0, 200));
   } else {
-    lines.push("信息不足，建议补充：先做哪 1-2 个最小动作验证假设。");
+    lines.push(inferred.mvp);
   }
   lines.push("");
   lines.push("5. 第一版功能边界");
-  if (tags.length) {
-    lines.push(`围绕标签 [${tags.map(sanitize).join("、")}] 圈定核心功能，不做无关特性。`);
-  } else {
-    lines.push("信息不足，建议补充：第一版只做哪 3 个功能，其余都标记为 V2。");
-  }
+  lines.push(inferred.scope);
   lines.push("");
   lines.push("6. 不要做什么");
   lines.push("- 不做账号系统。");
   lines.push("- 不做完整产品，先做最小验证。");
   lines.push("- 不直接派发外部 Agent / 智能体。");
+  lines.push("- 不花时间打磨 UI，先验证假设。");
+  lines.push("- 不接入付费数据源，第一版只用免费/已有数据。");
   lines.push("");
   lines.push("7. 推荐执行工具");
   lines.push("GPT 5.5 Thinking（总控判断）+ Codex（代码/脚本）+ 普通浏览器/LibreOffice（人工记录）。");
@@ -694,15 +701,18 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   lines.push("- Step 1：写一份 1 页验证计划（含假设、动作、判定标准）。");
   lines.push("- Step 2：花 1-2 天执行最小动作。");
   lines.push("- Step 3：收集反馈，决定继续 / 暂停 / 放弃。");
+  lines.push("- 判定标准：能不能在 3-5 天内被 EricChan 实际用起来。");
   lines.push("");
   lines.push("9. 风险与卡点");
-  if (sourceQuestion) {
-    lines.push(`原始问题：${safeQuestion.slice(0, 200)}`);
+  if (safeQuestion) {
+    lines.push(`- 原始问题方向：${safeQuestion.slice(0, 120)}`);
   }
-  lines.push("信息不足，建议补充：已知卡点 / 假设风险 / 缓解方式。");
+  for (const r of inferred.risks) {
+    lines.push(`- ${r}`);
+  }
   lines.push("");
   lines.push("10. 下一步提示词草稿");
-  if (sourceQuestion) {
+  if (safeQuestion) {
     lines.push(`基于"${safeName}"这个机会，帮我做：${safeQuestion.slice(0, 100)}`);
   } else {
     lines.push(`帮我把"${safeName}"拆成 3 个可执行的下一步动作。`);
@@ -710,7 +720,94 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   return lines.join("\n");
 }
 
+// V0.3.11-hotfix：基于 name / oneLine / note / tags 主动推断开工包字段
+// 策略：每节都给出"暂定 / 推断"的具体内容，绝不写"信息不足"占位
+function inferKickoffFields({ name = "", oneLine = "", note = "", next = "", tags = [] } = {}) {
+  const nm = String(name || "").trim();
+  const ol = String(oneLine || "").trim();
+  const tagList = Array.isArray(tags) ? tags : [];
+  const tagText = tagList.length ? tagList.join("、") : "";
+  // ---- 1) 目标用户 ----
+  // 根据 name / oneLine 推断
+  const userKeywords = [
+    { rx: /短视频|选题|口播|博主|创作者|IP|内容/, user: "短视频创作者、个人 IP、内容运营、想做 AI 内容变现的独立创作者" },
+    { rx: /写作|博客|文章|笔记/, user: "个人写作者、博客主、知识工作者、想做内容沉淀的独立创作者" },
+    { rx: /大模型|LLM|GPT|Claude|Agent|智能体/, user: "AI 开发者、Agent 工具使用者、想把 AI 工作流化的产品 / 运营 / 工程师" },
+    { rx: /自动化|workflow|工作流|批处理/, user: "运营、产品、独立开发者，希望把重复任务自动化的人" },
+    { rx: /前端|UI|设计|视觉|动效|网站/, user: "前端工程师、设计师、想用 AI 提效视觉/交互产出的人" },
+    { rx: /编程|IDE|代码|debug|开发工具/, user: "独立开发者、小团队工程师、想加速开发流程的人" },
+    { rx: /个人\s*OS|战略\s*OS|操作系统|个人系统|OPC/, user: "EricChan 本人 + 想做个人 OS / OPC 系统的独立开发者" },
+    { rx: /可变现|付费|订阅|商业化|变现/, user: "愿意为小工具付费的早期用户 + 想做小本生意的独立开发者" },
+    { rx: /调研|看趋势|方向|趋势|雷达/, user: "产品 / 战略 / 投资方向上需要做信息汇总的人" }
+  ];
+  let targetUsers = "";
+  for (const { rx, user } of userKeywords) {
+    if (rx.test(nm) || rx.test(ol) || rx.test(note) || tagList.some((t) => rx.test(String(t || "")))) {
+      targetUsers = `暂定目标用户：${user}。在信息不足时，先假设这批人会先尝试，他们的需求代表第一版功能边界。`;
+      break;
+    }
+  }
+  if (!targetUsers) {
+    targetUsers = `暂定目标用户：与「${nm}」方向最相关的早期独立用户（暂定为想用 AI 提效某重复动作的独立开发者 / 内容创作者 / 小团队成员）。第一版可先服务这 1-2 类用户，跑通后再扩展。`;
+  }
+
+  // ---- 2) 最小 MVP ----
+  let mvp = "";
+  if (next) {
+    mvp = `基于 next 描述推断：${next}。MVP 形式：单页表单 / 命令行 / 提示词模板 + 1 个最简输出。第一版不要做完整产品，先把这 1 个动作跑通 + 收集 3-5 个真实用户反馈。`;
+  } else {
+    mvp = `暂定 MVP：一个最小「输入 → 输出」流程。例如：\n- 输入：用户填 1-2 个字段（方向 / 目标平台 / 个人能力）\n- 输出：5 条候选结果 + 标题 + 简要说明\n- 形式：单页 HTML 表单 + 提示词后端（Node / Python）\n- 验证：3-5 个真实用户用一次，决定继续 / 改方向 / 放弃`;
+  }
+
+  // ---- 3) 第一版功能边界 ----
+  let scope = "";
+  if (tagText) {
+    scope = `围绕标签 [${tagText}] 圈定核心功能。第一版只做一件事：把核心 1-2 个动作跑通。`;
+  } else {
+    scope = "暂定第一版功能：\n- 核心：1 个端到端流程（输入 → 输出 → 用户复制使用）\n- 暂不做：账号系统、付费、用户系统、复杂 UI\n- 第一版不做 V2 的：批量处理、多角色协作、API 化\n- 验证假设：用户愿不愿意复制 / 收藏 / 二次使用这个输出";
+  }
+
+  // ---- 4) 风险与卡点（至少 4 条）----
+  const baseRisks = [
+    `需求过宽，容易做成"什么都能做"的泛工具，迷失焦点`,
+    `数据来源 / 搜索质量不稳定，可能导致输出质量波动`,
+    `用户是否愿意付费 / 二次使用未知，第一版只能验证"白嫖是否愿意用"`,
+    `MVP 容易演变成"内容生成玩具"，需要尽快接到真实工作流`,
+    `需要先验证单一场景：哪个具体用户 / 具体痛点是真的`
+  ];
+  // 拼接 name 相关的额外风险
+  const extraRisks = [];
+  if (nm) {
+    extraRisks.push(`项目名「${nm}」的边界在第一版可能模糊，要先写 1 段"不是 X"的反例，避免范围蔓延`);
+  }
+  if (/AI|Agent|智能体|工作流|自动化/.test(nm + ol + tagText)) {
+    extraRisks.push("AI 输出可能不稳定，要准备「用户反馈兜底 / 退化为模板」的退化方案");
+    extraRisks.push("避免一开始做复杂账号系统；先单设备 / 浏览器侧跑通");
+  }
+  if (/内容|写作|选题|博客/.test(nm + ol + tagText)) {
+    extraRisks.push("内容质量主观性强，需要快速收集 3-5 个目标用户的真实反馈");
+    extraRisks.push("避免做内容生成玩具：用户可能用一次就走，要接进真实工作流");
+  }
+  if (/编程|工具|IDE|开发/.test(nm + ol + tagText)) {
+    extraRisks.push("开发工具迁移成本高，用户粘性来自「用顺手」，要尽早让 EricChan 自己用上");
+  }
+  // 取 4-5 条
+  const risks = [...baseRisks, ...extraRisks].slice(0, 5);
+
+  // ---- 5) why ----
+  let why = "";
+  if (note) {
+    why = `基于备注推断：${String(note).slice(0, 200)}。暂定判断：当前信息虽不完整，但「${nm}」方向对独立开发者 / 内容创作者是值得先做最小验证的。`;
+  } else {
+    why = `暂定判断：当前信息有限，但「${nm}」方向属于独立开发者可快速验证的范围。建议先花 1-2 天跑通核心 1 个动作，再决定是否继续投入。`;
+  }
+
+  return { targetUsers, mvp, scope, risks, why };
+}
+
 function buildSparseKickoff({ name, sourceQuestion }) {
+  // V0.3.11-hotfix：信息稀疏时也用 inferKickoffFields 推断每节具体内容
+  const inferred = inferKickoffFields({ name, oneLine: "", note: "", next: "", tags: [] });
   const lines = [];
   lines.push(`# 开工包：${name}（保守版）`);
   lines.push("");
@@ -718,21 +815,23 @@ function buildSparseKickoff({ name, sourceQuestion }) {
   lines.push(`基于「${name}」机会的最小可执行项目。`);
   lines.push("");
   lines.push("2. 为什么值得做");
-  lines.push("信息不足，建议补充这个方向为什么值得做。");
+  lines.push(inferred.why);
   lines.push("");
   lines.push("3. 目标用户");
-  lines.push("信息不足，建议补充：谁会用、为什么现在用。");
+  lines.push(inferred.targetUsers);
   lines.push("");
   lines.push("4. 最小 MVP");
-  lines.push("信息不足，建议先做一个最小页面 / 提示词流程。");
+  lines.push(inferred.mvp);
   lines.push("");
   lines.push("5. 第一版功能边界");
-  lines.push("信息不足，建议补充：第一版只做哪 3 个功能。");
+  lines.push(inferred.scope);
   lines.push("");
   lines.push("6. 不要做什么");
   lines.push("- 不做账号系统。");
   lines.push("- 不做完整产品。");
   lines.push("- 不直接派发 Agent。");
+  lines.push("- 不花时间打磨 UI，先验证假设。");
+  lines.push("- 不接入付费数据源，第一版只用免费/已有数据。");
   lines.push("");
   lines.push("7. 推荐执行工具");
   lines.push("GPT 5.5 Thinking（总控）+ Codex（执行）+ 浏览器（人工记录）。");
@@ -740,10 +839,13 @@ function buildSparseKickoff({ name, sourceQuestion }) {
   lines.push("8. 第一轮验证路径");
   lines.push("- Step 1：写一份 1 页验证计划。");
   lines.push("- Step 2：花 1-2 天执行最小动作。");
+  lines.push("- Step 3：收集 3-5 个真实用户反馈，决定继续 / 暂停 / 放弃。");
   lines.push("");
   lines.push("9. 风险与卡点");
-  if (sourceQuestion) lines.push(`原始问题：${sourceQuestion.slice(0, 200)}`);
-  lines.push("信息不足。");
+  if (sourceQuestion) lines.push(`- 原始问题方向：${sourceQuestion.slice(0, 120)}`);
+  for (const r of inferred.risks) {
+    lines.push(`- ${r}`);
+  }
   lines.push("");
   lines.push("10. 下一步提示词草稿");
   lines.push(`帮我把"${name}"拆成 3 个可执行的下一步动作。`);
