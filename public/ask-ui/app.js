@@ -189,6 +189,7 @@ function createHistoryStore({ storage, maxSize = DEFAULT_HISTORY_MAX } = {}) {
 function buildClipboardPayload({ answer, _question } = {}) {
   const text = typeof answer === "string" ? answer : "";
   // 注意：不要返回 HTML，只返回 Markdown 纯文本。
+  // V0.3.6：明确忽略 searchSources / 任何外部结构，避免 raw JSON 进剪贴板。
   return { text, format: "text/markdown" };
 }
 
@@ -206,6 +207,102 @@ async function handleCopyClick({ answer, clipboardImpl } = {}) {
   } catch (error) {
     return { ok: false, message: "复制失败，请手动选择文本。" };
   }
+}
+
+// ============== Search sources panel (V0.3.6) ==============
+//
+// 纯函数：把 search.sources 渲染成轻量 HTML 字符串。
+// - 空数组 / 非数组：返回空字符串（不渲染空来源框）。
+// - 只保留前 5 条。
+// - 所有用户字段都做 HTML escape，避免 XSS。
+// - url 必须是 http(s) 协议且 host 不为 localhost / 127.* / 0.0.0.0 才允许 <a target="_blank">；
+//   否则只显示文本，避免把内部 URL 误开放成外链。
+// - 容器默认带 class "search-sources"，可被覆盖。
+
+const SAFE_EXTERNAL_PROTOCOLS = ["http:", "https:"];
+const BLOCKED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"];
+
+function isSafeExternalUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!SAFE_EXTERNAL_PROTOCOLS.includes(parsed.protocol)) return false;
+  if (BLOCKED_HOSTS.includes(parsed.hostname)) return false;
+  return true;
+}
+
+function pickTitle(item) {
+  return typeof item?.title === "string" ? item.title : "";
+}
+
+function pickSourceLabel(item) {
+  if (typeof item?.source === "string" && item.source.trim()) return item.source;
+  if (typeof item?.url === "string" && item.url) {
+    try {
+      return new URL(item.url).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function pickUrl(item) {
+  return typeof item?.url === "string" ? item.url : "";
+}
+
+function renderSearchSources(sources, options = {}) {
+  if (!Array.isArray(sources) || sources.length === 0) return "";
+  const maxResults = Number.isFinite(options.maxResults) && options.maxResults > 0
+    ? Math.min(Math.floor(options.maxResults), 5)
+    : 5;
+  const containerClass = typeof options.containerClass === "string" && options.containerClass
+    ? options.containerClass
+    : "search-sources";
+  const items = sources.slice(0, maxResults).map((item) => {
+    const title = escapeHtml(pickTitle(item) || "未命名来源");
+    const sourceLabel = escapeHtml(pickSourceLabel(item));
+    const url = pickUrl(item);
+    const safeUrl = isSafeExternalUrl(url);
+    const urlEscaped = safeUrl ? escapeHtml(url) : "";
+    const linkHtml = safeUrl
+      ? `<a href="${urlEscaped}" target="_blank" rel="noopener noreferrer">${title}</a>`
+      : `<span class="search-source-title">${title}</span>`;
+    const metaHtml = sourceLabel
+      ? `<span class="search-source-meta">${sourceLabel}</span>`
+      : "";
+    return `<li class="search-source-item">${linkHtml}${metaHtml}</li>`;
+  });
+
+  const header = `<div class="search-sources-head">参考来源</div>`;
+  const summary = `<p class="search-sources-summary">已参考 ${items.length} 条外部结果。</p>`;
+  const list = `<ul class="search-sources-list">${items.join("")}</ul>`;
+  return `<section class="${escapeHtml(containerClass)}" data-source="search-sources" aria-label="参考来源">${header}${summary}${list}</section>`;
+}
+
+function emptySearchSourcesMarkup() {
+  return "";
+}
+
+function hideSearchSources(node) {
+  if (!node) return;
+  node.innerHTML = "";
+  node.hidden = true;
+}
+
+function showSearchSources(node, markup) {
+  if (!node) return;
+  if (!markup) {
+    hideSearchSources(node);
+    return;
+  }
+  node.innerHTML = markup;
+  node.hidden = false;
 }
 
 // ============== Loading state helper (V0.3.4-hotfix) ==============
@@ -252,6 +349,7 @@ function createApp(deps) {
   const copyButton = nodes.copyButton;
   const answerLoading = nodes.answerLoading;
   const webSearchToggle = nodes.webSearchToggle;
+  const searchSourcesNode = nodes.searchSources;
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
   let storage = deps.storage;
@@ -294,6 +392,22 @@ function createApp(deps) {
     if (source === "local") return "已使用本地规则回答。";
     if (source === "local-fallback") return "LLM 动态回答暂时不可用，已回退到本地规则回答。";
     return "回答已生成。";
+  }
+
+  // V0.3.6：根据 search 字段决定是否展示参考来源。
+  //  - used=true && sources.length>0：渲染
+  //  - used=true && warning 存在：不渲染空来源，只在状态条里给中文提示
+  //  - used=false / search 缺失：隐藏
+  function applySearchSources(search) {
+    if (!searchSourcesNode) return;
+    const used = search && search.used === true;
+    const hasWarning = Boolean(search && search.warning);
+    const list = used && Array.isArray(search.sources) ? search.sources : [];
+    if (!used || hasWarning || list.length === 0) {
+      hideSearchSources(searchSourcesNode);
+      return;
+    }
+    showSearchSources(searchSourcesNode, renderSearchSources(list));
   }
 
   function setInFlight(value) {
@@ -431,9 +545,11 @@ function createApp(deps) {
     const search = {
       used: entry.searchUsed === true,
       warning: entry.searchWarning || null,
-      resultCount: entry.searchResultCount || 0
+      resultCount: entry.searchResultCount || 0,
+      sources: Array.isArray(entry.searchSources) ? entry.searchSources : []
     };
     setStatus(statusFromSource(entry.source, warning, search), warning || search.warning ? "error" : null);
+    applySearchSources(search);
     setCurrentAnswer(entry.answer || "", entry.source || "local");
     state.inFlight = false;
     if (askButton) askButton.disabled = false;
@@ -506,6 +622,7 @@ function createApp(deps) {
       const search = payload.search || null;
       state.currentSource = source;
       setStatus(statusFromSource(source, warning, search), warning || (search && search.warning) ? "error" : null);
+      applySearchSources(search);
       if (copyButton && state.currentAnswer.trim()) {
         copyButton.disabled = false;
         copyButton.hidden = false;
@@ -597,6 +714,8 @@ function createApp(deps) {
     }
     renderQuestions();
     renderHistory();
+    // V0.3.6：默认隐藏参考来源；恢复历史或新回答时由 applySearchSources 决定显隐。
+    if (searchSourcesNode) hideSearchSources(searchSourcesNode);
   }
 
   return {
@@ -712,6 +831,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const copyButton = document.querySelector("#copyButton");
   const answerLoading = document.querySelector("#answerLoading");
   const webSearchToggle = document.querySelector("#webSearchToggle");
+  const searchSourcesNode = document.querySelector("#searchSources");
 
   const app = createApp({
     nodes: {
@@ -726,7 +846,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       historyClearButton,
       copyButton,
       answerLoading,
-      webSearchToggle
+      webSearchToggle,
+      searchSources: searchSourcesNode
     }
   });
   app.mount();
@@ -753,5 +874,8 @@ module.exports = {
   createApp,
   renderMarkdown,
   escapeHtml,
-  applyInlineMarkdown
+  applyInlineMarkdown,
+  // V0.3.6 搜索来源展示
+  renderSearchSources,
+  isSafeExternalUrl
 };

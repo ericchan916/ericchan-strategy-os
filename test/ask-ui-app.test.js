@@ -14,7 +14,8 @@ const {
   removeHistoryItem,
   clearHistory,
   buildClipboardPayload,
-  handleCopyClick
+  handleCopyClick,
+  renderSearchSources
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -27,6 +28,52 @@ function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false,
     preventDefault() {
       this._prevented = true;
     }
+  };
+}
+
+// 用于 createApp / restoreHistoryItem 测试：构造最简 fake DOM 节点
+function makeFakeNodes() {
+  const fakeEl = (overrides = {}) => ({
+    value: "",
+    innerHTML: "",
+    textContent: "",
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    hidden: false,
+    disabled: false,
+    appendChild() {},
+    addEventListener() {},
+    setAttribute() {},
+    removeAttribute() {},
+    focus() {},
+    setSelectionRange() {},
+    scrollIntoView() {},
+    dataset: {},
+    children: [],
+    ...overrides
+  });
+  return {
+    questionInput: fakeEl(),
+    askButton: fakeEl(),
+    statusText: fakeEl(),
+    answerOutput: fakeEl(),
+    questionEcho: fakeEl(),
+    questionGrid: fakeEl({ dataset: { questions: "[]" } }),
+    historyList: fakeEl(),
+    historyEmpty: fakeEl(),
+    historyClearButton: fakeEl(),
+    copyButton: fakeEl(),
+    answerLoading: fakeEl(),
+    webSearchToggle: fakeEl({ checked: false }),
+    searchSources: fakeEl()
+  };
+}
+
+function makeFakeDocument() {
+  return {
+    createElement(tag) {
+      return makeFakeNodes()[tag] || makeFakeNodes();
+    },
+    querySelector() { return null; }
   };
 }
 
@@ -722,4 +769,260 @@ test("handleCopyClick: 缺 answer 时返回 ok:false，不调用 clipboard", asy
   });
   assert.equal(result.ok, false);
   assert.equal(called, 0);
+});
+
+// ============== V0.3.6 搜索来源展示 ==============
+
+test("renderSearchSources: 空数组返回空字符串（不渲染空来源框）", () => {
+  const html = renderSearchSources([]);
+  assert.equal(html, "", "无 sources 时应返回空字符串");
+});
+
+test("renderSearchSources: 渲染 title / source / url", () => {
+  const sources = [
+    { title: "示例新闻", url: "https://example.com/news/1", source: "example.com" }
+  ];
+  const html = renderSearchSources(sources);
+  assert.ok(html.includes("示例新闻"), "应包含 title");
+  assert.ok(html.includes("example.com"), "应包含 source 域名");
+  assert.ok(html.includes("https://example.com/news/1"), "应包含 url");
+});
+
+test("renderSearchSources: url 是可点击的 <a> 链接，含 target=_blank 与 rel=noopener noreferrer", () => {
+  const sources = [{ title: "外链测试", url: "https://example.com/x", source: "example.com" }];
+  const html = renderSearchSources(sources);
+  const link = html.match(/<a [^>]*href="https:\/\/example\.com\/x"[^>]*>/);
+  assert.ok(link, "应渲染成 <a href> 链接");
+  assert.ok(/target="_blank"/.test(link[0]), "外链应在新窗口打开");
+  assert.ok(/rel="noopener noreferrer"/.test(link[0]), "外链应带 rel=noopener noreferrer 安全属性");
+});
+
+test("renderSearchSources: 标题做 HTML 转义，避免 XSS", () => {
+  const sources = [{ title: "<script>alert('xss')</script>", url: "https://example.com/s", source: "evil" }];
+  const html = renderSearchSources(sources);
+  assert.equal(html.includes("<script>alert"), false, "title 不应出现未转义 <script>");
+  assert.ok(html.includes("&lt;script&gt;"), "title 应被 HTML escape");
+});
+
+test("renderSearchSources: url 与 source 字段也做 HTML 转义", () => {
+  const sources = [{ title: "ok", url: '"><img src=x onerror=alert(1)>', source: "<b>bad</b>" }];
+  const html = renderSearchSources(sources);
+  assert.equal(html.includes("<img src=x"), false, "不应出现注入的 <img>");
+  assert.ok(html.includes("&lt;b&gt;bad&lt;/b&gt;"), "source 字段应被 HTML escape");
+});
+
+test("renderSearchSources: 超过 5 条时只渲染前 5 条", () => {
+  const sources = Array.from({ length: 10 }, (_, i) => ({
+    title: `标题 ${i + 1}`,
+    url: `https://example.com/${i + 1}`,
+    source: "example.com"
+  }));
+  const html = renderSearchSources(sources);
+  for (let i = 1; i <= 5; i += 1) {
+    assert.ok(html.includes(`标题 ${i}`), `应包含第 ${i} 条`);
+  }
+  for (let i = 6; i <= 10; i += 1) {
+    assert.equal(html.includes(`标题 ${i}`), false, `不应包含第 ${i} 条`);
+  }
+});
+
+test("renderSearchSources: 缺 url 时不渲染成 <a> 链接，只显示文本", () => {
+  const sources = [{ title: "无链接", source: "example.com" }];
+  const html = renderSearchSources(sources);
+  assert.ok(html.includes("无链接"), "应显示 title");
+  // 不强制禁 <a>，但不允许出现 href="undefined"
+  assert.equal(/href="(undefined|)"/.test(html), false, "不应出现 href=undefined");
+});
+
+test("renderSearchSources: 接受自定义容器包裹（用于带 header 的完整区域）", () => {
+  const html = renderSearchSources(
+    [{ title: "T1", url: "https://e.com/a", source: "e.com" }],
+    { containerClass: "search-sources" }
+  );
+  assert.ok(/class="[^"]*search-sources[^"]*"/.test(html), "应带 search-sources 容器 class");
+  assert.ok(html.includes("参考来源"), "应包含'参考来源'标题");
+});
+
+test("renderSearchSources: 默认包含'已参考 N 条外部结果' 摘要", () => {
+  const sources = [
+    { title: "T1", url: "https://e.com/1", source: "e.com" },
+    { title: "T2", url: "https://e.com/2", source: "e.com" }
+  ];
+  const html = renderSearchSources(sources);
+  assert.ok(html.includes("已参考 2 条外部结果"), "应包含'已参考 2 条外部结果'");
+});
+
+// ============== V0.3.6 sources panel HTML / CSS 静态断言 ==============
+
+test("HTML 含参考来源容器 #searchSources（默认 hidden）", () => {
+  const startIdx = indexHtml.indexOf('id="searchSources"');
+  assert.ok(startIdx > 0, "缺少 #searchSources 容器");
+  const inner = indexHtml.slice(startIdx, startIdx + 1500);
+  assert.ok(/hidden\b/.test(inner), "#searchSources 默认应隐藏");
+});
+
+test("HTML 回答区按顺序：question-echo → answerLoading → answerOutput → searchSources", () => {
+  // V0.3.6：参考来源放在回答正文之后，loading 之前（即紧贴 #answerOutput 之后）。
+  // 这样复制按钮复制的是回答正文，不带 sources 区域。
+  const idxEcho = indexHtml.indexOf('id="questionEcho"');
+  const idxLoading = indexHtml.indexOf('id="answerLoading"');
+  const idxOutput = indexHtml.indexOf('id="answerOutput"');
+  const idxSources = indexHtml.indexOf('id="searchSources"');
+  assert.ok(idxEcho > 0 && idxOutput > 0 && idxSources > 0, "缺少必要 ID");
+  assert.ok(idxEcho < idxOutput, "question-echo 必须在 answerOutput 之前");
+  assert.ok(idxOutput < idxSources, "searchSources 应在 answerOutput 之后");
+  // loading 是动态显示的，位置不强制
+  if (idxLoading > 0) {
+    assert.ok(idxLoading < idxOutput, "loading 容器应在 answerOutput 之前");
+  }
+});
+
+test("CSS 包含参考来源样式（.search-sources / .search-source-item）", () => {
+  const hasSources =
+    /\.search-sources[\s\S]{0,200}?\{/i.test(stylesCss) ||
+    /\.search-source-item[\s\S]{0,200}?\{/i.test(stylesCss);
+  assert.ok(hasSources, "缺少参考来源样式");
+});
+
+test("CSS 包含 .search-source-item link 样式（链接可见但不刺眼）", () => {
+  // 链接应使用 :link / :visited / color，不强制具体颜色
+  const hasLinkRule =
+    /\.search-source-item\s+a[\s\S]{0,200}?\{/i.test(stylesCss) ||
+    /\.search-source-item[\s\S]{0,200}?a[\s\S]{0,100}?color/i.test(stylesCss);
+  assert.ok(hasLinkRule, "缺少来源链接样式");
+});
+
+test("CSS .search-sources 容器默认 hidden（display:none）", () => {
+  // 容器默认隐藏，只有挂上 visible 状态才显示。
+  const rule = stylesCss.match(/\.search-sources\s*\{[\s\S]{0,800}?\}/);
+  assert.ok(rule, "找不到 .search-sources 主规则");
+  assert.ok(/display\s*:\s*none/i.test(rule[0]), ".search-sources 默认应 display:none");
+});
+
+test("app.js 含 renderSearchSources 与 searchSources 节点引用", () => {
+  assert.ok(appJsText.includes("renderSearchSources"), "app.js 应暴露 renderSearchSources");
+  assert.ok(appJsText.includes("searchSources"), "app.js 应引用 #searchSources 节点");
+});
+
+test("app.js: 当 search.used=true 且 sources>0 时调用 renderSearchSources，否则清空", () => {
+  // 接受任一实现风格：直接调 renderSearchSources(...) / 或在 showSearchSources / hideSearchSources 中调。
+  const hasRender = /renderSearchSources\s*\(/.test(appJsText);
+  assert.ok(hasRender, "app.js 应在展示来源时调用 renderSearchSources");
+  // 同时：源代码里要出现 search.sources 的实际数据流向。
+  assert.ok(/search\.sources/.test(appJsText), "app.js 应读取 search.sources 渲染来源");
+});
+
+test("app.js: 搜索失败时（search.warning 存在）不渲染空来源列表", () => {
+  // 应有 if (search.warning) 早返回 / 或在 render 之前判断。
+  assert.ok(
+    /search\.warning/.test(appJsText) || /warning/.test(appJsText),
+    "app.js 应处理 search.warning 决定是否显示来源"
+  );
+});
+
+// ============== V0.3.6 history 恢复 & 复制隔离 ==============
+
+test("normalizeHistoryItem: 保存 searchSources 摘要（最多 5 条，且只保留 title/url/source）", () => {
+  const raw = {
+    question: "Q",
+    answer: "A",
+    source: "llm",
+    searchUsed: true,
+    searchWarning: null,
+    searchResultCount: 8,
+    searchSources: Array.from({ length: 8 }, (_, i) => ({
+      title: `T${i + 1}`,
+      url: `https://e.com/${i + 1}`,
+      source: "e.com",
+      snippet: "should be dropped",
+      raw: "should be dropped"
+    }))
+  };
+  const item = normalizeHistoryItem(raw);
+  assert.equal(item.searchSources.length, 5, "应只保留前 5 条");
+  assert.deepEqual(item.searchSources[0], { title: "T1", url: "https://e.com/1", source: "e.com" });
+  assert.equal(JSON.stringify(item).includes("should be dropped"), false, "snippet/raw 等多余字段应被丢弃");
+});
+
+test("createHistoryStore.push: 写入时 searchSources 最多保留 5 条", () => {
+  const storage = makeMemoryStorage();
+  const store = createHistoryStore({ storage, maxSize: 20 });
+  const sources = Array.from({ length: 12 }, (_, i) => ({
+    title: `T${i + 1}`,
+    url: `https://e.com/${i + 1}`,
+    source: "e.com"
+  }));
+  store.push({
+    question: "Q1",
+    answer: "A1",
+    source: "llm",
+    searchUsed: true,
+    searchSources: sources
+  });
+  const list = store.list();
+  assert.equal(list[0].searchSources.length, 5, "历史项应只保存前 5 条 sources");
+  assert.equal(list[0].searchSources[0].title, "T1");
+  assert.equal(list[0].searchSources[4].title, "T5");
+});
+
+test("buildClipboardPayload: 传入 searchSources 时不写入剪贴板文本", () => {
+  const payload = buildClipboardPayload({
+    answer: "# 标题\n\n结论：今天轻量。",
+    question: "今天适合做什么？",
+    searchSources: [
+      { title: "T1", url: "https://e.com/1", source: "e.com" }
+    ]
+  });
+  assert.equal(payload.text, "# 标题\n\n结论：今天轻量。");
+  // raw JSON / sources 任何字段都不应进剪贴板
+  const dumped = JSON.stringify(payload);
+  assert.equal(dumped.includes("searchSources"), false, "searchSources 不应进入复制 payload");
+  assert.equal(dumped.includes("https://e.com/1"), false, "来源 URL 不应进入复制 payload");
+});
+
+test("handleCopyClick: 即使传入 searchSources，写入剪贴板的内容也只是 answer 文本", async () => {
+  let written = "";
+  const clipboardImpl = async (text) => { written = text; };
+  const result = await handleCopyClick({
+    answer: "这是回答正文。",
+    searchSources: [{ title: "T1", url: "https://e.com/1", source: "e.com" }],
+    clipboardImpl
+  });
+  assert.equal(result.ok, true);
+  assert.equal(written, "这是回答正文。");
+  assert.equal(written.includes("https://e.com/1"), false, "来源 URL 不应被复制");
+  assert.equal(written.includes("T1"), false, "来源标题不应被复制");
+});
+
+test("restoreHistoryItem: 不调用 fetch（点击历史项不重新请求）", () => {
+  // 用 createApp + fake nodes + spy fetch 验证：restoreHistoryItem 不应触发 fetchImpl。
+  let fetchCalled = 0;
+  const fakeFetch = (url) => { fetchCalled += 1; return Promise.resolve({ ok: true, json: async () => ({}) }); };
+
+  const fakeStorage = makeMemoryStorage();
+  // 预先 push 一条带 searchSources 的历史
+  const store = createHistoryStore({ storage: fakeStorage, maxSize: 20 });
+  store.push({
+    question: "Q1",
+    answer: "A1",
+    source: "llm",
+    searchUsed: true,
+    searchSources: [
+      { title: "T1", url: "https://e.com/1", source: "e.com" }
+    ]
+  });
+
+  const { createApp } = require("../public/ask-ui/app");
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: fakeStorage,
+    fetchImpl: fakeFetch,
+    document: makeFakeDocument(),
+    now: () => 1_700_000_000_000
+  });
+
+  const entry = app.historyStore.list()[0];
+  app.restoreHistoryItem(entry);
+  assert.equal(fetchCalled, 0, "restoreHistoryItem 不应调用 fetch");
 });

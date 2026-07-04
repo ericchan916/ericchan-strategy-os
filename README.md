@@ -887,6 +887,50 @@ npm run ask:ui
 
 搜索失败时，页面会显示中文提示：“联网搜索暂时不可用，已使用本地上下文回答。” Ask Mode 仍会基于本地上下文继续回答。
 
+## V0.3.6 精修搜索来源展示体验
+
+V0.3.6 不再改后端搜索 provider，只在前端把搜索结果展示得更轻量、更自然。
+
+**回答区显示规则**：
+
+- 搜索成功（`search.used=true` 且 `search.sources.length>0`）时，回答正文下方显示一个“参考来源”区域：
+  - 顶部一行“参考来源” + “已参考 N 条外部结果”（N 为实际展示条数，最多 5 条）。
+  - 每条来源显示：标题（点击可打开外链，`target="_blank" rel="noopener noreferrer"`）+ 来源站点（域名）。
+  - URL 仅允许 `http(s)` 协议；其它协议或 localhost/127.0.0.0/::1 会被降级为纯文本（避免把内部 URL 误开放成外链）。
+  - 所有字段均做 HTML escape，标题里出现 `<script>` 不会执行。
+- 搜索失败（`search.used=true` 但 `search.warning` 存在）时，**不**渲染空来源列表，只在状态条显示中文 warning：“联网搜索暂时不可用，已使用本地上下文回答。”
+- 未勾选搜索 / `search.used=false` / `search` 字段缺失时，整个“参考来源”区域保持隐藏，不占回答区空间。
+- 来源区与回答正文是兄弟节点，复制按钮默认**只**复制 `#answerOutput` 内的回答正文，不会把 sources / raw search JSON / API Key 带进剪贴板。
+
+**历史记录恢复**：
+
+- 历史项保存轻量 `searchSources` 摘要，每条只含 `title` / `url` / `source`，**最多 5 条**；`snippet` / `raw` / API Key / provider 原始 payload 都不会进 history。
+- 点击历史项时，会：
+  - 恢复回答正文（已存在能力）。
+  - 重新渲染来源区（基于当时保存的 `searchSources`）。
+  - 恢复 warning 文案（如果是搜索失败的那次）。
+  - **不**重新调用 `/api/ask`，不触发任何 `fetch`。
+- 恢复后的来源区与新搜索时显示效果一致。
+
+**复制按钮隔离**：
+
+- `buildClipboardPayload` 现在明确忽略 `searchSources` / 任何外部结构；只输出 `text` (Markdown 纯文本) + `format: "text/markdown"`。
+- 测试覆盖：传入 `searchSources` 也不会写入剪贴板；剪贴板里看不到任何 URL / 标题。
+
+**前端展示结构**：
+
+- 新增轻量容器 `#searchSources`，位于 `#answerOutput` 之后；默认 `hidden`。
+- 由 `renderSearchSources(sources)` 纯函数生成内层 HTML（`<section.search-sources>` + head + summary + `<ul>`）。
+- 视觉风格：浅色（`var(--bg-soft)` 底）+ 1px 边线 + 圆角，文字沿用页面 accent / muted 色系；外链显示但颜色克制（`text-decoration: underline` + 半透明下划线）。
+- 全部交由 CSS 控制；`prefers-reduced-motion` 不影响来源区（无动画）。
+
+**不动的部分**：
+
+- 不修改 `scripts/search-client.js` / `scripts/check-search.js` / `scripts/ask-strategy-os.js` / `scripts/llm-client.js`。
+- 不修改 `prompts/ask-mode-system-prompt.md` / `ASK_MODE_SYSTEM_PROMPT_FALLBACK`。
+- 不修改 `scripts/start-ask-ui.js` 的双 loopback 监听（127.0.0.1 + ::1）。
+- 不修改 loading 动画（仓鼠跑轮 / 3D 盒子任一版本仍按 V0.3.4-hotfix-3 / 后续小调整原样保留）。
+
 ## 搜索诊断
 
 ```bash

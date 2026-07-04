@@ -1123,6 +1123,91 @@ h2 {
   box-shadow: 0 0 0 2px rgba(20, 86, 74, 0.22);
 }
 
+/* ---------------- Search sources panel (V0.3.6) ----------------
+   搜索成功时显示在回答正文之后。
+   - 容器默认 display:none，由 #searchSources:not([hidden]) 显示
+   - 列表紧凑，每条一行；title 是可点击链接，source 域名做辅助文字
+   - 链接使用 :link / :visited / :hover，不刺眼
+   ------------------------------------------------------------------ */
+
+.search-sources {
+  display: none;
+  margin-top: 14px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--ink-soft);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.search-sources:not([hidden]) {
+  display: block;
+}
+
+.search-sources-head {
+  margin: 0 0 6px;
+  color: var(--accent-dark);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.search-sources-summary {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.search-sources-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-source-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.search-source-item a {
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-decoration-color: rgba(20, 86, 74, 0.35);
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+
+.search-source-item a:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+.search-source-item a:visited {
+  color: var(--accent-ink);
+}
+
+.search-source-title {
+  color: var(--ink-soft);
+}
+
+.search-source-meta {
+  color: var(--muted-soft);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------------- Uiverse 3D box spinner (by bociKond) ----------------
    6 张方形面板组成一个 3D 盒子旋转。
    - 颜色：深墨绿（与页面主色一致，白卡背景里克制、不抢戏）。
