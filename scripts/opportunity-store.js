@@ -194,7 +194,7 @@ function normalizeOpportunity(item) {
 }
 
 function stripUiFields(item) {
-  const { statusLabel, humanDecisionLabel, typeLabel, ...rest } = item && typeof item === "object" ? item : {};
+  const { displayTitle, statusLabel, humanDecisionLabel, typeLabel, ...rest } = item && typeof item === "object" ? item : {};
   return rest;
 }
 
@@ -876,9 +876,9 @@ function deleteOpportunity({ rootDir = process.cwd(), id } = {}) {
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupPath = path.join(backupDir, `opportunity-pool-${stamp}.json`);
-    fs.writeFileSync(backupPath, JSON.stringify({ ...pool, opportunities: pool.opportunities }, null, 2));
+    fs.writeFileSync(backupPath, JSON.stringify({ ...pool, opportunities: pool.opportunities.map(stripUiFields) }, null, 2));
   } catch {
-    // 备份失败不阻塞删除；先抛错
+    // 备份失败不阻塞删除。
   }
   pool.opportunities.splice(index, 1);
   const saved = saveOpportunityPool(pool, { rootDir });

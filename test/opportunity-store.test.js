@@ -90,8 +90,10 @@ test("updateOpportunity only applies whitelisted fields and preserves unknown fi
   assert.deepEqual(result.opportunity.tags, ["agent", "brief"]);
   assert.equal(saved.opportunities[0].opportunityName, "我改后的中文名");
   assert.equal(saved.opportunities[0].unknownField, "keep");
+  assert.equal(saved.opportunities[0].displayTitle, undefined);
   assert.equal(saved.opportunities[0].statusLabel, undefined);
   assert.equal(saved.opportunities[0].humanDecisionLabel, undefined);
+  assert.equal(saved.opportunities[0].typeLabel, undefined);
 });
 
 test("updateOpportunity returns Chinese error when id is missing", () => {
@@ -476,6 +478,13 @@ test("deleteOpportunity: 删除存在的 id 并持久化", () => {
   const saved = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
   assert.equal(saved.opportunities.length, 1);
   assert.equal(saved.opportunities[0].id, "opp-keep");
+  assert.equal(saved.opportunities[0].displayTitle, undefined);
+  const backupDir = path.join(rootDir, "data", "opportunities", "backups");
+  const backups = fs.readdirSync(backupDir).filter((name) => name.endsWith(".json"));
+  assert.equal(backups.length, 1);
+  const backup = JSON.parse(fs.readFileSync(path.join(backupDir, backups[0]), "utf8"));
+  assert.equal(backup.opportunities[0].displayTitle, undefined);
+  assert.equal(backup.opportunities[0].statusLabel, undefined);
 });
 
 test("deleteOpportunity: 不存在的 id 抛 404 中文错误", () => {

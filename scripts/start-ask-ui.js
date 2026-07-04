@@ -4,6 +4,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { askStrategyOsAsync, generateKickoffPackageForOpportunity, generateOpportunityDraft } = require("./ask-strategy-os");
+const { redactSecretLikeText } = require("./secret-redact");
 const {
   loadOpportunityPool,
   updateOpportunity,
@@ -35,6 +36,10 @@ function send(res, status, body, type = "text/plain; charset=utf-8") {
 
 function sendJson(res, status, body) {
   send(res, status, JSON.stringify(body), "application/json; charset=utf-8");
+}
+
+function safeErrorMessage(error, fallback) {
+  return String(redactSecretLikeText((error && error.message) || fallback || "请求失败。"));
 }
 
 function readBody(req, maxBytes = 1_000_000) {
@@ -119,10 +124,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         if (result.warning) responseBody.warning = result.warning;
         sendJson(res, 200, responseBody);
       } catch (error) {
-        const safeMessage = String(error.message || "回答生成失败，请检查终端日志或先运行 npm run today。").replace(
-          /sk-[A-Za-z0-9_-]+/g,
-          "[redacted]"
-        );
+        const safeMessage = safeErrorMessage(error, "回答生成失败，请检查终端日志或先运行 npm run today。");
         console.error(safeMessage);
         sendJson(res, 500, { error: safeMessage });
       }
@@ -134,7 +136,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         const result = loadOpportunityPool({ rootDir });
         sendJson(res, 200, { opportunities: result.opportunities, stats: result.stats });
       } catch (error) {
-        sendJson(res, 500, { error: String(error.message || "机会池读取失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+        sendJson(res, 500, { error: safeErrorMessage(error, "机会池读取失败。") });
       }
       return;
     }
@@ -163,7 +165,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, body);
       } catch (error) {
         const status = error.statusCode || 400;
-        const safeMessage = String(error.message || "机会新增失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        const safeMessage = safeErrorMessage(error, "机会新增失败。");
         sendJson(res, status, { error: safeMessage });
       }
       return;
@@ -189,7 +191,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, pickDraftResponse(result));
       } catch (error) {
         const status = error.statusCode || 400;
-        const safeMessage = String(error.message || "草稿生成失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        const safeMessage = safeErrorMessage(error, "草稿生成失败。");
         sendJson(res, status, { error: safeMessage });
       }
       return;
@@ -203,7 +205,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, { opportunity: result.opportunity, opportunities: result.opportunities, stats: result.stats });
       } catch (error) {
         const status = error.statusCode || 400;
-        sendJson(res, status, { error: String(error.message || "机会池保存失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+        sendJson(res, status, { error: safeErrorMessage(error, "机会池保存失败。") });
       }
       return;
     }
@@ -220,7 +222,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, { removed: result.removed, opportunities: result.opportunities, stats: result.stats });
       } catch (error) {
         const status = error.statusCode || 400;
-        sendJson(res, status, { error: String(error.message || "机会删除失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]") });
+        sendJson(res, status, { error: safeErrorMessage(error, "机会删除失败。") });
       }
       return;
     }
@@ -256,7 +258,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         sendJson(res, 200, body);
       } catch (error) {
         const status = error.statusCode || 400;
-        const safeMessage = String(error.message || "开工包生成失败。").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+        const safeMessage = safeErrorMessage(error, "开工包生成失败。");
         sendJson(res, status, { error: safeMessage });
       }
       return;
@@ -375,5 +377,6 @@ module.exports = {
   closeAskUiServers,
   // V0.3.11-hotfix-3
   pickDraftResponse,
+  safeErrorMessage,
   readBody
 };

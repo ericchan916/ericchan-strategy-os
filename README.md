@@ -1686,6 +1686,29 @@ V0.4.1 把桌面三栏、推荐问题 / 历史分栏、折叠按钮搭好。V0.4
 - 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
 - 不改旧项目文件
 
+## V0.4.3 代码体检与轻量重构
+
+V0.4.3 不新增产品功能，只做代码体检和低风险整理。用户可见行为保持不变，默认不联网原则保持不变。
+
+体检结论：
+
+- `public/ask-ui/app.js`、`public/ask-ui/styles.css`、`test/ask-ui-app.test.js` 已经偏大，但当前是无构建的本地单页应用；强拆前端模块需要改变浏览器加载与测试方式，收益不够确定，所以本次不拆文件。
+- `scripts/opportunity-store.js` 承担机会池读写、normalize、草稿派生和 prompt 摘要，边界基本清楚；后续若继续增长，可优先拆出 label / draft 纯函数。
+- `scripts/start-ask-ui.js` 仍保持 HTTP route 层职责，不承载业务逻辑。
+- `search-client.js` / `search-planner.js` 边界清楚：前者负责 provider 调用、去重、时效和质量评分；后者负责意图与 query planning。
+
+本次轻量整理：
+
+- 修复机会池保存时的派生字段污染：`displayTitle`、`statusLabel`、`humanDecisionLabel`、`typeLabel` 只用于 UI，不再写入 `opportunity-pool.json` 或删除备份。
+- `start-ask-ui.js` 新增 `safeErrorMessage`，统一复用 `secret-redact.js` 的 `sk-*` 脱敏，替代多处手写 regex。
+- 更新测试覆盖：机会池保存 / 删除备份不落 UI 派生字段；HTTP 错误消息不会回显 `sk-*`。
+
+不动的部分：
+
+- 不修改 loading 动画本体、keyframes、内部结构或参数。
+- 不改 Ask UI 三栏布局、搜索开关默认值、LLM 配置、Bocha / Tavily provider。
+- 不提交 `.env`、`opportunity-pool.json`、`data/opportunities/backups` 或测试机会数据。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

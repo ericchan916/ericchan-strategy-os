@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { getDateString } = require("../scripts/generate-report");
-const { startAskUiServer } = require("../scripts/start-ask-ui");
+const { safeErrorMessage, startAskUiServer } = require("../scripts/start-ask-ui");
 
 // 防止真实 .env 把 STRATEGY_OS_LLM_* 注进 process.env，导致 UI 测试命中真实 LLM。
 const LLM_TEST_KEYS = [
@@ -141,6 +141,14 @@ test("ask UI serves Chinese HTML with recommended questions", async () => {
     assert.ok(response.body.includes("今天适合做什么？"));
     assert.ok(response.body.includes("最近提问"), "HTML 应含历史记录区域");
   });
+});
+
+test("start-ask-ui safeErrorMessage redacts sk-like secrets", () => {
+  const error = new Error("上游失败：sk-v0-4-3-secret-123456");
+  const message = safeErrorMessage(error, "fallback");
+
+  assert.equal(message.includes("sk-v0-4-3-secret-123456"), false);
+  assert.ok(message.includes("[redacted]"));
 });
 
 test("ask UI API returns a Chinese Ask Mode answer", async () => {
