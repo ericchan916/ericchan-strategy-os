@@ -225,7 +225,8 @@ async function searchBocha({ config, query, fetchImpl, abortImpl }) {
     return unavailable(config, query, "parse");
   }
 
-  const values = payload && payload.webPages && payload.webPages.value;
+  const webPages = (payload && payload.webPages) || (payload && payload.data && payload.data.webPages);
+  const values = webPages && webPages.value;
   const results = normalizeBochaResults(values, config.maxResults);
   if (!results.length) return unavailable(config, query, "empty", "没有搜到可用结果，已使用本地上下文回答。");
 

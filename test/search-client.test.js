@@ -177,6 +177,64 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(JSON.stringify(toPublicSearchMeta(result)).includes("test-bocha-key"), false);
 });
 
+test("bocha real data wrapper response is normalized", async () => {
+  const result = await searchWeb({
+    query: "最近 AI Agent 有什么新机会？",
+    env: {
+      STRATEGY_OS_SEARCH_ENABLED: "true",
+      STRATEGY_OS_SEARCH_PROVIDER: "bocha",
+      STRATEGY_OS_SEARCH_API_KEY: "test-bocha-key",
+      STRATEGY_OS_SEARCH_MAX_RESULTS: "5"
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 200,
+        log_id: "log-should-not-leak",
+        msg: "success",
+        data: {
+          webPages: {
+            value: [
+              {
+                name: "真实结构结果",
+                url: "https://example.cn/agent",
+                siteName: "ExampleCN",
+                snippet: "短摘要",
+                summary: "真实结构摘要优先",
+                datePublished: "2026-07-04T00:00:00+08:00"
+              },
+              {
+                name: "无站点名",
+                url: "https://agent.example/path",
+                snippet: "hostname fallback"
+              },
+              {
+                name: "No URL",
+                summary: "skip"
+              }
+            ]
+          }
+        }
+      })
+    })
+  });
+
+  assert.equal(result.warning, null);
+  assert.equal(result.errorCode, null);
+  assert.equal(result.results.length, 2);
+  assert.deepEqual(result.results[0], {
+    title: "真实结构结果",
+    url: "https://example.cn/agent",
+    snippet: "真实结构摘要优先",
+    source: "ExampleCN",
+    publishedAt: "2026-07-04T00:00:00+08:00"
+  });
+  assert.equal(result.results[1].source, "agent.example");
+  assert.equal(JSON.stringify(result.results).includes("log-should-not-leak"), false);
+  assert.equal(JSON.stringify(result.results).includes("success"), false);
+});
+
 test("bocha count is capped at 50", async () => {
   let body = {};
   await searchWeb({
