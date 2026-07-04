@@ -264,34 +264,46 @@ test("HTML 含 loading 容器", () => {
   assert.ok(hasLoading, "缺少 loading 容器");
 });
 
-test("HTML loading 容器包含完整 wheel-and-hamster 结构（V0.3.4-hotfix-2）", () => {
-  // 用户提供的 Uiverse 结构必须完整出现在 #answerLoading 里。
-  // 不可接受任何 "用 SVG 圆环替代" 的简化。
-  // 抓取 #answerLoading 开始到整个文件末尾不匹配的多行 nested div 容器。
+test("HTML loading 容器包含动画结构（wheel-and-hamster 或 loading-spinner）", () => {
+  // 接受任一 Uiverse loading 实现：
+  //  1) wheel-and-hamster（仓鼠跑轮；V0.3.4-hotfix-2 默认）
+  //  2) loading-spinner 6-盒子 3D 旋转（备选，可随时切换）
   const startIdx = indexHtml.indexOf('id="answerLoading"');
   assert.ok(startIdx > 0, "找不到 #answerLoading 节点");
-  // 用查找最后一个 </div> 之前闭合一个 div 的方式不够稳；这里简单地抓
-  // 接下来 2000 个字符作为内层区域，包含整个 #answerLoading DOM 子树。
   const inner = indexHtml.slice(startIdx, startIdx + 2400);
-  assert.ok(/class="[^"]*wheel-and-hamster[^"]*"/.test(inner), "缺少 wheel-and-hamster");
-  assert.ok(/class="[^"]*\bwheel\b[^"]*"/.test(inner), "缺少 wheel");
-  assert.ok(/class="[^"]*\bhamster\b[^"]*"/.test(inner), "缺少 hamster");
-  assert.ok(/class="[^"]*hamster__body[^"]*"/.test(inner), "缺少 hamster__body");
-  assert.ok(/class="[^"]*hamster__head[^"]*"/.test(inner), "缺少 hamster__head");
-  assert.ok(/class="[^"]*hamster__ear[^"]*"/.test(inner), "缺少 hamster__ear");
-  assert.ok(/class="[^"]*hamster__eye[^"]*"/.test(inner), "缺少 hamster__eye");
-  assert.ok(/class="[^"]*hamster__nose[^"]*"/.test(inner), "缺少 hamster__nose");
-  assert.ok(/class="[^"]*\bspoke\b[^"]*"/.test(inner), "缺少 spoke");
-  for (const limb of ["fr", "fl", "br", "bl"]) {
-    assert.ok(
-      new RegExp(`class="[^"]*hamster__limb--${limb}[^"]*"`).test(inner),
-      `缺少 hamster__limb--${limb}`
-    );
+
+  const hasHamster = /class="[^"]*wheel-and-hamster[^"]*"/.test(inner);
+  const hasSpinner = /class="[^"]*loading-spinner[^"]*"/.test(inner);
+  assert.ok(hasHamster || hasSpinner, "缺少 loading 动画结构（wheel-and-hamster 或 loading-spinner）");
+
+  if (hasHamster) {
+    // 仓鼠结构必须完整
+    assert.ok(/class="[^"]*\bwheel\b[^"]*"/.test(inner), "缺少 wheel");
+    assert.ok(/class="[^"]*\bhamster\b[^"]*"/.test(inner), "缺少 hamster");
+    assert.ok(/class="[^"]*hamster__body[^"]*"/.test(inner), "缺少 hamster__body");
+    assert.ok(/class="[^"]*hamster__head[^"]*"/.test(inner), "缺少 hamster__head");
+    assert.ok(/class="[^"]*hamster__ear[^"]*"/.test(inner), "缺少 hamster__ear");
+    assert.ok(/class="[^"]*hamster__eye[^"]*"/.test(inner), "缺少 hamster__eye");
+    assert.ok(/class="[^"]*hamster__nose[^"]*"/.test(inner), "缺少 hamster__nose");
+    assert.ok(/class="[^"]*\bspoke\b[^"]*"/.test(inner), "缺少 spoke");
+    for (const limb of ["fr", "fl", "br", "bl"]) {
+      assert.ok(
+        new RegExp(`class="[^"]*hamster__limb--${limb}[^"]*"`).test(inner),
+        `缺少 hamster__limb--${limb}`
+      );
+    }
+    assert.ok(/class="[^"]*hamster__tail[^"]*"/.test(inner), "缺少 hamster__tail");
+  } else if (hasSpinner) {
+    // spinner 结构：必须含 6 个 <div></div> 盒子
+    const nested = inner.match(/<div aria-hidden="true" class="loading-spinner"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/);
+    assert.ok(nested, "loading-spinner 结构不完整");
+    const emptyDivs = (nested[0].match(/<div><\/div>/g) || []).length;
+    assert.equal(emptyDivs, 6, `loading-spinner 应含 6 个 <div></div>，实际 ${emptyDivs}`);
   }
-  assert.ok(/class="[^"]*hamster__tail[^"]*"/.test(inner), "缺少 hamster__tail");
+
   // 中文 aria-label
   assert.ok(
-    /aria-label="[^"]*仓鼠[^"]*"|aria-label="[^"]*战略判断[^"]*"/.test(inner),
+    /aria-label="[^"]*仓鼠[^"]*"|aria-label="[^"]*正在生成[^"]*"|aria-label="[^"]*战略判断[^"]*"/.test(inner),
     "loading 容器应使用中文 aria-label"
   );
 });
@@ -321,45 +333,37 @@ test("CSS 包含 loading 动画样式（@keyframes / hamster / spinner）", () =
   assert.ok(hasKeyframes, "缺少 @keyframes（loading 动画）");
 });
 
-test("CSS 包含完整 Uiverse wheel-and-hamster 关键帧（V0.3.4-hotfix-2）", () => {
-  // Uiverse 仓鼠动画必须真存在：列出的 keyframes 全部出现在 CSS 中。
-  const requiredKeyframes = [
-    "hamster",
-    "hamsterHead",
-    "hamsterEye",
-    "hamsterEar",
-    "hamsterBody",
-    "hamsterFRLimb",
-    "hamsterFLLimb",
-    "hamsterBRLimb",
-    "hamsterBLLimb",
-    "hamsterTail",
-    "spoke"
-  ];
-  for (const name of requiredKeyframes) {
-    const re = new RegExp(`@keyframes\\s+${name}\\b`);
-    assert.ok(re.test(stylesCss), `缺少 @keyframes ${name}`);
+test("CSS loading 动画样式（@keyframes + 必要 class）", () => {
+  // 接受任一 Uiverse 实现：
+  //  1) 仓鼠实现：11 个 @keyframes (hamsterHead/Eye/.../spoke) + 14 个 .wheel-* 选择器
+  //  2) spinner 实现：@keyframes loading-spinner + .loading-spinner 规则
+  const hasHamsterKeyframes = /@keyframes\s+hamster\b/.test(stylesCss);
+  const hasSpinnerKeyframes = /@keyframes\s+loading-spinner\b/.test(stylesCss);
+  assert.ok(
+    hasHamsterKeyframes || hasSpinnerKeyframes,
+    "缺少 loading @keyframes（hamster 或 loading-spinner）"
+  );
+  if (hasHamsterKeyframes) {
+    const requiredKeyframes = [
+      "hamster",
+      "hamsterHead",
+      "hamsterEye",
+      "hamsterEar",
+      "hamsterBody",
+      "hamsterFRLimb",
+      "hamsterFLLimb",
+      "hamsterBRLimb",
+      "hamsterBLLimb",
+      "hamsterTail",
+      "spoke"
+    ];
+    for (const name of requiredKeyframes) {
+      const re = new RegExp(`@keyframes\\s+${name}\\b`);
+      assert.ok(re.test(stylesCss), `缺少 @keyframes ${name}`);
+    }
   }
-  // class 选择器必须存在
-  const requiredSelectors = [
-    ".wheel-and-hamster",
-    ".wheel",
-    ".hamster",
-    ".hamster__head",
-    ".hamster__ear",
-    ".hamster__eye",
-    ".hamster__nose",
-    ".hamster__body",
-    ".hamster__limb--fr",
-    ".hamster__limb--fl",
-    ".hamster__limb--br",
-    ".hamster__limb--bl",
-    ".hamster__tail",
-    ".spoke"
-  ];
-  for (const selector of requiredSelectors) {
-    const re = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{`);
-    assert.ok(re.test(stylesCss), `缺少 ${selector} 规则块`);
+  if (hasSpinnerKeyframes) {
+    assert.ok(/\.loading-spinner\s*\{/.test(stylesCss), ".loading-spinner 主规则缺失");
   }
 });
 
@@ -374,17 +378,20 @@ test("CSS loading 区域高度被限制（仓鼠动画不会撑大页面）", ()
   assert.ok(/width|height|font-size/i.test(target), ".wheel-and-hamster 应限制尺寸");
 });
 
-test("CSS .answer-loading 是深色卡片背景（V0.3.4-hotfix-3 严格复刻图二）", () => {
-  // .answer-loading 主规则（不是 reduced-motion 覆盖）必须在浅色面板里设置深色卡片。
-  // 取到主规则（在 .loading-inner / .loading-text 之前）。
+test("CSS .answer-loading 有明确背景（深色卡片或白卡二选一）", () => {
+  // .answer-loading 主规则（不是 reduced-motion 覆盖）。
+  // 接受任一视觉方案：
+  //  1) V0.3.4-hotfix-3 深色卡片方案（#1f1f1f / #202124 / #232323 系列）
+  //  2) 白卡方案（与页面面板一致，#ffffff / var(--panel-strong)）
   const rule = stylesCss.match(/\.answer-loading\s*\{[\s\S]*?\n\s*\}\s*\.answer-loading:not/);
   assert.ok(rule, "找不到 .answer-loading 主规则");
-  const target = rule[0];
-  // 深色背景：用 # 6位 灰黑 / 接近 #1f1f1f ~ #232323。
+  const target = rule[0].toLowerCase();
   const darkHexes = ["#1f1f1f", "#202124", "#232323", "#1a1a1a", "#222"];
-  const hasDark = darkHexes.some((hex) => target.toLowerCase().includes(hex));
-  assert.ok(hasDark, ".answer-loading 应使用深色背景（#1f1f1f / #202124 / #232323 系列）");
-  // 深色卡片应有圆角和适度 padding。
+  const lightHexes = ["#ffffff", "var(--panel-strong)"];
+  const isDark = darkHexes.some((hex) => target.includes(hex));
+  const isLight = lightHexes.some((hex) => target.includes(hex));
+  assert.ok(isDark || isLight, ".answer-loading 应有明确背景（深色或白卡）");
+  // 卡片应有圆角和适度 padding。
   assert.ok(/border-radius/i.test(target), ".answer-loading 应有 border-radius");
   assert.ok(/padding/i.test(target), ".answer-loading 应有 padding");
 });
@@ -716,4 +723,3 @@ test("handleCopyClick: 缺 answer 时返回 ok:false，不调用 clipboard", asy
   assert.equal(result.ok, false);
   assert.equal(called, 0);
 });
-

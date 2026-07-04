@@ -680,12 +680,12 @@ h2 {
   display: none;
   align-items: center;
   justify-content: center;
-  min-height: 220px;
-  padding: 36px 28px 40px;
+  min-height: 96px;
+  padding: 16px 22px 18px;
   border-radius: var(--radius-md);
-  background: #1f1f1f;
-  border: 1px solid #2c2c2c;
-  color: #f5f1e8;
+  background: #ffffff;
+  border: 1px solid var(--line-soft);
+  color: var(--ink-soft);
   margin-bottom: 16px;
 }
 
@@ -698,13 +698,13 @@ h2 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 18px;
+  gap: 8px;
 }
 
 .loading-text {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13.5px;
-  color: rgba(245, 241, 232, 0.78);
+  font-size: 12.5px;
+  color: var(--muted);
   letter-spacing: 0.04em;
 }
 
@@ -1121,4 +1121,77 @@ h2 {
   outline: none;
   color: var(--accent-dark);
   box-shadow: 0 0 0 2px rgba(20, 86, 74, 0.22);
+}
+
+/* ---------------- Uiverse 3D box spinner (by bociKond) ----------------
+   6 张方形面板组成一个 3D 盒子旋转。
+   - 颜色：深墨绿（与页面主色一致，白卡背景里克制、不抢戏）。
+   - 尺寸：36 × 36 px（Uiverse 原版 70.4 × 70.4 的约 51%；translateZ/translateX/Y
+     按比例缩到 ±18，保持盒子几何一致）。
+   - 不计入版本；后续如需复刻回轮子，去掉 .loading-spinner 标记并恢复 .wheel-and-hamster。
+   ------------------------------------------------------------------ */
+
+.loading-spinner {
+  width: 36px;
+  height: 36px;
+  --clr: #14564a;
+  --clr-alpha: rgba(20, 86, 74, 0.12);
+  animation: loading-spinner 1.6s infinite ease;
+  transform-style: preserve-3d;
+}
+
+.loading-spinner > div {
+  background-color: var(--clr-alpha);
+  height: 100%;
+  position: absolute;
+  width: 100%;
+  border: 1.8px solid var(--clr);
+}
+
+.loading-spinner div:nth-of-type(1) {
+  transform: translateZ(-18px) rotateY(180deg);
+}
+
+.loading-spinner div:nth-of-type(2) {
+  transform: rotateY(-270deg) translateX(50%);
+  transform-origin: top right;
+}
+
+.loading-spinner div:nth-of-type(3) {
+  transform: rotateY(270deg) translateX(-50%);
+  transform-origin: center left;
+}
+
+.loading-spinner div:nth-of-type(4) {
+  transform: rotateX(90deg) translateY(-50%);
+  transform-origin: top center;
+}
+
+.loading-spinner div:nth-of-type(5) {
+  transform: rotateX(-90deg) translateY(50%);
+  transform-origin: bottom center;
+}
+
+.loading-spinner div:nth-of-type(6) {
+  transform: translateZ(18px);
+}
+
+@keyframes loading-spinner {
+  0% {
+    transform: rotate(45deg) rotateX(-25deg) rotateY(25deg);
+  }
+  50% {
+    transform: rotate(45deg) rotateX(-385deg) rotateY(25deg);
+  }
+  100% {
+    transform: rotate(45deg) rotateX(-385deg) rotateY(385deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 让 3D 盒子静止在第一帧静态首态 */
+  .loading-spinner,
+  .loading-spinner > div {
+    animation: none !important;
+  }
 }
