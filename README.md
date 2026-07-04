@@ -1510,6 +1510,73 @@ CSS：
 - 不提交 `data/opportunities/*.json` 或测试机会数据
 - 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
 
+## V0.4 整理战略OS日用入口
+
+V0.3 主线（联网搜索 → 战略回答 → ＋机会池 → 智能草稿 → 保存 → 编辑 → 开工包 → 历史恢复 → 复制 → 删除）已收束闭环。V0.4 不堆新功能，只把工具整理成"日用战略入口"。
+
+### 1. 首页入口层级
+
+- 主输入区：提问输入框 + 本次联网搜索 toggle + 发送按钮 + 清空按钮
+- 回答区：回答正文为主，meta 单行，＋机会池按钮 + 复制按钮
+- 侧边：今日机会池（不再是"机会池"），历史弱化
+- 搜索过程默认折叠；搜索来源默认隐藏
+- 顶部状态条保持"默认不联网"
+
+### 2. 机会池日用化
+
+- 标题改为"今日机会池"
+- 机会项里 `nextAction` 用 `border-left: 2px solid accent` 高亮，作为"今日可推进"的主信号
+- 无 `nextAction` 时显示弱提示「暂无下一步，建议补充行动。」
+- 按钮顺序：生成开工包（主）→ 编辑 → 删除
+- stats 文案精简：仅显示"全部 N / 已归档 M / 已拒绝 K"；不再把 watch / validate / accepted 混在同一排
+
+### 3. 开工包入口强化
+
+- 机会项上"生成开工包"按钮视觉权重最大（墨绿边 + hover 实心）
+- 点击后在回答区显示"为「机会名」生成开工包"（通过 questionEcho 体现）
+- 复制按钮可复制开工包正文
+- 历史保存为 `kickoff-package` 类型，恢复时按钮按 V0.3.11-hotfix-2 逻辑隐藏
+
+### 4. 历史 / 来源 / 搜索过程弱化
+
+- 历史保留但视觉弱化
+- 搜索过程默认折叠为 `<details>`
+- 搜索来源默认 hidden，需要时由 applySearchSources 显式显示
+- meta 单行不抢主视觉
+
+### 5. stats 口径修复
+
+修复 V0.3.12 验收时发现的 stats 矛盾：
+
+- 旧实现：同一机会 `status=validate` + `humanDecision=watching` 会被 validate 桶 +1、watch 桶 +1（双计）
+- 新实现（V0.4）：互斥桶。每个机会按优先级归入唯一一个主桶
+  - `archived` → 已归档
+  - `rejected` → 已拒绝
+  - `status=watch` 或 `humanDecision=watching` → 观察中
+  - 其它 → 待验证（inbox / validate / mvp-spec / building 都归这里）
+- `humanDecision=accepted` 单独计入 `accepted` 桶（作为决策维度，与 status 桶正交）
+- UI 改为只显示 total / archived / rejected，避免用户看到 validate+watch 互斥之和 ≠ total 的矛盾
+
+### 6. 输入区
+
+- 提交后自动清空（V0.3.11-hotfix-3）
+- × 清空按钮（V0.3.11-hotfix-3）
+- Enter 发送 / Shift+Enter 换行 / IME composition 不误触发（V0.3.4）
+- 本次联网搜索 toggle 默认关闭
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）
+- 不恢复仓鼠跑轮
+- 不默认自动联网 / 不默认勾选"本次联网搜索"
+- 不删除 Bocha / Tavily provider
+- 不改 LLM API 配置逻辑
+- 不暴露 API Key / 不提交 .env
+- 不提交 `data/opportunities/*.json` 或测试机会数据
+- 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
+- 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
+- 不把旧项目当成默认优化对象
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

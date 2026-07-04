@@ -728,13 +728,33 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
 
 function summarizeOpportunities(opportunities) {
   const list = Array.isArray(opportunities) ? opportunities : [];
+  // V0.4：状态桶互斥（之前 status=validate 同时 humanDecision=watching 会被 validate + watch 各自 +1）
+  // 优先级（高 → 低）：
+  //   archived / rejected（终态） > watch（含 status=watch 或 humanDecision=watching） > validate / inbox / mvp-spec / building
+  // accepted 是 humanDecision 字段（accepted=true 时单独计入）
+  let accepted = 0;
+  let validate = 0;
+  let watch = 0;
+  let archived = 0;
+  let rejected = 0;
+  for (const item of list) {
+    const status = String(item && item.status || "");
+    const decision = String(item && item.humanDecision || "");
+    if (status === "archived") { archived += 1; continue; }
+    if (status === "rejected") { rejected += 1; continue; }
+    if (status === "watch" || decision === "watching") { watch += 1; continue; }
+    // accepted 是"已确认"的人类判断，与 status 是正交的；当一个机会 status=inbox/validate/mvp-spec/building
+    // 且 humanDecision=accepted 时，仍按 status 算在 validate 桶，但 accepted 单独 +1（决策维度）。
+    if (decision === "accepted") { accepted += 1; }
+    validate += 1;
+  }
   return {
     total: list.length,
-    accepted: list.filter((item) => item.humanDecision === "accepted").length,
-    validate: list.filter((item) => item.status === "validate").length,
-    watch: list.filter((item) => item.status === "watch" || item.humanDecision === "watching").length,
-    archived: list.filter((item) => item.status === "archived").length,
-    rejected: list.filter((item) => item.status === "rejected").length
+    accepted,
+    validate,
+    watch,
+    archived,
+    rejected
   };
 }
 

@@ -510,11 +510,17 @@ h2 {
   margin: 4px 0 0;
 }
 
+/* V0.4：nextAction 更突出，作为"今日可推进"的主信号 */
 .opportunity-next {
-  color: var(--ink-soft);
+  color: var(--ink);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 12.5px;
-  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 6px 0 2px;
+  padding: 4px 8px;
+  background: var(--accent-soft, rgba(20, 86, 74, 0.05));
+  border-left: 2px solid var(--accent, #14564a);
+  border-radius: 0 4px 4px 0;
 }
 
 .opportunity-actions {

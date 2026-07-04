@@ -1015,7 +1015,7 @@ test("renderOpportunityPanel: 渲染中文状态、统计、编辑表单和空�
     ]
   });
 
-  assert.ok(html.statsHtml.includes("待验证 1"));
+  assert.ok(html.statsHtml.includes("全部 1"));
   // V0.3.10-hotfix：旧英文标题会被显示为中文（独立 AI 机会简报 MVP）
   assert.ok(html.listHtml.includes("独立 AI 机会简报 MVP"), "应显示中文映射");
   assert.ok(html.listHtml.includes("待验证"));
@@ -3062,5 +3062,130 @@ test("V0.3.11-hotfix-4: buildLocalKickoff 输入机会 note 含 sk-* 时输出�
   });
   assert.equal(/sk-fakefakefake0123456789/.test(out), false, "buildLocalKickoff 输出不应含 sk-fakefakefake0123456789 原文");
   assert.equal(out.includes("[redacted]"), true);
+});
+
+// ============== V0.4: 日用入口整理 ==============
+
+test("V0.4: 机会池区域标题为「今日机会池」", () => {
+  assert.ok(/今日机会池/.test(indexHtml), "index.html 应含「今日机会池」标题");
+});
+
+test("V0.4: 机会池 stats 文案格式清爽（避免矛盾口径：total/validate/watch 三数字无歧义）", () => {
+  // stats 默认显示：仅显示 total；validate/watch 是补充分类
+  // 验证"全部 N"或"全部 N · 待验证 M"格式而非堆叠互斥桶
+  const statMatch = indexHtml.match(/id="opportunityStats"[\s\S]*?<\/div>/);
+  assert.ok(statMatch, "应存在 #opportunityStats");
+});
+
+test("V0.4: 机会项优先显示 nextAction（找不到时显示「暂无下一步」弱提示）", () => {
+  // 用 renderOpportunityPanel 验证一个 nextAction 存在的机会
+  const html = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "x1",
+        opportunityName: "X 机会",
+        displayTitle: "X 机会",
+        statusLabel: "待验证",
+        typeLabel: "新项目机会",
+        humanDecisionLabel: "",
+        notes: "n",
+        nextAction: "明天先做 demo 验证",
+        tags: [],
+        scores: {},
+        updatedAt: "2026-01-01T00:00:00Z",
+        source: "ask-mode"
+      }
+    ],
+    stats: { total: 1, accepted: 0, validate: 1, watch: 0, archived: 0, rejected: 0 }
+  });
+  // 优先 nextAction
+  assert.ok(/明天先做 demo 验证/.test(html.listHtml), "应优先显示 nextAction");
+});
+
+test("V0.4: 机会项 nextAction 缺失时显示「暂无下一步」弱提示", () => {
+  const html = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "x2",
+        opportunityName: "无下一步",
+        displayTitle: "无下一步",
+        statusLabel: "待验证",
+        typeLabel: "新项目机会",
+        humanDecisionLabel: "",
+        notes: "n",
+        nextAction: "",
+        tags: [],
+        scores: {},
+        updatedAt: "",
+        source: ""
+      }
+    ],
+    stats: { total: 1, accepted: 0, validate: 1, watch: 0, archived: 0, rejected: 0 }
+  });
+  assert.ok(/暂无下一步/.test(html.listHtml), "无 nextAction 应显示「暂无下一步」");
+});
+
+test("V0.4: 「生成开工包」按钮在「编辑」「删除」之前", () => {
+  const html = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "x3",
+        opportunityName: "排序测试",
+        displayTitle: "排序测试",
+        statusLabel: "待验证",
+        typeLabel: "新项目机会",
+        humanDecisionLabel: "",
+        notes: "",
+        nextAction: "next",
+        tags: [],
+        scores: {},
+        updatedAt: "",
+        source: ""
+      }
+    ],
+    stats: { total: 1, accepted: 0, validate: 1, watch: 0, archived: 0, rejected: 0 }
+  });
+  const kickoffIdx = html.listHtml.indexOf("data-op-kickoff");
+  const editIdx = html.listHtml.indexOf("data-op-edit");
+  const deleteIdx = html.listHtml.indexOf("data-op-delete");
+  assert.ok(kickoffIdx > -1, "应有「生成开工包」按钮");
+  assert.ok(editIdx > -1, "应有「编辑」按钮");
+  assert.ok(deleteIdx > -1, "应有「删除」按钮");
+  // 视觉顺序：kickoff 在 edit 之前、edit 在 delete 之前
+  assert.ok(kickoffIdx < editIdx, "生成开工包应在编辑之前");
+  assert.ok(editIdx < deleteIdx, "编辑应在删除之前");
+});
+
+test("V0.4: 「生成开工包」按钮文案为「生成开工包」", () => {
+  const html = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "x4",
+        opportunityName: "X4",
+        displayTitle: "X4",
+        statusLabel: "待验证",
+        typeLabel: "新项目机会",
+        humanDecisionLabel: "",
+        notes: "",
+        nextAction: "next",
+        tags: [],
+        scores: {},
+        updatedAt: "",
+        source: ""
+      }
+    ],
+    stats: { total: 1, accepted: 0, validate: 1, watch: 0, archived: 0, rejected: 0 }
+  });
+  assert.ok(/>生成开工包</.test(html.listHtml), "「生成开工包」按钮文案应完整保留");
+});
+
+test("V0.4: 搜索过程 / 来源 default hidden（页面打开不显示）", () => {
+  // HTML 应保留 hidden 属性
+  assert.ok(/<section[^>]*id="searchProcess"[^>]*hidden/.test(indexHtml), "searchProcess 应默认 hidden");
+  assert.ok(/<section[^>]*id="searchSources"[^>]*hidden/.test(indexHtml), "searchSources 应默认 hidden");
+});
+
+test("V0.4: 主页状态条仍含「默认不联网」", () => {
+  assert.ok(/默认不联网/.test(indexHtml), "顶部状态条应含「默认不联网」");
 });
 

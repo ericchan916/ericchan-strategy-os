@@ -887,3 +887,67 @@ test("V0.3.11-hotfix: 提炼后含产品名后缀（助手/工具/平台）", ()
   });
   assert.ok(/(助手|工具|平台|雷达|简报|看板|生成器|工作流|日历|模板|系统|插件|agent|Agent|bot|Bot|OS|选题器|分析器|检查器|体检器)/.test(draft.opportunityName), `应含产品后缀: ${draft.opportunityName}`);
 });
+
+// ============== V0.4: 机会池 stats 口径互斥 ==============
+
+test("V0.4: summarizeOpportunities 状态统计互斥（互斥之和 ≤ total）", () => {
+  const { summarizeOpportunities } = require("../scripts/opportunity-store");
+  const list = [
+    { id: "a", status: "validate", humanDecision: "pending" },
+    { id: "b", status: "validate", humanDecision: "accepted" },
+    { id: "c", status: "watch", humanDecision: "pending" },
+    { id: "d", status: "watch", humanDecision: "watching" },
+    { id: "e", status: "archived", humanDecision: "pending" }
+  ];
+  const stats = summarizeOpportunities(list);
+  const sum = stats.validate + stats.watch + stats.archived + stats.rejected;
+  assert.ok(sum <= stats.total, `状态分类互斥后之和 ${sum} 应 ≤ total ${stats.total}`);
+  assert.equal(stats.total, 5);
+});
+
+test("V0.4: summarizeOpportunities watch 不再双计（status=watch 与 humanDecision=watching 不重复计数）", () => {
+  const { summarizeOpportunities } = require("../scripts/opportunity-store");
+  const stats = summarizeOpportunities([
+    { id: "x", status: "watch", humanDecision: "watching" }
+  ]);
+  assert.equal(stats.watch, 1, "watch 计数应 = 1 而非 2");
+});
+
+test("V0.4: summarizeOpportunities 无 watch 状态时 watch=0", () => {
+  const { summarizeOpportunities } = require("../scripts/opportunity-store");
+  const stats = summarizeOpportunities([
+    { id: "a", status: "validate" },
+    { id: "b", status: "validate" }
+  ]);
+  assert.equal(stats.watch, 0);
+  assert.equal(stats.validate, 2);
+  assert.equal(stats.total, 2);
+});
+
+test("V0.4: summarizeOpportunities 单机会同时 status=validate 与 humanDecision=watching 不被双计", () => {
+  // V0.4：状态桶互斥；一个机会只算一次
+  // 现状：被 validate 算 1 次 + watch 算 1 次 = 2，但 total=1
+  const { summarizeOpportunities } = require("../scripts/opportunity-store");
+  const stats = summarizeOpportunities([
+    { id: "x", status: "validate", humanDecision: "watching" }
+  ]);
+  const sum = stats.validate + stats.watch + stats.archived + stats.rejected;
+  assert.ok(sum <= stats.total, `互斥后 sum=${sum} 应 ≤ total=${stats.total}`);
+  // humanDecision=watching 单独记到 watch
+  assert.equal(stats.watch, 1);
+});
+
+test("V0.4: summarizeOpportunities 真实场景：3 个机会（2 validate + 1 watch），sum 应 ≤ 3", () => {
+  // 真实验证：V0.3.12 验收时观察到 total=3 validate=2 watch=1，怀疑双计
+  const { summarizeOpportunities } = require("../scripts/opportunity-store");
+  const stats = summarizeOpportunities([
+    { id: "a", status: "validate" },
+    { id: "b", status: "validate" },
+    { id: "c", status: "watch" }
+  ]);
+  const sum = stats.validate + stats.watch + stats.archived + stats.rejected;
+  assert.ok(sum <= stats.total, `sum=${sum} 应 ≤ total=${stats.total}`);
+  assert.equal(stats.validate, 2);
+  assert.equal(stats.watch, 1);
+  assert.equal(stats.total, 3);
+});

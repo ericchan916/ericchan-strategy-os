@@ -511,19 +511,18 @@ function normalizeOpportunityForUi(item) {
 }
 
 function renderOpportunityStats(stats = {}) {
+  // V0.4：清爽版 stats
+  // 主指标：total（不与 validate/watch 重复桶计）
+  // 副指标：按 status 桶（archived / rejected）显示，避免与 watch 双计
   const safe = {
     total: Number(stats.total || 0),
-    accepted: Number(stats.accepted || 0),
-    validate: Number(stats.validate || 0),
-    watch: Number(stats.watch || 0),
-    archived: Number(stats.archived || 0)
+    archived: Number(stats.archived || 0),
+    rejected: Number(stats.rejected || 0)
   };
   return `<div class="opportunity-stat-grid">
     <span>全部 ${safe.total}</span>
-    <span>已确认 ${safe.accepted}</span>
-    <span>待验证 ${safe.validate}</span>
-    <span>观察中 ${safe.watch}</span>
     <span>已归档 ${safe.archived}</span>
+    <span>已拒绝 ${safe.rejected}</span>
   </div>`;
 }
 
