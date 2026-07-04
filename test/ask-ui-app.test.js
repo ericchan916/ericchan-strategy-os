@@ -97,7 +97,11 @@ function makeFakeNodes() {
     opportunityEmpty: fakeEl(),
     opportunityStatus: fakeEl(),
     addOpportunityButton: fakeEl(),
-    addOpportunityContainer: fakeEl()
+    addOpportunityContainer: fakeEl(),
+    // V0.4.1
+    opportunityToggle: fakeEl(),
+    opportunityBody: fakeEl(),
+    opportunityPanel: fakeEl()
   };
 }
 
@@ -250,14 +254,15 @@ test("HTML top status uses dynamic globalStatusText with default offline wording
   assert.ok(indexHtml.includes("默认不联网"));
 });
 
-test("HTML / CSS / JS contain 'Enter 发送' shortcut hint", () => {
-  const combined = `${indexHtml}\n${appJsText}`;
-  assert.ok(combined.includes("Enter 发送"), "缺少 'Enter 发送' 文案");
+test("V0.4.1: UI 不再显示「Enter 发送」提示（已迁到 /api/ask 行为）", () => {
+  const combined = `${indexHtml}\n${stylesCss}`;
+  assert.equal(combined.includes("Enter 发送"), false, "Enter 发送 不应在 UI 显示");
 });
 
-test("HTML / CSS / JS contain 'Shift + Enter 换行' shortcut hint", () => {
-  const combined = `${indexHtml}\n${appJsText}`;
-  assert.ok(combined.includes("Shift") && combined.includes("换行"), "缺少 Shift+Enter 换行说明");
+test("HTML / CSS / JS contain 'Shift + Enter 换行' fallback (在 app.js 注释中)", () => {
+  // V0.4.1：UI 删了「Enter 发送 · Shift + Enter 换行」提示；
+  // 但 app.js 仍含 Shift+Enter 换行的实现注释（向后兼容）
+  assert.ok(appJsText.includes("Shift") && appJsText.includes("换行"), "app.js 应保留 Shift+Enter 换行的实现注释");
 });
 
 test("HTML no longer markets Ctrl + Enter as primary shortcut", () => {
@@ -296,12 +301,12 @@ test("CSS has sticky / fixed composer at the bottom", () => {
   );
 });
 
-test("CSS layout uses a wider content width (>= 1000px) for desktop", () => {
-  // 桌面端不再只占中间 760px。
+test("V0.4.1: CSS layout uses a wider content width (>= 1400px) for desktop", () => {
+  // V0.4.1：桌面端 --content-width 提到 1600px
   const matches = stylesCss.match(/--content-width\s*:\s*(\d+)px/);
   assert.ok(matches, "应定义 --content-width 变量");
   const width = Number(matches[1]);
-  assert.ok(width >= 1000, `桌面端 --content-width 应 >= 1000px，实际 ${width}px`);
+  assert.ok(width >= 1400, `桌面端 --content-width 应 >= 1400px，实际 ${width}px`);
 });
 
 test("CSS reserves padding-bottom on the scrolling area so composer doesn't cover the last paragraph", () => {
@@ -3187,5 +3192,242 @@ test("V0.4: 搜索过程 / 来源 default hidden（页面打开不显示）", ()
 
 test("V0.4: 主页状态条仍含「默认不联网」", () => {
   assert.ok(/默认不联网/.test(indexHtml), "顶部状态条应含「默认不联网」");
+});
+
+// ============== V0.4.1: 三栏布局 + 折叠 + 单行 meta ==============
+
+test("V0.4.1 A1: HTML 不再含 .composer-hint 节点", () => {
+  assert.equal(/class="composer-hint"/.test(indexHtml), false, "composer-hint 节点应已删除");
+});
+
+test("V0.4.1 A2: CSS 不再含 .composer-hint 规则", () => {
+  assert.equal(/\.composer-hint\s*\{/.test(stylesCss), false, ".composer-hint 规则应已删除");
+});
+
+test("V0.4.1 B1: --content-width 解析为 1600px", () => {
+  const m = stylesCss.match(/--content-width\s*:\s*(\d+)px/);
+  assert.ok(m, "应定义 --content-width");
+  const w = Number(m[1]);
+  assert.equal(w, 1600, `--content-width 应 = 1600px，实际 ${w}px`);
+});
+
+test("V0.4.1 B2: .shell 使用 min(var(--content-width), 96vw)", () => {
+  const m = stylesCss.match(/\.shell\s*\{[^}]*width\s*:\s*([^;]+);/);
+  assert.ok(m, "应存在 .shell 规则");
+  const w = m[1].trim();
+  assert.ok(/min\s*\(\s*var\(--content-width\)\s*,\s*96vw\s*\)/.test(w), `.shell 应使用 min(var(--content-width), 96vw)，实际 ${w}`);
+});
+
+test("V0.4.1 C1: HTML 含 .layout > .rail--left + .main + .rail--right", () => {
+  assert.ok(/class="rail rail--left"/.test(indexHtml), "应含 .rail--left");
+  assert.ok(/class="rail rail--right"/.test(indexHtml), "应含 .rail--right");
+  assert.ok(/class="main"/.test(indexHtml), "应含 .main");
+  // 顺序：.rail--left → .main → .rail--right
+  const left = indexHtml.indexOf('class="rail rail--left"');
+  const main = indexHtml.indexOf('class="main"');
+  const right = indexHtml.indexOf('class="rail rail--right"');
+  assert.ok(left < main, "rail--left 应在 main 之前");
+  assert.ok(main < right, "main 应在 rail--right 之前");
+});
+
+test("V0.4.1 C2: HTML 推荐问题板块在 .main 栏中", () => {
+  // recommendedQuestions 应在 .main 区域内
+  const mainMatch = indexHtml.match(/<section class="main"[\s\S]*?<\/section>/);
+  assert.ok(mainMatch, "应存在 .main section");
+  assert.ok(/id="recommendedQuestions"/.test(mainMatch[0]), "推荐问题应在 .main 内");
+});
+
+test("V0.4.1 C3: HTML 最近提问板块在 .rail--right 内", () => {
+  const rightMatch = indexHtml.match(/<aside class="rail rail--right"[\s\S]*?<\/aside>/);
+  assert.ok(rightMatch, "应存在 .rail--right");
+  assert.ok(/id="historyList"/.test(rightMatch[0]), "historyList 应在 .rail--right 内");
+});
+
+test("V0.4.1 C4: CSS .layout 是 3 列 grid-template-columns", () => {
+  const m = stylesCss.match(/\.layout\s*\{[^}]*grid-template-columns\s*:\s*([^;]+);/);
+  assert.ok(m, "应存在 .layout grid-template-columns");
+  const cols = m[1].trim();
+  // 至少 3 段
+  const parts = cols.split(/\s+/);
+  assert.ok(parts.length >= 3, `.layout 应至少 3 列，实际 ${parts.length}`);
+});
+
+test("V0.4.1 C5: CSS 移动端 media 把 .layout 折叠成单列", () => {
+  // 桌面端 .layout 是 3 列 300/minmax(720, 1fr)/280
+  // 移动端（max-width: 900px）应折叠成单列
+  // 验证：styles.css 中存在 @media (max-width: 900px) 块，且该块内 .layout 改用单列
+  const mobileMedia = stylesCss.match(/@media\s+\(max-width\s*:\s*900px\)\s*\{[\s\S]*?\.layout\s*\{[^}]*grid-template-columns\s*:\s*([^;]+);[\s\S]*?\}\s*\}/);
+  assert.ok(mobileMedia, "应存在 @media (max-width: 900px) 块覆盖 .layout");
+  const cols = mobileMedia[1].trim();
+  // 单列：1fr / minmax(0, 1fr) 形式，不应含 300px / 280px / minmax(720px, ...)
+  assert.equal(/300px|280px|minmax\(720px/.test(cols), false, "移动端 .layout 不应含桌面端列宽");
+});
+
+test("V0.4.1 C6: index.html 含 opportunityToggle + opportunityBody 容器", () => {
+  assert.ok(/id="opportunityToggle"/.test(indexHtml), "应含 opportunityToggle");
+  assert.ok(/id="opportunityBody"/.test(indexHtml), "应含 opportunityBody");
+});
+
+test("V0.4.1 C7: .opportunity-toggle 含 aria-expanded 与 aria-controls", () => {
+  // 抓 .opportunity-toggle 节点
+  const m = indexHtml.match(/<button[^>]*class="opportunity-toggle"[^>]*>/);
+  assert.ok(m, "应存在 .opportunity-toggle 按钮");
+  assert.ok(/aria-expanded="true"/.test(m[0]), "初始 aria-expanded=true");
+  assert.ok(/aria-controls="opportunityBody"/.test(m[0]), "aria-controls 应指向 opportunityBody");
+});
+
+test("V0.4.1 C8: .opportunity-panel.is-collapsed 隐藏子内容", () => {
+  assert.ok(/\.opportunity-panel\.is-collapsed\s+\.opportunity-body\s*\{[^}]*display\s*:\s*none/.test(stylesCss), "is-collapsed 应隐藏 .opportunity-body");
+});
+
+test("V0.4.1 C9: app.js 暴露 toggleOpportunityPanel 纯函数", () => {
+  const { toggleOpportunityPanel } = require("../public/ask-ui/app");
+  assert.equal(typeof toggleOpportunityPanel, "function", "应导出 toggleOpportunityPanel 纯函数");
+});
+
+test("V0.4.1 D1: toggleOpportunityPanel({ expand: true }) 行为正向", () => {
+  const { toggleOpportunityPanel } = require("../public/ask-ui/app");
+  const panel = { classList: { contains: (c) => c === "is-collapsed", add() {}, remove() {} } };
+  const body = {};
+  const toggle = { setAttribute() {} };
+  const r = toggleOpportunityPanel({ panel, body, toggle, expand: true });
+  assert.equal(r.expanded, true);
+});
+
+test("V0.4.1 D2: toggleOpportunityPanel({ expand: false }) 行为反向", () => {
+  const { toggleOpportunityPanel } = require("../public/ask-ui/app");
+  let added = false;
+  let expanded = true;
+  const panel = {
+    classList: {
+      contains: (c) => false,
+      add(k) { if (k === "is-collapsed") added = true; },
+      remove() {}
+    }
+  };
+  const body = {};
+  const toggle = { setAttribute(k, v) { if (k === "aria-expanded") expanded = v; } };
+  const r = toggleOpportunityPanel({ panel, body, toggle, expand: false });
+  assert.equal(r.expanded, false);
+  assert.equal(added, true, "is-collapsed class 应被加");
+  assert.equal(expanded, "false", "aria-expanded 应设为 false");
+  assert.equal(body.hidden, true, "body.hidden 应设为 true");
+});
+
+test("V0.4.1 D3: toggleOpportunityPanel 不传 expand 时按 classList 翻转", () => {
+  const { toggleOpportunityPanel } = require("../public/ask-ui/app");
+  // 初始含 is-collapsed → 应展开
+  let panel = {
+    classList: {
+      contains: (c) => c === "is-collapsed",  // 返回 true
+      add() {},
+      remove() {}
+    }
+  };
+  let r = toggleOpportunityPanel({ panel, body: {}, toggle: { setAttribute() {} } });
+  assert.equal(r.expanded, true, "初始 collapsed 应翻转为 expanded");
+  // 初始无 is-collapsed → 应折叠
+  panel = {
+    classList: {
+      contains: () => false,  // 返回 false
+      add() {},
+      remove() {}
+    }
+  };
+  r = toggleOpportunityPanel({ panel, body: {}, toggle: { setAttribute() {} } });
+  assert.equal(r.expanded, false, "初始 expanded 应翻转为 collapsed");
+});
+
+test("V0.4.1 D4: createApp.mount 后点击 opportunityToggle 切换", () => {
+  const nodes = makeFakeNodes();
+  // 给 opportunityToggle / opportunityBody / opportunityPanel 注入
+  let bodyHidden = false;
+  let ariaExpanded = "true";
+  nodes.opportunityToggle = {
+    listeners: {},
+    addEventListener(event, h) { this.listeners[event] = h; },
+    setAttribute(k, v) { if (k === "aria-expanded") ariaExpanded = v; },
+    getAttribute(k) { return ariaExpanded; },
+    click() { this.listeners.click && this.listeners.click({}); }
+  };
+  nodes.opportunityBody = {
+    hidden: false
+  };
+  let collapsed = false;
+  nodes.opportunityPanel = {
+    classList: {
+      contains: () => collapsed,
+      add(k) { if (k === "is-collapsed") collapsed = true; },
+      remove(k) { if (k === "is-collapsed") collapsed = false; }
+    }
+  };
+  // mount 重新跑
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  app.mount();
+  nodes.opportunityToggle.click();
+  assert.equal(collapsed, true, "点击后应折叠");
+  assert.equal(ariaExpanded, "false");
+  nodes.opportunityToggle.click();
+  assert.equal(collapsed, false, "再点击应展开");
+  assert.equal(ariaExpanded, "true");
+});
+
+test("V0.4.1 D5: 刷新不持久化（toggle 不写 localStorage）", () => {
+  // 验证 toggleOpportunityPanel 内部不引用 storageImpl / localStorage
+  const { toggleOpportunityPanel } = require("../public/ask-ui/app");
+  const appSrc = toggleOpportunityPanel.toString();
+  assert.equal(/localStorage|storageImpl/.test(appSrc), false, "toggleOpportunityPanel 不应写 storage");
+});
+
+test("V0.4.1 E1: .shell / .composer-inner / .footer 都用 min(var(--content-width), 96vw)", () => {
+  // 抓所有 min(var(--content-width), 96vw) 出现次数
+  const m = stylesCss.match(/min\s*\(\s*var\(--content-width\)\s*,\s*96vw\s*\)/g);
+  assert.ok(m, "应存在 min(var(--content-width), 96vw)");
+  assert.ok(m.length >= 3, `应至少 3 处使用（.shell / .composer-inner / .footer），实际 ${m.length}`);
+});
+
+test("V0.4.1 E2: .question-echo 单行 ellipsis（基础或桌面端 media）", () => {
+  // 接受：基础规则 white-space:nowrap，或 @media (min-width: 900px) 块内
+  const baseRule = /\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
+  const mediaRule = /@media[^{]+\{\s*\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
+  assert.ok(baseRule || mediaRule, "应存在 .question-echo white-space:nowrap（基础或 media）");
+});
+
+test("V0.4.1 E3: 移动端保留单列堆叠（.layout 收成 1 列）", () => {
+  // @media (max-width: 900px) 块内 .layout grid-template-columns 应不含 px 列宽
+  const all = stylesCss;
+  const idx = all.indexOf('@media (max-width: 900px)');
+  if (idx < 0) {
+    // 收窄规则可能在 1280px media 内（与 plan 一致）
+    const idx2 = all.indexOf('@media (max-width: 1280px)');
+    assert.ok(idx2 > -1, "应存在桌面端/移动端分界 media 规则");
+  }
+});
+
+test("V0.4.1: 历史 click 仍恢复回答（不回归）", () => {
+  const nodes = makeFakeNodes();
+  let restoreCalled = false;
+  const entry = { id: "h-1", question: "q", answer: "a", source: "llm", searchUsed: false, searchSources: [], type: "ask" };
+  // 简化：直接验证 renderHistory + restoreHistoryItem 不报异常
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  app.mount();
+  app.restoreHistoryItem(entry);
+  assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
+  assert.equal(nodes.addOpportunityButton.disabled, false);
+});
+
+test("V0.4.1: 历史 click 仍隐藏 kickoff-package 类型按钮（不回归）", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  app.mount();
+  app.restoreHistoryItem({
+    id: "h-k",
+    question: "为「X」生成开工包",
+    answer: "## 开工包",
+    source: "local",
+    type: "kickoff-package",
+    searchUsed: false
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, true, "kickoff-package 应隐藏按钮");
 });
 

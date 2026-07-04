@@ -406,6 +406,34 @@ function showSearchSources(node, markup) {
   node.hidden = false;
 }
 
+// ============== V0.4.1: 今日机会池折叠 / 展开 ==============
+//
+// 纯函数：只操作节点 + 切换 is-collapsed / aria-expanded / body.hidden
+// 不写 localStorage；每次刷新回到默认展开
+// - panel: 含 classList 的 .opportunity-panel 节点
+// - body:  .opportunity-body 节点（显示/隐藏目标）
+// - toggle: 折叠按钮节点（更新 aria-expanded）
+// - expand: true 展开 / false 折叠 / undefined 按 classList 翻转
+function toggleOpportunityPanel({ panel, body, toggle, expand } = {}) {
+  if (!panel || !body) return { expanded: null };
+  // next: 期望的"展开"状态。
+  // 若已传 expand 则直接用；否则按当前 classList 翻转：
+  //   - 当前含 is-collapsed → 期望展开（true）
+  //   - 当前不含 is-collapsed → 期望折叠（false）
+  const isCollapsed = !!(panel.classList && panel.classList.contains && panel.classList.contains("is-collapsed"));
+  const next = typeof expand === "boolean" ? expand : isCollapsed;
+  if (next) {
+    panel.classList.remove("is-collapsed");
+    if (toggle && typeof toggle.setAttribute === "function") toggle.setAttribute("aria-expanded", "true");
+    body.hidden = false;
+  } else {
+    panel.classList.add("is-collapsed");
+    if (toggle && typeof toggle.setAttribute === "function") toggle.setAttribute("aria-expanded", "false");
+    body.hidden = true;
+  }
+  return { expanded: next };
+}
+
 // ============== Search process panel (V0.3.8) ==============
 
 function intentLabel(intent) {
@@ -872,6 +900,10 @@ function createApp(deps) {
   const opportunityStatus = nodes.opportunityStatus;
   const addOpportunityButton = nodes.addOpportunityButton;
   const addOpportunityContainer = nodes.addOpportunityContainer;
+  // V0.4.1：机会池折叠 / 展开
+  const opportunityToggle = nodes.opportunityToggle;
+  const opportunityBody = nodes.opportunityBody;
+  const opportunityPanelNode = nodes.opportunityPanel;
   // V0.3.11-hotfix-3：输入框右侧 × 清空按钮
   const clearInputButton = nodes.clearInputButton;
   const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
@@ -1763,6 +1795,16 @@ function createApp(deps) {
         renderHistory();
       });
     }
+    // V0.4.1：今日机会池折叠 / 展开（不持久化）
+    if (opportunityToggle && opportunityBody && opportunityPanelNode) {
+      opportunityToggle.addEventListener("click", () => {
+        toggleOpportunityPanel({
+          panel: opportunityPanelNode,
+          body: opportunityBody,
+          toggle: opportunityToggle
+        });
+      });
+    }
     renderQuestions();
     renderHistory();
     loadOpportunities();
@@ -1964,5 +2006,7 @@ module.exports = {
   OPPORTUNITY_TYPE_LABELS,
   OPPORTUNITY_SCORE_LABELS,
   OPPORTUNITY_TITLE_OVERRIDES,
-  PRESET_TAGS
+  PRESET_TAGS,
+  // V0.4.1
+  toggleOpportunityPanel
 };

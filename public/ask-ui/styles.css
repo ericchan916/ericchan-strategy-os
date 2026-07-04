@@ -23,7 +23,7 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --content-width: 1180px;
+  --content-width: 1600px;
   --composer-height: 132px;
 }
 
@@ -56,7 +56,7 @@ body {
 }
 
 .shell {
-  width: min(var(--content-width), calc(100% - 32px));
+  width: min(var(--content-width), 96vw);
   margin: 0 auto;
   padding: 48px 0 32px;
 }
@@ -117,11 +117,12 @@ h1 {
   box-shadow: 0 0 0 3px rgba(20, 86, 74, 0.15);
 }
 
-/* ---------------- Two-column layout ---------------- */
+/* ---------------- V0.4.1: Three-column layout ---------------- */
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  /* 左：今日机会池 | 中：主栏 | 右：最近提问 */
+  grid-template-columns: 300px minmax(720px, 1fr) 280px;
   gap: 24px;
   align-items: start;
 }
@@ -134,6 +135,85 @@ h1 {
   top: 24px;
   max-height: calc(100vh - 48px);
   overflow: auto;
+}
+
+/* V0.4.1：中栏（提问 + 推荐问题 + 战略回答） */
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.rail--left,
+.rail--right {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* V0.4.1：机会池头 - 标题 + 折叠按钮一行 */
+.opportunity-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.opportunity-toggle {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.opportunity-toggle:hover,
+.opportunity-toggle:focus-visible {
+  color: var(--accent-dark);
+  border-color: var(--accent);
+  outline: none;
+}
+.opportunity-toggle-icon {
+  display: inline-block;
+  line-height: 1;
+  font-weight: 600;
+}
+/* 折叠状态：隐藏 body */
+.opportunity-panel.is-collapsed .opportunity-body {
+  display: none;
+}
+/* 默认 placeholder 文本 + 标题（折叠后）仍可见 */
+.opportunity-panel.is-collapsed .panel-hint {
+  display: none;
+}
+
+/* V0.4.1：收窄屏 - 中屏 - 移动端 三档断点 */
+@media (max-width: 1280px) {
+  .layout {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+  .rail--right {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rail--right {
+    display: flex;
+  }
+  .rail {
+    position: static;
+    max-height: none;
+  }
 }
 
 /* ---------------- Panel ---------------- */
@@ -758,7 +838,7 @@ h2 {
 }
 
 .composer-inner {
-  width: min(var(--content-width), calc(100% - 0px));
+  width: min(var(--content-width), 96vw);
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -898,15 +978,6 @@ h2 {
   color: var(--danger);
 }
 
-.composer-hint {
-  width: min(var(--content-width), calc(100% - 0px));
-  margin: 8px auto 0;
-  color: var(--muted-soft);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 11.5px;
-  letter-spacing: 0.02em;
-}
-
 /* ---------------- Output Panel ---------------- */
 
 .output-panel {
@@ -924,6 +995,11 @@ h2 {
   color: var(--muted);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 13.5px;
+  /* V0.4.1：过长单行 ellipsis，避免换行成两行 */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .question-echo strong {
@@ -1033,7 +1109,7 @@ h2 {
 /* ---------------- Footer ---------------- */
 
 .footer {
-  width: min(var(--content-width), calc(100% - 32px));
+  width: min(var(--content-width), 96vw);
   margin: 28px auto 0;
   padding: 18px 22px;
   border-top: 1px solid var(--line-soft);
@@ -1053,17 +1129,6 @@ h2 {
 }
 
 /* ---------------- Narrow Screen ---------------- */
-
-@media (max-width: 960px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .rail {
-    position: static;
-    max-height: none;
-  }
-}
 
 @media (max-width: 680px) {
   :root {

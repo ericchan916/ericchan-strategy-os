@@ -1577,6 +1577,68 @@ V0.3 主线（联网搜索 → 战略回答 → ＋机会池 → 智能草稿 �
 - 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
 - 不把旧项目当成默认优化对象
 
+## V0.4.1 优化战略OS三栏日用布局
+
+V0.4 已经把首页标题、stats 口径和开工包顺序整理到位。V0.4.1 进一步把首页布局重做为桌面三栏 + 收窄屏 / 移动端两档断点,并清理过时的 `.composer-hint` 提示。
+
+### 1. 桌面三栏布局
+
+```
+左 (300px)        | 中 (minmax 720px, 1fr) | 右 (280px)
+今日机会池 (可折叠) | 推荐问题             | 最近提问
+                  | 战略回答 (主体)      |
+                  | meta 说明            |
+```
+
+- `.layout` 改用 `grid-template-columns: 300px minmax(720px, 1fr) 280px`
+- 左栏 `.rail--left` 仅含"今日机会池"（V0.4 的左栏太大，机会池 + 历史 + 推荐问题 + meta 全塞一栏）
+- 中栏 `.main` 含推荐问题 + 战略回答 + meta 说明
+- 右栏 `.rail--right` 仅含"最近提问"（与机会池分离）
+- 收窄屏 (`max-width: 1280px`) 退化为两栏（隐藏右栏）；移动端 (`max-width: 900px`) 单列堆叠
+
+### 2. 页面饱满度
+
+- `--content-width: 1180px → 1600px`
+- `.shell / .composer-inner / .footer` 全部用 `width: min(var(--content-width), 96vw)`
+- 桌面端 1080p+ 1920px+ 显示器左右留白从原来 300px+ 收窄到 80px 左右
+
+### 3. 今日机会池折叠 / 展开
+
+- 标题行右侧加 `+` 按钮 `<button id="opportunityToggle" aria-expanded="true" aria-controls="opportunityBody">`
+- 点击 → `toggleOpportunityPanel` 切换 `.is-collapsed` class + `aria-expanded` + `body.hidden`
+- 折叠状态 **不持久化**：每次刷新回到默认展开
+- 纯函数 `toggleOpportunityPanel({ panel, body, toggle, expand })` 在 `app.js` 顶层导出，可单测
+
+### 4. 推荐问题 + 最近提问分栏迁移
+
+- 推荐问题 `.questions-panel` 移到中栏 `.main` 顶部（紧贴战略回答）
+- 最近提问 `.history-panel` 移到右栏 `.rail--right`
+- 点击推荐问题仍只填入输入框；点击历史项仍恢复搜索过程 / 参考来源
+
+### 5. 删除底部 "Enter 发送 / Shift + Enter 换行" 提示
+
+- HTML 删除 `<p class="composer-hint">` 节点
+- CSS 删除 `.composer-hint { ... }` 规则
+- 交互逻辑不变：Enter 仍发送 / Shift+Enter 仍换行 / IME composition 仍不误触发（保留在 `app.js` 的实现注释里作为 fallback）
+
+### 6. 战略回答下方 meta 单行
+
+- `.question-echo` 基础规则加 `white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%`
+- 长 question / kickoff 描述不会撑成两行；过长时省略号截断
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）
+- 不恢复仓鼠跑轮
+- 不默认自动联网 / 不默认勾选"本次联网搜索"
+- 不删除 Bocha / Tavily provider
+- 不改 LLM API 配置逻辑
+- 不暴露 API Key / 不提交 .env
+- 不提交 `data/opportunities/*.json` 或测试机会数据
+- 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
+- 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
+- 不把旧项目当成默认优化对象
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。
