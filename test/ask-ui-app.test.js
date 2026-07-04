@@ -15,6 +15,9 @@ const {
   clearHistory,
   buildClipboardPayload,
   handleCopyClick,
+  redactPromptText,
+  buildCodexTaskPrompt,
+  buildClaudeCodeTaskPrompt,
   renderSearchSources,
   renderSearchProcess,
   renderOpportunityPanel,
@@ -45,10 +48,12 @@ function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false,
 function makeFakeNodes() {
   const fakeEl = (overrides = {}) => {
     const listeners = {};
+    const attrs = {};
     const el = {
       value: "",
       innerHTML: "",
       textContent: "",
+      title: "",
       classList: { add() {}, remove() {}, contains() { return false; } },
       hidden: false,
       disabled: false,
@@ -59,8 +64,9 @@ function makeFakeNodes() {
         for (const h of handlers) h(event);
       },
       removeEventListener() {},
-      setAttribute() {},
-      removeAttribute() {},
+      setAttribute(name, value) { attrs[name] = String(value); this[name] = String(value); },
+      removeAttribute(name) { delete attrs[name]; if (name in this) this[name] = ""; },
+      getAttribute(name) { return attrs[name] || null; },
       focus() {},
       setSelectionRange() {},
       scrollIntoView() {},
@@ -87,6 +93,8 @@ function makeFakeNodes() {
     historyEmpty: fakeEl(),
     historyClearButton: fakeEl(),
     copyButton: fakeEl(),
+    copyCodexTaskButton: fakeEl({ hidden: true, disabled: true, textContent: "复制为 Codex 任务" }),
+    copyClaudeTaskButton: fakeEl({ hidden: true, disabled: true, textContent: "复制为 Claude Code 任务" }),
     answerLoading: fakeEl(),
     webSearchToggle: fakeEl({ checked: false }),
     searchSources: fakeEl(),
@@ -368,6 +376,13 @@ test("HTML 含复制回答按钮 (id 或 aria-label)", () => {
   assert.ok(hasCopy, "缺少复制回答按钮");
 });
 
+test("V0.4.4: HTML 含开工包专属任务复制按钮", () => {
+  assert.ok(/id="copyCodexTaskButton"/.test(indexHtml), "缺少 Codex 任务复制按钮");
+  assert.ok(/id="copyClaudeTaskButton"/.test(indexHtml), "缺少 Claude Code 任务复制按钮");
+  assert.ok(indexHtml.includes("复制为 Codex 任务"));
+  assert.ok(indexHtml.includes("复制为 Claude Code 任务"));
+});
+
 test("HTML 含 loading 容器", () => {
   const hasLoading =
     /id="answerLoading"/.test(indexHtml) ||
@@ -577,6 +592,11 @@ test("CSS 包含历史记录样式（.history / .history-item / .history-empty�
     /\.history-item[\s\S]{0,200}?\{/i.test(stylesCss) ||
     /\.history-empty[\s\S]{0,200}?\{/i.test(stylesCss);
   assert.ok(hasHistory, "缺少历史记录样式");
+});
+
+test("V0.4.4: CSS 包含开工包任务复制按钮样式", () => {
+  assert.ok(/\.task-copy-button\s*\{/.test(stylesCss), "缺少 .task-copy-button 样式");
+  assert.ok(/\.task-copy-button\[data-state="copied"\]/.test(stylesCss), "缺少任务复制成功态样式");
 });
 
 test("app.js 含 history store (createHistoryStore / strategyOsAskHistory) 与 copy helpers", () => {
@@ -868,6 +888,39 @@ test("handleCopyClick: 缺 answer 时返回 ok:false，不调用 clipboard", asy
   });
   assert.equal(result.ok, false);
   assert.equal(called, 0);
+});
+
+test("buildCodexTaskPrompt: 包含开工包正文、测试与 Git 要求，并脱敏 sk-*", () => {
+  const prompt = buildCodexTaskPrompt({
+    question: "帮我生成开工包",
+    answer: "# 项目开工包\n使用 sk-testSecret123456 做配置。"
+  });
+  assert.ok(prompt.includes("# 项目开工包"));
+  assert.ok(prompt.includes("测试要求"));
+  assert.ok(prompt.includes("Git 要求"));
+  assert.ok(prompt.includes("[redacted]"));
+  assert.equal(prompt.includes("sk-testSecret123456"), false);
+});
+
+test("buildClaudeCodeTaskPrompt: 包含开工包正文与真实网页验证要求，并脱敏 sk-*", () => {
+  const prompt = buildClaudeCodeTaskPrompt({
+    question: "帮我生成开工包",
+    answer: "# 项目开工包\n不要泄露 sk-claudeSecret123456。"
+  });
+  assert.ok(prompt.includes("# 项目开工包"));
+  assert.ok(prompt.includes("真实网页验证要求"));
+  assert.ok(prompt.includes("不要碰 loading 动画"));
+  assert.ok(prompt.includes("[redacted]"));
+  assert.equal(prompt.includes("sk-claudeSecret123456"), false);
+});
+
+test("任务提示词模板: 空 answer 有 fallback", () => {
+  assert.ok(buildCodexTaskPrompt({ answer: "" }).includes("开工包正文为空"));
+  assert.ok(buildClaudeCodeTaskPrompt({ answer: "" }).includes("开工包正文为空"));
+});
+
+test("redactPromptText: 替换 sk-* 原文", () => {
+  assert.equal(redactPromptText("key=sk-abc123_ABC-456"), "key=[redacted]");
 });
 
 // ============== V0.3.6 搜索来源展示 ==============
@@ -2203,6 +2256,8 @@ test("V0.3.11-hotfix-2: 普通 Ask 成功后加入机会池按钮可见可点", 
   app.setCurrentAnswer("一些本地回答", "local", { question: "q" });
   assert.equal(nodes.addOpportunityButton.hidden, false, "有回答时按钮应可见");
   assert.equal(nodes.addOpportunityButton.disabled, false, "有回答时按钮应可点");
+  assert.equal(nodes.copyCodexTaskButton.hidden, true, "普通 answer 不显示 Codex 任务复制");
+  assert.equal(nodes.copyClaudeTaskButton.hidden, true, "普通 answer 不显示 Claude Code 任务复制");
 });
 
 test("V0.3.11-hotfix-2: 联网搜索成功后按钮仍可见可点（即使 source=llm / search.used=true）", () => {
@@ -2244,6 +2299,8 @@ test("V0.3.11-hotfix-2: loading 中按钮 disabled 或隐藏", async () => {
   // 模拟 loading 开始（不真正提交）
   app.setInFlight(true);
   assert.equal(nodes.addOpportunityButton.disabled, true, "loading 中按钮应 disabled");
+  assert.equal(nodes.copyCodexTaskButton.hidden, true, "loading 中隐藏 Codex 任务复制");
+  assert.equal(nodes.copyClaudeTaskButton.hidden, true, "loading 中隐藏 Claude Code 任务复制");
 });
 
 test("V0.3.11-hotfix-2: loading 结束且有 answer 后按钮恢复可点", () => {
@@ -2269,6 +2326,8 @@ test("V0.3.11-hotfix-2: history restore 普通 answer 后按钮可见可点", ()
   });
   assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
   assert.equal(nodes.addOpportunityButton.disabled, false, "恢复普通 answer 后按钮应可点");
+  assert.equal(nodes.copyCodexTaskButton.hidden, true, "恢复普通 answer 后隐藏 Codex 任务复制");
+  assert.equal(nodes.copyClaudeTaskButton.hidden, true, "恢复普通 answer 后隐藏 Claude Code 任务复制");
 });
 
 test("V0.3.11-hotfix-2: history restore 开工包类型（kickoff-package）后按钮应隐藏，不显示 disabled 灰按钮", () => {
@@ -2285,6 +2344,10 @@ test("V0.3.11-hotfix-2: history restore 开工包类型（kickoff-package）后�
   // 应隐藏，而不是 disabled
   assert.equal(nodes.addOpportunityButton.hidden, true, "kickoff-package 类型应隐藏按钮");
   assert.notEqual(nodes.addOpportunityButton.hidden === false && nodes.addOpportunityButton.disabled === true, true, "不应显示 disabled 灰按钮");
+  assert.equal(nodes.copyCodexTaskButton.hidden, false, "kickoff-package 应显示 Codex 任务复制");
+  assert.equal(nodes.copyCodexTaskButton.disabled, false);
+  assert.equal(nodes.copyClaudeTaskButton.hidden, false, "kickoff-package 应显示 Claude Code 任务复制");
+  assert.equal(nodes.copyClaudeTaskButton.disabled, false);
 });
 
 test("V0.3.11-hotfix-2: clear/reset 状态后按钮隐藏", () => {
@@ -2295,6 +2358,83 @@ test("V0.3.11-hotfix-2: clear/reset 状态后按钮隐藏", () => {
   app.setCurrentAnswer("", "");
   assert.equal(nodes.addOpportunityButton.hidden, true, "清空后按钮隐藏");
   assert.notEqual(nodes.addOpportunityButton.disabled === true && nodes.addOpportunityButton.hidden === false, true, "清空后不能显示 disabled 灰按钮");
+  assert.equal(nodes.copyCodexTaskButton.hidden, true, "清空后 Codex 任务复制隐藏");
+  assert.equal(nodes.copyClaudeTaskButton.hidden, true, "清空后 Claude Code 任务复制隐藏");
+});
+
+test("V0.4.4: 直接设置 kickoff-package 后显示任务复制按钮并隐藏机会池", () => {
+  const { app, nodes } = makeAskApp();
+  app.setCurrentAnswer("# 开工包\n做一个小验证。", "local", {
+    question: "为「X」生成开工包",
+    answerType: "kickoff-package"
+  });
+  assert.equal(nodes.addOpportunityButton.hidden, true);
+  assert.equal(nodes.copyCodexTaskButton.hidden, false);
+  assert.equal(nodes.copyClaudeTaskButton.hidden, false);
+});
+
+test("V0.4.4: 点击 Codex 任务按钮写入脱敏任务提示词", async () => {
+  let written = "";
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    clipboardImpl: async (text) => {
+      written = text;
+    },
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  app.setCurrentAnswer("# 开工包\n配置 sk-codexSecret123456。", "local", {
+    question: "生成开工包",
+    answerType: "kickoff-package"
+  });
+  const result = await app.handleCodexTaskCopy();
+  assert.equal(result.ok, true);
+  assert.ok(written.includes("测试要求"));
+  assert.ok(written.includes("Git 要求"));
+  assert.ok(written.includes("# 开工包"));
+  assert.equal(written.includes("sk-codexSecret123456"), false);
+});
+
+test("V0.4.4: 点击 Claude Code 任务按钮写入脱敏任务提示词", async () => {
+  let written = "";
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    clipboardImpl: async (text) => {
+      written = text;
+    },
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  app.setCurrentAnswer("# 开工包\n配置 sk-claudeSecret123456。", "local", {
+    question: "生成开工包",
+    answerType: "kickoff-package"
+  });
+  const result = await app.handleClaudeCodeTaskCopy();
+  assert.equal(result.ok, true);
+  assert.ok(written.includes("真实网页验证要求"));
+  assert.ok(written.includes("# 开工包"));
+  assert.equal(written.includes("sk-claudeSecret123456"), false);
+});
+
+test("V0.4.4: 任务复制 clipboard 失败时不抛异常", async () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    clipboardImpl: async () => {
+      throw new Error("clipboard denied");
+    },
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  app.setCurrentAnswer("# 开工包", "local", { question: "q", answerType: "kickoff-package" });
+  const result = await app.handleCodexTaskCopy();
+  assert.equal(result.ok, false);
+  assert.ok(app.getStatus().includes("复制失败"));
 });
 
 test("V0.3.11-hotfix-2: draftWarning 时主按钮仍可点击，表单内显示 warning", async () => {
@@ -3424,6 +3564,8 @@ test("V0.4.1: 历史 click 仍恢复回答（不回归）", () => {
   app.restoreHistoryItem(entry);
   assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
   assert.equal(nodes.addOpportunityButton.disabled, false);
+  assert.equal(nodes.copyCodexTaskButton.hidden, true);
+  assert.equal(nodes.copyClaudeTaskButton.hidden, true);
 });
 
 test("V0.4.1: 历史 click 仍隐藏 kickoff-package 类型按钮（不回归）", () => {
@@ -3439,6 +3581,8 @@ test("V0.4.1: 历史 click 仍隐藏 kickoff-package 类型按钮（不回归）
     searchUsed: false
   });
   assert.equal(nodes.addOpportunityButton.hidden, true, "kickoff-package 应隐藏按钮");
+  assert.equal(nodes.copyCodexTaskButton.hidden, false, "kickoff-package 应显示 Codex 任务复制");
+  assert.equal(nodes.copyClaudeTaskButton.hidden, false, "kickoff-package 应显示 Claude Code 任务复制");
 });
 
 // =================================================================

@@ -1209,6 +1209,8 @@ h2 {
 .answer-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1260,6 +1262,47 @@ h2 {
 
 .copy-icon {
   display: block;
+}
+
+.task-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.task-copy-button:hover:not(:disabled),
+.task-copy-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.task-copy-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(20, 86, 74, 0.14);
+}
+
+.task-copy-button[data-state="copied"] {
+  border-style: solid;
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent-dark);
+}
+
+.task-copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* ---------------- Loading: 深色卡片 + 完整 Uiverse 仓鼠跑轮 (V0.3.4-hotfix-3) ----------------

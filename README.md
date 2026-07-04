@@ -1709,6 +1709,20 @@ V0.4.3 不新增产品功能，只做代码体检和低风险整理。用户可�
 - 不改 Ask UI 三栏布局、搜索开关默认值、LLM 配置、Bocha / Tavily provider。
 - 不提交 `.env`、`opportunity-pool.json`、`data/opportunities/backups` 或测试机会数据。
 
+## V0.4.4 开工包任务复制
+
+V0.4.4 只整理开工包派发前的手动准备动作：当回答类型是 `kickoff-package` 时，回答区会额外显示“复制为 Codex 任务”和“复制为 Claude Code 任务”。
+
+- 普通战略回答不显示这两个专属按钮，仍只保留“＋ 机会池”和普通复制。
+- 开工包历史恢复后，专属任务复制按钮仍可用。
+- 按钮只生成可复制的任务提示词，不会自动调用 Codex、Claude Code、OpenDesign 或任何外部执行工具。
+- 复制内容会对 `sk-*` 做脱敏，避免把 API Key 原文带入下游工具。
+- Codex 任务模板偏工程执行：现状检查、边界、测试、Git 与最终汇报。
+- Claude Code 任务模板偏前端 / 交互执行：禁止大改架构，要求真实网页验证并汇报 URL 与停止方式。
+- 默认不联网原则不变，“本次联网搜索”不会被默认打开。
+- loading 动画未修改。
+- `.env`、`opportunity-pool.json` 和用户生成数据仍不提交。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

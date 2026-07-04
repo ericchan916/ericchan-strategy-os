@@ -311,6 +311,110 @@ async function handleCopyClick({ answer, clipboardImpl } = {}) {
   }
 }
 
+function redactPromptText(value) {
+  return String(value || "").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]");
+}
+
+function inferTaskTitle({ question, answer, fallback } = {}) {
+  const safeAnswer = redactPromptText(answer);
+  const heading = safeAnswer.match(/^#\s*(.+)$/m);
+  const raw = (heading && heading[1]) || question || fallback || "开工包任务";
+  return redactPromptText(raw).trim().slice(0, 80) || "开工包任务";
+}
+
+function normalizeKickoffAnswer(answer) {
+  const safe = redactPromptText(answer).trim();
+  return safe || "（开工包正文为空。请先检查项目现状、目标和边界，再决定是否执行。）";
+}
+
+function buildCodexTaskPrompt({ question, answer } = {}) {
+  const title = inferTaskTitle({ question, answer, fallback: "Codex 工程任务" });
+  const kickoff = normalizeKickoffAnswer(answer);
+  return `任务标题：
+${title}
+
+任务背景：
+以下是 EricChan·战略OS 生成的开工包，请基于它执行。开工包不足时，先做现状检查，不要凭空扩大需求。
+
+开工包正文：
+${kickoff}
+
+执行原则：
+- 先检查项目现状和 Git 工作区；如果工作区不干净，先停下汇报。
+- 不要扩大需求，不要重写项目，不要修改无关旧项目。
+- 不要提交 .env、node_modules、reports、data、opportunities、daily-command 等用户数据文件。
+- 不要真实调用外部付费 API，除非用户明确要求。
+- 每次只做本次任务范围内的小步修改。
+
+推荐执行方式：
+- 先定位相关文件和现有模式。
+- 优先复用现有函数、测试和命令。
+- 只在需要时补最小测试。
+- 完成后做真实可复现验证。
+
+测试要求：
+- 运行项目已有测试。
+- 如果没有测试，说明原因并做最小验证。
+- 不用测试通过替代真实功能检查。
+
+Git 要求：
+- 提交前确认没有敏感文件和用户数据文件。
+- 使用清晰 commit message。
+- 最终确认工作区状态。
+
+最终汇报：
+- 修改文件
+- 核心实现
+- 测试结果
+- 风险
+- commit 信息
+- 工作区状态`;
+}
+
+function buildClaudeCodeTaskPrompt({ question, answer } = {}) {
+  const title = inferTaskTitle({ question, answer, fallback: "Claude Code 前端任务" });
+  const kickoff = normalizeKickoffAnswer(answer);
+  return `任务标题：
+${title}
+
+当前开工包正文：
+${kickoff}
+
+页面 / 交互目标：
+- 基于开工包完成最小必要的页面、交互或单页应用修改。
+- 优先保持现有架构和视觉约定，不做大规模重写。
+
+禁止事项：
+- 不要自动调用 Codex / Claude Code / OpenDesign / MiniMax。
+- 不要真实调用外部付费 API，除非用户明确要求。
+- 不要修改用户已确认的视觉点，尤其不要碰 loading 动画。
+- 不要提交 .env、node_modules、reports、data、opportunities、daily-command 等用户数据文件。
+- 不要把任务扩展成 Dashboard、账号系统、数据库或部署。
+
+允许修改范围：
+- 只改与开工包目标直接相关的前端、样式、脚本和测试。
+- 如果项目现状不清楚，先检查并汇报，再做小步修改。
+
+验收标准：
+- 用户可见行为符合开工包目标。
+- 普通流程不回归。
+- API Key 和 sk-* 信息不泄露。
+- 测试通过。
+
+真实网页验证要求：
+- 完成后打开本地网页真实验证，不要只跑测试。
+- 汇报实际 URL、端口、服务是否仍在运行，以及如何停止服务。
+
+最终汇报格式：
+- 修改文件
+- 页面 / 交互实现
+- 测试结果
+- 真实网页验证结果
+- 风险和未做事项
+- commit 信息
+- 工作区状态`;
+}
+
 // ============== Search sources panel (V0.3.6) ==============
 //
 // 纯函数：把 search.sources 渲染成轻量 HTML 字符串。
@@ -928,6 +1032,8 @@ function createApp(deps) {
   const historyEmpty = nodes.historyEmpty;
   const historyClearButton = nodes.historyClearButton;
   const copyButton = nodes.copyButton;
+  const copyCodexTaskButton = nodes.copyCodexTaskButton;
+  const copyClaudeTaskButton = nodes.copyClaudeTaskButton;
   const answerLoading = nodes.answerLoading;
   const webSearchToggle = nodes.webSearchToggle;
   const searchSourcesNode = nodes.searchSources;
@@ -1275,6 +1381,7 @@ function createApp(deps) {
     if (copyButton && state.inFlight) copyButton.disabled = true;
     // V0.3.11-hotfix-2：统一按钮状态
     syncOpportunityActionState();
+    syncKickoffTaskCopyState();
   }
 
   // V0.3.11-hotfix-2：统一决定"加入机会池"按钮的显隐 / disabled。
@@ -1293,6 +1400,17 @@ function createApp(deps) {
     addOpportunityButton.disabled = !visible;
     if (visible) {
       addOpportunityButton.removeAttribute("data-state");
+    }
+  }
+
+  function syncKickoffTaskCopyState() {
+    const hasAnswer = typeof state.currentAnswer === "string" && state.currentAnswer.trim().length > 0;
+    const visible = hasAnswer && !state.inFlight && state.currentAnswerType === "kickoff-package";
+    for (const button of [copyCodexTaskButton, copyClaudeTaskButton]) {
+      if (!button) continue;
+      button.hidden = !visible;
+      button.disabled = !visible;
+      if (!visible) button.removeAttribute("data-state");
     }
   }
 
@@ -1356,6 +1474,7 @@ function createApp(deps) {
     // V0.3.10：回答存在时显示"加入机会池"按钮
     // V0.3.11-hotfix-2：统一由 syncOpportunityActionState 决定
     syncOpportunityActionState();
+    syncKickoffTaskCopyState();
     // 关闭之前的"加入机会池"弹层
     if (!state.currentAnswer.trim()) {
       closeAddOpportunityForm();
@@ -1649,6 +1768,30 @@ function createApp(deps) {
     return result;
   }
 
+  async function handleTaskPromptCopy(kind) {
+    const builder = kind === "claude" ? buildClaudeCodeTaskPrompt : buildCodexTaskPrompt;
+    const button = kind === "claude" ? copyClaudeTaskButton : copyCodexTaskButton;
+    const defaultLabel = kind === "claude" ? "复制为 Claude Code 任务" : "复制为 Codex 任务";
+    const prompt = builder({ question: state.currentQuestion, answer: state.currentAnswer });
+    const result = await handleCopyClick({ answer: prompt, clipboardImpl });
+    if (button) {
+      if (result.ok) {
+        button.setAttribute("data-state", "copied");
+        button.textContent = "已复制";
+        button.title = "已复制";
+        setTimeout(() => {
+          if (button) {
+            button.removeAttribute("data-state");
+            button.textContent = defaultLabel;
+            button.title = defaultLabel;
+          }
+        }, 1800);
+      }
+      setStatus(result.message, result.ok ? null : "error");
+    }
+    return result;
+  }
+
   async function submitAsk() {
     if (state.inFlight) return { submitted: false, reason: "in-flight" };
     const value = input ? String(input.value || "").trim() : "";
@@ -1819,6 +1962,12 @@ function createApp(deps) {
     if (copyButton) {
       copyButton.addEventListener("click", handleCopy);
     }
+    if (copyCodexTaskButton) {
+      copyCodexTaskButton.addEventListener("click", () => handleTaskPromptCopy("codex"));
+    }
+    if (copyClaudeTaskButton) {
+      copyClaudeTaskButton.addEventListener("click", () => handleTaskPromptCopy("claude"));
+    }
     if (addOpportunityButton) {
       addOpportunityButton.addEventListener("click", () => {
         if (state.inFlight) return;
@@ -1878,6 +2027,8 @@ function createApp(deps) {
       renderHistory();
     },
     handleCopy,
+    handleCodexTaskCopy: () => handleTaskPromptCopy("codex"),
+    handleClaudeCodeTaskCopy: () => handleTaskPromptCopy("claude"),
     getStatus: () => (statusText ? statusText.textContent : ""),
     setStatus,
     setGlobalStatus,
@@ -1984,6 +2135,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const historyEmpty = document.querySelector("#historyEmpty");
   const historyClearButton = document.querySelector("#historyClear");
   const copyButton = document.querySelector("#copyButton");
+  const copyCodexTaskButton = document.querySelector("#copyCodexTaskButton");
+  const copyClaudeTaskButton = document.querySelector("#copyClaudeTaskButton");
   const answerLoading = document.querySelector("#answerLoading");
   const webSearchToggle = document.querySelector("#webSearchToggle");
   const searchSourcesNode = document.querySelector("#searchSources");
@@ -2008,6 +2161,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       historyEmpty,
       historyClearButton,
       copyButton,
+      copyCodexTaskButton,
+      copyClaudeTaskButton,
       answerLoading,
       webSearchToggle,
       searchSources: searchSourcesNode,
@@ -2039,6 +2194,9 @@ module.exports = {
   clearHistory,
   buildClipboardPayload,
   handleCopyClick,
+  redactPromptText,
+  buildCodexTaskPrompt,
+  buildClaudeCodeTaskPrompt,
   buildLoadingMarkup,
   translateInternalTermsClient,
   createApp,
