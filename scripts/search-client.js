@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 // Ask Mode 按需搜索客户端：只读取 STRATEGY_OS_SEARCH_*，不输出 / 不返回 API Key。
-// 当前只支持 tavily；其它 provider 保留为明确错误，不做多平台抽象。
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RESULTS = 5;
+const MAX_SEARCH_RESULTS = 50;
 const DEFAULT_TAVILY_URL = "https://api.tavily.com/search";
+const DEFAULT_BOCHA_URL = "https://api.bochaai.com/v1/web-search";
 const SEARCH_FALLBACK_WARNING = "联网搜索暂时不可用，已使用本地上下文回答。";
 
 function redactKey(value) {
@@ -21,7 +22,7 @@ function readSearchConfig(env = process.env) {
     apiKey: String(env.STRATEGY_OS_SEARCH_API_KEY || "").trim(),
     baseUrl: String(env.STRATEGY_OS_SEARCH_BASE_URL || "").trim(),
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS,
-    maxResults: Number.isFinite(maxResults) && maxResults > 0 ? Math.min(Math.floor(maxResults), 10) : DEFAULT_MAX_RESULTS
+    maxResults: Number.isFinite(maxResults) && maxResults > 0 ? Math.min(Math.floor(maxResults), MAX_SEARCH_RESULTS) : DEFAULT_MAX_RESULTS
   };
 }
 
@@ -58,6 +59,22 @@ function normalizeResults(items, maxResults) {
       };
     })
     .filter((item) => item.title || item.url || item.snippet);
+}
+
+function normalizeBochaResults(items, maxResults) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const url = String(item.url || "").trim();
+      return {
+        title: truncate(item.name || item.title || "未命名来源", 140),
+        url,
+        snippet: truncate(item.summary || item.snippet || "", 500),
+        source: truncate(item.siteName || hostFromUrl(url), 80),
+        publishedAt: item.datePublished || null
+      };
+    })
+    .filter((item) => item.url)
+    .slice(0, maxResults);
 }
 
 function resultSkeleton(config, query) {
@@ -101,9 +118,10 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
   if (!config.apiKey) return unavailable(config, q, "missing-key");
   if (!q) return unavailable(config, q, "empty-query", "搜索问题为空，已使用本地上下文回答。");
   if (typeof fetchImpl !== "function") return unavailable(config, q, "no-fetch");
-  if (config.provider !== "tavily") return unavailable(config, q, "unsupported-provider");
+  if (config.provider === "tavily") return searchTavily({ config, query: q, fetchImpl, abortImpl });
+  if (config.provider === "bocha") return searchBocha({ config, query: q, fetchImpl, abortImpl });
 
-  return searchTavily({ config, query: q, fetchImpl, abortImpl });
+  return unavailable(config, q, "unsupported-provider");
 }
 
 async function searchTavily({ config, query, fetchImpl, abortImpl }) {
@@ -165,6 +183,58 @@ async function searchTavily({ config, query, fetchImpl, abortImpl }) {
   };
 }
 
+async function searchBocha({ config, query, fetchImpl, abortImpl }) {
+  const url = config.baseUrl || DEFAULT_BOCHA_URL;
+  const body = JSON.stringify({
+    query,
+    freshness: "oneYear",
+    summary: true,
+    count: Math.min(Math.max(config.maxResults, 1), MAX_SEARCH_RESULTS)
+  });
+  let timer;
+  let response;
+  try {
+    const request = {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        "content-type": "application/json"
+      },
+      body
+    };
+    if (abortImpl) {
+      const controller = new abortImpl();
+      timer = setTimeout(() => controller.abort(), config.timeoutMs);
+      request.signal = controller.signal;
+    }
+    response = await fetchImpl(url, request);
+  } catch (error) {
+    return unavailable(config, query, classifyNetworkError(error));
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  if (!response || !response.ok) {
+    return unavailable(config, query, classifyHttpStatus(response ? response.status : 0));
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    return unavailable(config, query, "parse");
+  }
+
+  const values = payload && payload.webPages && payload.webPages.value;
+  const results = normalizeBochaResults(values, config.maxResults);
+  if (!results.length) return unavailable(config, query, "empty", "没有搜到可用结果，已使用本地上下文回答。");
+
+  return {
+    ...resultSkeleton(config, query),
+    results
+  };
+}
+
 function toPublicSearchMeta(search) {
   const result = search && typeof search === "object" ? search : {};
   const sources = normalizeResults(result.results || [], DEFAULT_MAX_RESULTS).map((item) => ({
@@ -184,12 +254,15 @@ function toPublicSearchMeta(search) {
 module.exports = {
   DEFAULT_TIMEOUT_MS,
   DEFAULT_MAX_RESULTS,
+  MAX_SEARCH_RESULTS,
   DEFAULT_TAVILY_URL,
+  DEFAULT_BOCHA_URL,
   SEARCH_FALLBACK_WARNING,
   redactKey,
   readSearchConfig,
   shouldUseWebSearch,
   searchWeb,
   normalizeResults,
+  normalizeBochaResults,
   toPublicSearchMeta
 };

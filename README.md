@@ -861,6 +861,21 @@ STRATEGY_OS_SEARCH_TIMEOUT_MS=15000
 STRATEGY_OS_SEARCH_MAX_RESULTS=5
 ```
 
+当前支持的 provider：
+
+- `tavily`：海外 Web Search provider。
+- `bocha`：博查，国内 Web Search provider。
+
+Bocha 配置示例：
+
+```env
+STRATEGY_OS_SEARCH_ENABLED=true
+STRATEGY_OS_SEARCH_PROVIDER=bocha
+STRATEGY_OS_SEARCH_API_KEY=你的 Bocha API Key
+STRATEGY_OS_SEARCH_BASE_URL=https://api.bochaai.com/v1/web-search
+STRATEGY_OS_SEARCH_MAX_RESULTS=5
+```
+
 使用方式：
 
 ```bash
@@ -888,7 +903,7 @@ npm run search:check
 - maxResults
 - 测试搜索是否成功
 
-诊断脚本不会输出真实 Key，不会修改任何项目数据。当前内置 provider：`tavily`。
+诊断脚本不会输出真实 Key，不会修改任何项目数据。当前内置 provider：`tavily`、`bocha`。
 
 ## LLM 回答清洗（V0.3.3-hotfix-3）
 
