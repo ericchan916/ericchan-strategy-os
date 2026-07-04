@@ -406,6 +406,8 @@ test("search results are injected into LLM prompt without API key and with trunc
       searchWeb: async ({ query }) => ({
         provider: "tavily",
         query,
+        plannedQueries: ["Anthropic AI news Claude product launch recent"],
+        intent: "news",
         warning: null,
         results: [{ title: "Anthropic update", url: "https://example.com/news", snippet: longSnippet, source: "example.com" }]
       })
@@ -414,7 +416,10 @@ test("search results are injected into LLM prompt without API key and with trunc
 
   assert.equal(result.source, "llm");
   assert.ok(capturedPrompt.includes("【外部搜索结果摘要】"));
+  assert.ok(capturedPrompt.includes("搜索意图：news"));
+  assert.ok(capturedPrompt.includes("实际搜索词：Anthropic AI news Claude product launch recent"));
   assert.ok(capturedPrompt.includes("搜索结果只是参考"));
+  assert.ok(capturedPrompt.includes("A股、行情、股票、盘面热点"));
   assert.equal(capturedPrompt.includes("sk-llm-key"), false);
   assert.equal(capturedPrompt.includes("sk-search-secret"), false);
   assert.ok(capturedPrompt.length < longSnippet.length + 3000, "搜索摘要应被截断后注入 prompt");

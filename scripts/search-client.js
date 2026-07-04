@@ -2,6 +2,8 @@
 
 // Ask Mode 按需搜索客户端：只读取 STRATEGY_OS_SEARCH_*，不输出 / 不返回 API Key。
 
+const { filterSearchResultsByRelevance, planSearchQueries } = require("./search-planner");
+
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RESULTS = 5;
 const MAX_SEARCH_RESULTS = 50;
@@ -77,10 +79,12 @@ function normalizeBochaResults(items, maxResults) {
     .slice(0, maxResults);
 }
 
-function resultSkeleton(config, query) {
+function resultSkeleton(config, query, plan = null) {
   return {
     provider: config.provider || "",
     query: String(query || ""),
+    plannedQueries: plan && Array.isArray(plan.queries) ? plan.queries : [],
+    intent: plan ? plan.intent : "general",
     results: [],
     warning: null,
     errorCode: null
@@ -88,8 +92,9 @@ function resultSkeleton(config, query) {
 }
 
 function unavailable(config, query, errorCode, warning = SEARCH_FALLBACK_WARNING) {
+  const plan = planSearchQueries(query);
   return {
-    ...resultSkeleton(config, query),
+    ...resultSkeleton(config, query, plan),
     warning,
     errorCode
   };
@@ -112,16 +117,53 @@ function classifyNetworkError(error) {
 async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetch, abortImpl = globalThis.AbortController } = {}) {
   const config = readSearchConfig(env);
   const q = String(query || "").trim();
+  const plan = planSearchQueries(q);
 
   if (!config.enabled) return unavailable(config, q, "disabled", "联网搜索未启用，已使用本地上下文回答。");
   if (!config.provider) return unavailable(config, q, "missing-provider");
   if (!config.apiKey) return unavailable(config, q, "missing-key");
   if (!q) return unavailable(config, q, "empty-query", "搜索问题为空，已使用本地上下文回答。");
   if (typeof fetchImpl !== "function") return unavailable(config, q, "no-fetch");
-  if (config.provider === "tavily") return searchTavily({ config, query: q, fetchImpl, abortImpl });
-  if (config.provider === "bocha") return searchBocha({ config, query: q, fetchImpl, abortImpl });
+  if (config.provider !== "tavily" && config.provider !== "bocha") return unavailable(config, q, "unsupported-provider");
 
-  return unavailable(config, q, "unsupported-provider");
+  const queries = plan.queries.slice(0, 3);
+  const attempts = [];
+  for (const plannedQuery of queries) {
+    attempts.push(await searchProvider({ config, query: plannedQuery, fetchImpl, abortImpl }));
+  }
+
+  const results = dedupeResults(attempts.flatMap((item) => item.results || []));
+  if (!results.length) {
+    const failed = attempts.find((item) => item.warning);
+    return {
+      ...resultSkeleton(config, q, plan),
+      warning: failed ? failed.warning : "没有搜到可用结果，已使用本地上下文回答。",
+      errorCode: failed ? failed.errorCode : "empty"
+    };
+  }
+
+  const filtered = filterSearchResultsByRelevance(results, plan, config.maxResults);
+  return {
+    ...resultSkeleton(config, q, plan),
+    results: filtered.results,
+    warning: filtered.weak ? "搜索结果相关性较弱，已保留少量结果供参考。" : null,
+    errorCode: filtered.weak ? "weak-relevance" : null
+  };
+}
+
+function dedupeResults(results) {
+  const seen = new Set();
+  return (Array.isArray(results) ? results : []).filter((item) => {
+    const key = String(item.url || item.title || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function searchProvider({ config, query, fetchImpl, abortImpl }) {
+  if (config.provider === "tavily") return searchTavily({ config, query, fetchImpl, abortImpl });
+  return searchBocha({ config, query, fetchImpl, abortImpl });
 }
 
 async function searchTavily({ config, query, fetchImpl, abortImpl }) {
@@ -244,8 +286,10 @@ function toPublicSearchMeta(search) {
     source: item.source
   }));
   return {
-    used: sources.length > 0 && !result.warning,
+    used: sources.length > 0,
     query: String(result.query || ""),
+    plannedQueries: Array.isArray(result.plannedQueries) ? result.plannedQueries.slice(0, 4) : [],
+    intent: result.intent || "general",
     resultCount: sources.length,
     warning: result.warning || null,
     sources
@@ -263,6 +307,7 @@ module.exports = {
   readSearchConfig,
   shouldUseWebSearch,
   searchWeb,
+  dedupeResults,
   normalizeResults,
   normalizeBochaResults,
   toPublicSearchMeta

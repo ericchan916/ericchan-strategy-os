@@ -887,6 +887,18 @@ npm run ask:ui
 
 搜索失败时，页面会显示中文提示：“联网搜索暂时不可用，已使用本地上下文回答。” Ask Mode 仍会基于本地上下文继续回答。
 
+## V0.3.7 搜索意图改写与相关性过滤
+
+V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。
+
+Search Planner 会做三件事：
+
+- 判断搜索意图：`ai-opportunity` / `project-research` / `news` / `competitor-research` / `technical-docs` / `general`。
+- 把宽泛问题改写成更贴近 EricChan 战略OS的搜索词。例如“今天有什么趋势？”不会直接搜索原句，而会改写到 AI Agent、大模型应用、独立开发者、商业机会、个人 OS / OPC 等方向。
+- 对结果做轻量相关性过滤。宽泛趋势类问题会过滤明显 A股 / 股票 / 行情 / 盘面热点污染；如果用户明确问财经，则不做这类过滤。
+
+搜索结果仍然只是补充证据，不替代战略判断。`search` 返回中会包含 `intent` 与 `plannedQueries`，前端暂不展示这些调试字段，历史记录也不保存完整搜索响应。
+
 ## V0.3.6 精修搜索来源展示体验
 
 V0.3.6 不再改后端搜索 provider，只在前端把搜索结果展示得更轻量、更自然。

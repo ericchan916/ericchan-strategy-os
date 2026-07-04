@@ -117,7 +117,7 @@ test("bocha success posts expected request and normalizes response", async () =>
   let requestUrl = "";
   let requestOptions = {};
   const result = await searchWeb({
-    query: "最近 AI Agent 有什么新机会？",
+    query: "EricChan Strategy OS",
     env: {
       STRATEGY_OS_SEARCH_ENABLED: "true",
       STRATEGY_OS_SEARCH_PROVIDER: "bocha",
@@ -162,7 +162,7 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(requestOptions.headers.authorization, "Bearer test-bocha-key");
   assert.equal(requestOptions.headers["content-type"], "application/json");
   assert.deepEqual(JSON.parse(requestOptions.body), {
-    query: "最近 AI Agent 有什么新机会？",
+    query: "EricChan Strategy OS",
     freshness: "oneYear",
     summary: true,
     count: 3
@@ -175,6 +175,63 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(result.results[0].publishedAt, "2026-07-01T00:00:00+08:00");
   assert.equal(result.results[1].source, "news.example");
   assert.equal(JSON.stringify(toPublicSearchMeta(result)).includes("test-bocha-key"), false);
+});
+
+test("wide opportunity search uses planned queries, dedupes urls, and filters finance noise", async () => {
+  const requestBodies = [];
+  const result = await searchWeb({
+    query: "今天有什么趋势？",
+    env: {
+      STRATEGY_OS_SEARCH_ENABLED: "true",
+      STRATEGY_OS_SEARCH_PROVIDER: "bocha",
+      STRATEGY_OS_SEARCH_API_KEY: "test-bocha-key",
+      STRATEGY_OS_SEARCH_MAX_RESULTS: "5"
+    },
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      requestBodies.push(body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          webPages: {
+            value: [
+              {
+                name: "A股三大指数缩量上涨，资金流入机器人板块",
+                url: "https://finance.example/a",
+                siteName: "财经站",
+                summary: "股票 行情 板块 资金流入"
+              },
+              {
+                name: "AI Agent workflow automation tools for solo developers",
+                url: "https://ai.example/agent",
+                siteName: "AI Example",
+                summary: "AI Agent 工具 独立开发者 workflow automation product launch"
+              },
+              {
+                name: "Duplicate AI Agent result",
+                url: "https://ai.example/agent",
+                siteName: "AI Example",
+                summary: "重复 URL 应被去重"
+              }
+            ]
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(requestBodies.length, 3);
+  assert.equal(requestBodies.some((body) => body.query === "今天有什么趋势？"), false);
+  assert.equal(result.intent, "ai-opportunity");
+  assert.ok(result.plannedQueries.some((item) => /AI|Agent|大模型|独立开发者|商业机会/i.test(item)));
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].url, "https://ai.example/agent");
+  assert.equal(JSON.stringify(result.results).includes("A股"), false);
+  const meta = toPublicSearchMeta(result);
+  assert.equal(meta.used, true);
+  assert.equal(meta.intent, "ai-opportunity");
+  assert.ok(meta.plannedQueries.length > 1);
 });
 
 test("bocha real data wrapper response is normalized", async () => {

@@ -410,7 +410,7 @@ function renderAnswer({ context, question }) {
 }
 
 function appendSearchSources(answer, search) {
-  if (!search || search.warning || !Array.isArray(search.results) || !search.results.length) return answer;
+  if (!search || !Array.isArray(search.results) || !search.results.length) return answer;
   const lines = search.results.slice(0, 5).map((item, index) => `${index + 1}. ${item.title} — ${item.source || item.url}`);
   return `${String(answer || "").trim()}
 
@@ -565,7 +565,9 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
   if (search && Array.isArray(search.results) && search.results.length) {
     lines.push("");
     lines.push("【外部搜索结果摘要】");
-    lines.push(`搜索词：${trimContext(search.query || question, 160)}`);
+    lines.push(`原始问题：${trimContext(question, 160)}`);
+    lines.push(`搜索意图：${trimContext(search.intent || "general", 80)}`);
+    lines.push(`实际搜索词：${trimContext((search.plannedQueries || [search.query || question]).join(" / "), 360)}`);
     for (const item of search.results.slice(0, 5)) {
       lines.push(`- 标题：${trimContext(item.title, 120)}`);
       lines.push(`  URL：${trimContext(item.url, 220)}`);
@@ -578,6 +580,9 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
     lines.push("- 回答必须区分基于本地上下文的判断与基于外部搜索的补充。");
     lines.push("- 不要编造搜索结果没有的信息；信息不足就说不足以判断。");
     lines.push("- 涉及最新信息时提醒它可能随时间变化。");
+    lines.push("- 如果外部结果偏向 A股、行情、股票、盘面热点，不要把它当成 EricChan 主方向。");
+    lines.push("- 优先判断搜索结果是否服务 AI 工具、Agent、独立开发者、小型可变现项目、OPC / 个人 OS、产品机会。");
+    lines.push("- 如果外部搜索结果相关性较弱，要明确说明，并回到本地上下文判断。");
     lines.push("- 回答必须中文，不输出英文 reasoning。");
     lines.push("- 末尾最多列 3-5 个关键参考来源，不要堆长链接。");
   }
