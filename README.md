@@ -1639,6 +1639,53 @@ V0.4 已经把首页标题、stats 口径和开工包顺序整理到位。V0.4.1
 - 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
 - 不把旧项目当成默认优化对象
 
+## V0.4.2 修补三栏日用细节
+
+V0.4.1 把桌面三栏、推荐问题 / 历史分栏、折叠按钮搭好。V0.4.2 把"每天打开都顺手"打磨到位：左右栏独立滚动、折叠状态记忆、右栏密度更舒服。
+
+### 1. 三栏独立滚动
+
+- `.rail` 桌面端 `position: sticky; top: 24px; max-height: calc(100vh - var(--composer-height) - 32px); overflow-y: auto`
+- 左栏今日机会池 / 右栏最近提问 各自独立滚动，不再拖累主栏
+- 滚动条弱化：`scrollbar-width: thin` + `::-webkit-scrollbar` 6px 浅色，不抢戏
+- 移动端 (`max-width: 900px`) `.rail { position: static; max-height: none }` 退化为普通流
+
+### 2. 今日机会池折叠状态记忆
+
+- 新增纯函数 `loadOpportunityCollapsed(storage)` / `saveOpportunityCollapsed(storage, value)`
+- key：`strategyOsOpportunityPanelCollapsed`，`"true"` / `"false"`
+- `createApp.mount` 时读取 → 若为折叠则初始化 `is-collapsed`
+- 点击折叠按钮 → `toggleOpportunityPanel` → `saveOpportunityCollapsed` 写入
+- localStorage 不可用 / 抛错 / 写入非法值 → 静默 fallback false（默认展开）
+- 不影响机会池新增 / 编辑 / 删除 / 生成开工包
+
+### 3. 最近提问右栏密度优化
+
+- `.history-item` padding 从 `10px 12px` 收到 `7px 10px`
+- `.history-question` line-clamp 2 行保留（不溢出）
+- `.history-meta` / `.history-source` 字号 11.5px → 10.5px
+- `.history-list` 取消 `max-height: 280px`（外层 `.rail` 已限制）
+- 长问题标题继续被 `-webkit-line-clamp: 2` 截断
+- kickoff-package 历史项仍显示"开工包"标签，可点击恢复
+
+### 4. 主栏输入区与回答 meta 稳定性
+
+- `.question-echo` 从 `inline-block` 改为 `display: block; width: 100%` + `box-sizing: border-box`
+- 真实场景中长 question / kickoff 描述不会被工具栏挤压、不会换行成两行
+- composer / 推荐问题 / ＋机会池 按钮位置不动；与 V0.4.1 一致
+
+### 不动的部分
+
+- 不修改 loading 动画本体（keyframes / 内部 6 个 div / animation 时长都不动）
+- 不默认自动联网 / 不默认勾选"本次联网搜索"
+- 不删除 Bocha / Tavily provider
+- 不改 LLM API 配置逻辑
+- 不暴露 API Key / 不提交 .env
+- 不提交 `data/opportunities/*.json` 或测试机会数据
+- 不调用真实 Codex / WorkBuddy / OpenDesign / MiniMax
+- 不做复杂 Dashboard / 拖拽看板 / 引入 UI 库
+- 不改旧项目文件
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

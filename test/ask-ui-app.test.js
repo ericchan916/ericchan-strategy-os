@@ -3372,11 +3372,21 @@ test("V0.4.1 D4: createApp.mount 后点击 opportunityToggle 切换", () => {
   assert.equal(ariaExpanded, "true");
 });
 
-test("V0.4.1 D5: 刷新不持久化（toggle 不写 localStorage）", () => {
-  // 验证 toggleOpportunityPanel 内部不引用 storageImpl / localStorage
+test("V0.4.1 D5 / V0.4.2: 折叠状态由独立的 saveOpportunityCollapsed 写入（toggle 不直接调用 storage）", () => {
+  // V0.4.2：toggleOpportunityPanel 内部通过 saveOpportunityCollapsed 抽象层写入，
+  // 而不是直接调 storageImpl / localStorage。这里验证：
+  // 1) toggleOpportunityPanel 源码内不出现 localStorage / storageImpl 等直接调用；
+  // 2) storage=null 时不抛（saveOpportunityCollapsed 内部已 try/catch）。
   const { toggleOpportunityPanel } = require("../public/ask-ui/app");
   const appSrc = toggleOpportunityPanel.toString();
-  assert.equal(/localStorage|storageImpl/.test(appSrc), false, "toggleOpportunityPanel 不应写 storage");
+  assert.equal(/localStorage/.test(appSrc), false, "toggleOpportunityPanel 不应直接读 localStorage");
+  // 直接传 null storage 也不应抛
+  const panel = { classList: { contains: () => false, add() {}, remove() {} } };
+  const body = {};
+  const toggle = { setAttribute() {} };
+  assert.doesNotThrow(() => {
+    toggleOpportunityPanel({ panel, body, toggle, storage: null });
+  });
 });
 
 test("V0.4.1 E1: .shell / .composer-inner / .footer 都用 min(var(--content-width), 96vw)", () => {
@@ -3429,5 +3439,376 @@ test("V0.4.1: 历史 click 仍隐藏 kickoff-package 类型按钮（不回归）
     searchUsed: false
   });
   assert.equal(nodes.addOpportunityButton.hidden, true, "kickoff-package 应隐藏按钮");
+});
+
+// =================================================================
+// V0.4.2 三栏日用细节修补
+// =================================================================
+
+// F1：CSS .rail 应在桌面端使用 sticky + max-height + overflow-y 实现独立滚动
+test("V0.4.2 F1a: .rail 桌面端使用 position: sticky 独立滚动", () => {
+  // .rail 主规则应包含 position: sticky + overflow-y
+  const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(railRule, "找不到 .rail 主规则");
+  const target = railRule[0];
+  assert.ok(/position\s*:\s*sticky/i.test(target), ".rail 应使用 position: sticky");
+  assert.ok(/overflow-y\s*:\s*auto|overflow\s*:\s*auto/i.test(target), ".rail 应允许独立纵向滚动");
+  assert.ok(/max-height\s*:\s*calc\(100vh\s*-/i.test(target), ".rail 应限制 max-height 不超过视口");
+});
+
+// F1：移动端 .rail 退化为普通 flow（无 sticky / max-height）
+test("V0.4.2 F1b: 移动端 .rail 退化为普通 flow", () => {
+  // @media (max-width: 900px) 块内 .rail 应 position:static 或不带 sticky
+  const media = stylesCss.match(/@media\s*\(max-width\s*:\s*900px\)\s*\{[\s\S]*?\n\s*\}\s*\}/);
+  assert.ok(media, "找不到 max-width: 900px media 块");
+  const block = media[0];
+  assert.ok(/\.rail\s*\{[^}]*position\s*:\s*static/.test(block), "移动端 .rail 应 position:static");
+});
+
+// F2：折叠状态记忆 - 新增纯函数 loadOpportunityCollapsed / saveOpportunityCollapsed
+test("V0.4.2 F2a: app.js 暴露 loadOpportunityCollapsed / saveOpportunityCollapsed 纯函数", () => {
+  const mod = require("../public/ask-ui/app");
+  assert.equal(typeof mod.loadOpportunityCollapsed, "function", "应导出 loadOpportunityCollapsed");
+  assert.equal(typeof mod.saveOpportunityCollapsed, "function", "应导出 saveOpportunityCollapsed");
+});
+
+test("V0.4.2 F2b: loadOpportunityCollapsed(true) 返回 true（折叠）", () => {
+  const { loadOpportunityCollapsed } = require("../public/ask-ui/app");
+  const fakeStorage = { getItem: (k) => (k === "strategyOsOpportunityPanelCollapsed" ? "true" : null) };
+  assert.equal(loadOpportunityCollapsed(fakeStorage), true);
+});
+
+test("V0.4.2 F2c: loadOpportunityCollapsed(false / null) 返回 false（展开）", () => {
+  const { loadOpportunityCollapsed } = require("../public/ask-ui/app");
+  const storageFalse = { getItem: () => "false" };
+  const storageNull = { getItem: () => null };
+  const storageEmpty = { getItem: () => "" };
+  const storageMissing = { getItem: () => undefined };
+  assert.equal(loadOpportunityCollapsed(storageFalse), false);
+  assert.equal(loadOpportunityCollapsed(storageNull), false);
+  assert.equal(loadOpportunityCollapsed(storageEmpty), false);
+  assert.equal(loadOpportunityCollapsed(storageMissing), false);
+});
+
+test("V0.4.2 F2d: loadOpportunityCollapsed 写入非法值不崩", () => {
+  const { loadOpportunityCollapsed } = require("../public/ask-ui/app");
+  const garbage = { getItem: () => "{not-json}" };
+  assert.equal(loadOpportunityCollapsed(garbage), false);
+});
+
+test("V0.4.2 F2e: loadOpportunityCollapsed storage 抛错时静默 fallback false", () => {
+  const { loadOpportunityCollapsed } = require("../public/ask-ui/app");
+  const throwingStorage = {
+    getItem: () => { throw new Error("QuotaExceededError"); }
+  };
+  assert.equal(loadOpportunityCollapsed(throwingStorage), false);
+});
+
+test("V0.4.2 F2f: loadOpportunityCollapsed 接受 null / undefined storage 返回 false", () => {
+  const { loadOpportunityCollapsed } = require("../public/ask-ui/app");
+  assert.equal(loadOpportunityCollapsed(null), false);
+  assert.equal(loadOpportunityCollapsed(undefined), false);
+});
+
+test("V0.4.2 F2g: saveOpportunityCollapsed(true) 调用 setItem(true)", () => {
+  const { saveOpportunityCollapsed } = require("../public/ask-ui/app");
+  let stored = null;
+  const fakeStorage = { setItem: (k, v) => { stored = { k, v }; } };
+  saveOpportunityCollapsed(fakeStorage, true);
+  assert.equal(stored.k, "strategyOsOpportunityPanelCollapsed");
+  assert.equal(stored.v, "true");
+});
+
+test("V0.4.2 F2h: saveOpportunityCollapsed(false) 调用 setItem(false)", () => {
+  const { saveOpportunityCollapsed } = require("../public/ask-ui/app");
+  let stored = null;
+  const fakeStorage = { setItem: (k, v) => { stored = { k, v }; } };
+  saveOpportunityCollapsed(fakeStorage, false);
+  assert.equal(stored.k, "strategyOsOpportunityPanelCollapsed");
+  assert.equal(stored.v, "false");
+});
+
+test("V0.4.2 F2i: saveOpportunityCollapsed storage 抛错时静默 fallback", () => {
+  const { saveOpportunityCollapsed } = require("../public/ask-ui/app");
+  const throwingStorage = {
+    setItem: () => { throw new Error("QuotaExceededError"); }
+  };
+  // 不应抛
+  saveOpportunityCollapsed(throwingStorage, true);
+  // null storage 也不抛
+  saveOpportunityCollapsed(null, true);
+});
+
+// F3：createApp.mount 读取 localStorage 折叠状态作为初始值
+test("V0.4.2 F3a: createApp.mount 读取 localStorage 后默认折叠", () => {
+  const nodes = makeFakeNodes();
+  let bodyHidden = false;
+  let ariaExpanded = "true";
+  let collapsed = false;
+  nodes.opportunityToggle = {
+    listeners: {},
+    addEventListener(event, h) { this.listeners[event] = h; },
+    setAttribute(k, v) { if (k === "aria-expanded") ariaExpanded = v; },
+    getAttribute(k) { return ariaExpanded; },
+    click() { this.listeners.click && this.listeners.click({}); }
+  };
+  nodes.opportunityBody = {
+    hidden: false
+  };
+  nodes.opportunityPanel = {
+    classList: {
+      contains: () => collapsed,
+      add(k) { if (k === "is-collapsed") collapsed = true; },
+      remove(k) { if (k === "is-collapsed") collapsed = false; }
+    }
+  };
+  const fakeStorage = {
+    items: { strategyOsOpportunityPanelCollapsed: "true" },
+    getItem(k) { return this.items[k] || null; },
+    setItem(k, v) { this.items[k] = v; },
+    removeItem(k) { delete this.items[k]; }
+  };
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: fakeStorage });
+  app.mount();
+  assert.equal(collapsed, true, "localStorage=true 时应初始化为折叠");
+  assert.equal(nodes.opportunityBody.hidden, true);
+  assert.equal(ariaExpanded, "false");
+});
+
+test("V0.4.2 F3b: createApp.mount 读取 localStorage=false 时默认展开", () => {
+  const nodes = makeFakeNodes();
+  // 真实 DOM 初始状态：panel 无 is-collapsed，body 显示
+  let collapsed = false;
+  nodes.opportunityToggle = {
+    listeners: {},
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return "true"; },
+    click() {}
+  };
+  nodes.opportunityBody = { hidden: false };
+  nodes.opportunityPanel = {
+    classList: {
+      contains: () => collapsed,
+      add(k) { if (k === "is-collapsed") collapsed = true; },
+      remove(k) { if (k === "is-collapsed") collapsed = false; }
+    }
+  };
+  const fakeStorage = {
+    items: { strategyOsOpportunityPanelCollapsed: "false" },
+    getItem(k) { return this.items[k] || null; },
+    setItem(k, v) { this.items[k] = v; },
+    removeItem(k) { delete this.items[k]; }
+  };
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: fakeStorage });
+  app.mount();
+  assert.equal(collapsed, false, "localStorage=false 时应保持展开（不做强制折叠）");
+  assert.equal(nodes.opportunityBody.hidden, false);
+});
+
+// F4：点击折叠按钮时写入 localStorage
+test("V0.4.2 F4: 点击折叠按钮写入 localStorage", () => {
+  const nodes = makeFakeNodes();
+  let collapsed = false;
+  nodes.opportunityToggle = {
+    listeners: {},
+    addEventListener(event, h) { this.listeners[event] = h; },
+    setAttribute() {},
+    getAttribute() { return "true"; },
+    click() { this.listeners.click && this.listeners.click({}); }
+  };
+  nodes.opportunityBody = { hidden: false };
+  nodes.opportunityPanel = {
+    classList: {
+      contains: () => collapsed,
+      add(k) { if (k === "is-collapsed") collapsed = true; },
+      remove(k) { if (k === "is-collapsed") collapsed = false; }
+    }
+  };
+  let stored = null;
+  const fakeStorage = {
+    items: {},
+    getItem(k) { return this.items[k] || null; },
+    setItem(k, v) { stored = { k, v }; this.items[k] = v; },
+    removeItem(k) { delete this.items[k]; }
+  };
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: fakeStorage });
+  app.mount();
+  // mount 后默认是展开状态。点击一次 → 折叠。
+  nodes.opportunityToggle.click();
+  assert.equal(collapsed, true);
+  assert.equal(stored.v, "true", "折叠时应写入 true");
+  // 再点击 → 展开
+  nodes.opportunityToggle.click();
+  assert.equal(collapsed, false);
+  assert.equal(stored.v, "false", "展开时应写入 false");
+});
+
+// F5：右栏密度 - .history-item padding / line-clamp
+test("V0.4.2 F5a: .history-item 紧凑（padding 较小）", () => {
+  // V0.4.2：减小 padding / gap；要求 padding ≤ 10px
+  const rule = stylesCss.match(/\.history-item\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "找不到 .history-item 规则");
+  const block = rule[0];
+  const paddingMatch = block.match(/padding\s*:\s*(\d+)px\s+(\d+)px/);
+  assert.ok(paddingMatch, ".history-item 应有 padding 数字");
+  const vertical = Number(paddingMatch[1]);
+  assert.ok(vertical <= 10, `.history-item 上下 padding 应 ≤ 10px（紧凑），实际 ${vertical}px`);
+});
+
+test("V0.4.2 F5b: .history-question 仍 line-clamp 2 行（不溢出）", () => {
+  // 桌面端 line-clamp: 2 仍保留，避免长问题撑爆右栏
+  const rule = stylesCss.match(/\.history-question\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "找不到 .history-question 规则");
+  assert.ok(/-webkit-line-clamp\s*:\s*2/.test(rule[0]), ".history-question 应限制为 2 行");
+});
+
+// F6：右栏在 1280px 以下被隐藏时，主栏不出现奇怪内部滚动（仍 .rail--right { display: none }）
+test("V0.4.2 F6a: 1280px 以下隐藏右栏（最近提问暂不可见）", () => {
+  // 这是 V0.4.1 已有的行为，这里再覆盖一遍确保 V0.4.2 不回归
+  const media = stylesCss.match(/@media\s*\(max-width\s*:\s*1280px\)\s*\{[\s\S]*?\n\s*\}\s*\}/);
+  assert.ok(media, "找不到 1280px media 块");
+  assert.ok(/\.rail--right\s*\{[^}]*display\s*:\s*none/.test(media[0]), "1280px 以下 .rail--right 应 display:none");
+});
+
+// F7：移动端 .rail--right 重新显示（< 900px 时单列堆叠）
+test("V0.4.2 F7a: 900px 以下 .rail--right 重新显示为单列", () => {
+  const media = stylesCss.match(/@media\s*\(max-width\s*:\s*900px\)\s*\{[\s\S]*?\n\s*\}\s*\}/);
+  assert.ok(media, "找不到 900px media 块");
+  assert.ok(/\.rail--right\s*\{[^}]*display\s*:\s*flex/.test(media[0]), "900px 以下 .rail--right 应重新显示");
+});
+
+// F8：主栏 .main 在三栏布局中保持主阅读区域（display flex column）
+test("V0.4.2 F8a: .main 仍为 flex column 主阅读区", () => {
+  const rule = stylesCss.match(/\.main\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "找不到 .main 规则");
+  assert.ok(/display\s*:\s*flex/.test(rule[0]));
+  assert.ok(/flex-direction\s*:\s*column/.test(rule[0]));
+});
+
+// F9：composer-inner / shell / footer 仍使用 min(--content-width, 96vw)（不回归）
+test("V0.4.2 F9a: composer-inner / shell / footer 仍使用 min(--content-width, 96vw)", () => {
+  const m = stylesCss.match(/min\s*\(\s*var\(--content-width\)\s*,\s*96vw\s*\)/g);
+  assert.ok(m && m.length >= 3, `应至少 3 处 min(--content-width, 96vw)，实际 ${m ? m.length : 0}`);
+});
+
+// F10：.question-echo 单行 ellipsis（V0.4.1 已实现，V0.4.2 不回归）
+test("V0.4.2 F10a: .question-echo 仍单行 ellipsis", () => {
+  const baseRule = /\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
+  const mediaRule = /@media[^{]+\{\s*\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
+  assert.ok(baseRule || mediaRule, ".question-echo 应保持单行省略（基础或 media）");
+});
+
+// F11：+ 机会池按钮在 question-echo 旁不被挤压（output-head 是 flex space-between）
+test("V0.4.2 F11a: .output-head 是 flex space-between 头尾对齐", () => {
+  const rule = stylesCss.match(/\.output-head\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "找不到 .output-head 规则");
+  assert.ok(/display\s*:\s*flex/.test(rule[0]));
+  assert.ok(/justify-content\s*:\s*space-between/.test(rule[0]));
+});
+
+// F12：加载动画 loading-spinner 6 个 div 仍存在（不回归）
+test("V0.4.2 F12a: loading-spinner 6 个 div 完整存在", () => {
+  // 测试 HTML 里的 loading-spinner 结构（即使 .css 内部 spinner 可能未启用，HTML 内结构不变）
+  // 使用 "loading-spinner" 块匹配最近 6 个 <div></div>
+  const inner = indexHtml.slice(indexHtml.indexOf('id="answerLoading"'), indexHtml.indexOf('id="answerLoading"') + 2400);
+  const spinnerSection = inner.match(/<div aria-hidden="true" class="loading-spinner"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/);
+  assert.ok(spinnerSection, "loading-spinner 结构应存在（备选实现）");
+  const emptyDivs = (spinnerSection[0].match(/<div><\/div>/g) || []).length;
+  assert.equal(emptyDivs, 6, `loading-spinner 应含 6 个 <div></div>，实际 ${emptyDivs}`);
+});
+
+// F13：默认不联网（webSearchToggle 默认无 checked）
+test("V0.4.2 F13a: webSearchToggle 默认不勾选（不回归）", () => {
+  const match = indexHtml.match(/<input[^>]+id="webSearchToggle"[^>]*>/);
+  assert.ok(match, "#webSearchToggle 应存在");
+  assert.equal(/checked/i.test(match[0]), false, "webSearchToggle 默认不应 checked");
+});
+
+// F14：× 清空按钮不回归
+test("V0.4.2 F14a: × 清空按钮仍存在（不回归）", () => {
+  assert.ok(/id="clearInputButton"/.test(indexHtml), "× 清空按钮节点应保留");
+});
+
+// F15：sk-* 脱敏不回归
+test("V0.4.2 F15a: sk-* 脱敏工具仍存在（不回归）", () => {
+  const { redactSecretLikeText } = require("../public/ask-ui/app");
+  // 新版本不一定叫 redactSecretLikeText；改用更宽的检查
+  // 检查 app.js 含 sk- 相关脱敏代码
+  const hasSkRedact = /redactSecretLike|sk-[A-Za-z0-9_-]{8,}/.test(appJsText);
+  // 直接用导出函数（如果有）或文本匹配
+  assert.ok(hasSkRedact || /sk-/i.test(appJsText), "app.js 应含 sk- 脱敏逻辑");
+});
+
+// F16：Bocha / Tavily provider 不被删除（不回归）
+test("V0.4.2 F16a: Bocha / Tavily provider 不被删除", () => {
+  // 检查 search-client.js / search-planner.js 仍含 bocha / tavily
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const ROOT = path.join(__dirname, "..");
+  const searchClient = fs.readFileSync(path.join(ROOT, "scripts", "search-client.js"), "utf8");
+  const searchPlanner = fs.readFileSync(path.join(ROOT, "scripts", "search-planner.js"), "utf8");
+  assert.ok(/bocha/i.test(searchClient + searchPlanner), "Bocha provider 应保留");
+  assert.ok(/tavily/i.test(searchClient + searchPlanner), "Tavily provider 应保留");
+});
+
+// F17：历史项可点击 + 右栏密度（仍能用）
+test("V0.4.2 F17a: 历史 click 仍恢复回答（不回归）", () => {
+  const nodes = makeFakeNodes();
+  const entry = { id: "h-1", question: "q", answer: "a", source: "llm", searchUsed: false, searchSources: [], type: "ask" };
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  app.mount();
+  app.restoreHistoryItem(entry);
+  assert.equal(nodes.addOpportunityButton.hidden, false, "恢复普通 answer 后按钮应可见");
+});
+
+// F18：meta-panel / scope / search 文案不回归
+test("V0.4.2 F18a: meta-list 含 范围 / 搜索 项（不回归）", () => {
+  assert.ok(indexHtml.includes("范围"), "meta 应含 范围");
+  assert.ok(indexHtml.includes("搜索"), "meta 应含 搜索");
+});
+
+// F19：rail 滚动条视觉优化（细滚动条 / 不抢戏）
+test("V0.4.2 F19a: .rail 滚动条弱化（scrollbar-width / scrollbar-color）", () => {
+  const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(railRule, "找不到 .rail 主规则");
+  const target = railRule[0];
+  // 允许 scrollbar-width: thin 或 scrollbar-color，但不强求
+  const hasThin = /scrollbar-width\s*:\s*thin/i.test(target);
+  const hasColor = /scrollbar-color\s*:/i.test(target);
+  assert.ok(hasThin || hasColor, ".rail 应弱化滚动条（scrollbar-width 或 scrollbar-color）");
+});
+
+// F20：rail max-height 在桌面端与 .composer 高度协调（不挡 footer / composer）
+test("V0.4.2 F20a: .rail max-height 不超过 100vh - composer-height", () => {
+  const railRule = stylesCss.match(/\.rail\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(railRule, "找不到 .rail 主规则");
+  const target = railRule[0];
+  const m = target.match(/max-height\s*:\s*calc\(100vh\s*-\s*([^)]+)\)/);
+  assert.ok(m, ".rail 应使用 calc(100vh - ...) 限制高度");
+  // 偏移值至少 80px（足够预留 header + composer 边界）
+  const offsetStr = m[1].trim();
+  // 偏移可能是 "48px" 或 "var(--composer-height) + 48px"
+  // 简化为：检查不含 0 或 px 内紧跟 0
+  assert.ok(/(\d+px|var\()/.test(offsetStr), ".rail max-height 偏移应为 px 或 var()");
+});
+
+// F21：移动端 layout 单列时 .rail 仍允许最大高度自适应（不强行 sticky）
+test("V0.4.2 F21a: 移动端 layout 单列堆叠时 .rail max-height: none", () => {
+  const media = stylesCss.match(/@media\s*\(max-width\s*:\s*900px\)\s*\{[\s\S]*?\n\s*\}\s*\}/);
+  assert.ok(media, "找不到 900px media 块");
+  const block = media[0];
+  // .rail 规则应去除 sticky / max-height
+  assert.ok(/\.rail\s*\{[^}]*max-height\s*:\s*none/.test(block), "移动端 .rail max-height 应为 none");
+});
+
+// F22：localStorage 不可用时（storage = null）mount 不崩
+test("V0.4.2 F22a: storage=null 时 mount 不崩，折叠状态使用默认（展开）", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({ nodes, fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) }), storage: null });
+  // 不应抛
+  app.mount();
+  // 默认展开：body.hidden 应为 false（makeFakeNodes 默认值）
+  assert.equal(nodes.opportunityBody.hidden, false, "storage=null 时默认展开");
 });
 

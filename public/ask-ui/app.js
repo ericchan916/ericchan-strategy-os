@@ -406,15 +406,52 @@ function showSearchSources(node, markup) {
   node.hidden = false;
 }
 
+// ============== V0.4.2: 今日机会池折叠状态记忆（localStorage） ==============
+//
+// 纯函数：读取 / 写入折叠状态
+// - storage 不存在 / 抛错 / 写入非法值 → 静默 fallback false（默认展开）
+// - 不抛任何异常
+const OPPORTUNITY_COLLAPSED_KEY = "strategyOsOpportunityPanelCollapsed";
+function readBooleanFromStorage(storage, key) {
+  if (!storage || typeof storage.getItem !== "function") return false;
+  let raw;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return false;
+  }
+  if (raw == null) return false;
+  if (typeof raw !== "string") return false;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  return false;
+}
+function writeBooleanToStorage(storage, key, value) {
+  if (!storage || typeof storage.setItem !== "function") return;
+  try {
+    storage.setItem(key, value ? "true" : "false");
+  } catch {
+    // 静默：QuotaExceededError / SecurityError 等都不应让 UI 崩溃
+  }
+}
+function loadOpportunityCollapsed(storage) {
+  return readBooleanFromStorage(storage, OPPORTUNITY_COLLAPSED_KEY);
+}
+function saveOpportunityCollapsed(storage, value) {
+  writeBooleanToStorage(storage, OPPORTUNITY_COLLAPSED_KEY, !!value);
+}
+
 // ============== V0.4.1: 今日机会池折叠 / 展开 ==============
 //
-// 纯函数：只操作节点 + 切换 is-collapsed / aria-expanded / body.hidden
-// 不写 localStorage；每次刷新回到默认展开
+// 纯函数：操作节点 + 切换 is-collapsed / aria-expanded / body.hidden
+// V0.4.2：通过 saveOpportunityCollapsed(storage) 间接持久化（注入 storage 可测试）。
 // - panel: 含 classList 的 .opportunity-panel 节点
 // - body:  .opportunity-body 节点（显示/隐藏目标）
 // - toggle: 折叠按钮节点（更新 aria-expanded）
 // - expand: true 展开 / false 折叠 / undefined 按 classList 翻转
-function toggleOpportunityPanel({ panel, body, toggle, expand } = {}) {
+// - storage: 可选；用于把折叠状态写入持久层（可注入以测试）
+function toggleOpportunityPanel({ panel, body, toggle, expand, storage } = {}) {
   if (!panel || !body) return { expanded: null };
   // next: 期望的"展开"状态。
   // 若已传 expand 则直接用；否则按当前 classList 翻转：
@@ -431,6 +468,8 @@ function toggleOpportunityPanel({ panel, body, toggle, expand } = {}) {
     if (toggle && typeof toggle.setAttribute === "function") toggle.setAttribute("aria-expanded", "false");
     body.hidden = true;
   }
+  // V0.4.2：折叠 / 展开时把状态通过 saveOpportunityCollapsed 写入（可注入 storage）
+  saveOpportunityCollapsed(storage, !next);
   return { expanded: next };
 }
 
@@ -1795,13 +1834,25 @@ function createApp(deps) {
         renderHistory();
       });
     }
-    // V0.4.1：今日机会池折叠 / 展开（不持久化）
+    // V0.4.1：今日机会池折叠 / 展开（V0.4.2：状态写入 localStorage）
     if (opportunityToggle && opportunityBody && opportunityPanelNode) {
+      // V0.4.2：mount 时从 localStorage 读取折叠状态并初始化
+      const initialCollapsed = loadOpportunityCollapsed(storage);
+      if (initialCollapsed) {
+        toggleOpportunityPanel({
+          panel: opportunityPanelNode,
+          body: opportunityBody,
+          toggle: opportunityToggle,
+          expand: false,
+          storage
+        });
+      }
       opportunityToggle.addEventListener("click", () => {
         toggleOpportunityPanel({
           panel: opportunityPanelNode,
           body: opportunityBody,
-          toggle: opportunityToggle
+          toggle: opportunityToggle,
+          storage
         });
       });
     }
@@ -2008,5 +2059,9 @@ module.exports = {
   OPPORTUNITY_TITLE_OVERRIDES,
   PRESET_TAGS,
   // V0.4.1
-  toggleOpportunityPanel
+  toggleOpportunityPanel,
+  // V0.4.2 折叠状态记忆
+  loadOpportunityCollapsed,
+  saveOpportunityCollapsed,
+  OPPORTUNITY_COLLAPSED_KEY
 };
