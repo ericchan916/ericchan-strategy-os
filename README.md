@@ -1445,7 +1445,7 @@ CSS：grid 间距 10px，fieldsets 圆角边框，warning 改为 chip，移动�
 V0.3.11-hotfix-3 完成后用户真实使用反馈两个问题：
 
 1. "机会池"按钮只显示加号，缺少右侧的"机会池"三个字。
-2. 真实验证时，draft 响应中出现了用户输入的 `sk-fakefakefake0123456789` 原文（即使 LLM 在 note 中引用了用户的输入）。
+2. 真实验证时，draft 响应中出现了用户输入的 `sk-fakefake` 原文（即使 LLM 在 note 中引用了用户的输入）。
 
 本次仍只动前端 + 后端脱敏共享层，不改 LLM provider / search / 端口。
 
@@ -1492,8 +1492,8 @@ CSS：
 
 ### 真实验证
 
-- `POST /api/opportunities/draft` body 含 `sk-fakefakefake0123456789`，响应中 `note` / `oneLineSummary` / `sourceAnswerSummary` / `sourceUrls[].title|url|source` 均无 sk-* 原文；含 `[redacted]`
-- `POST /api/opportunities` 保存 `note = "sk-fakefakefake0123456789 in note"`，opportunity-pool.json 持久化字段无 sk-* 原文
+- `POST /api/opportunities/draft` body 含 `sk-fakefake`，响应中 `note` / `oneLineSummary` / `sourceAnswerSummary` / `sourceUrls[].title|url|source` 均无 sk-* 原文；含 `[redacted]`
+- `POST /api/opportunities` 保存 `note = "sk-fakefake in note"`，opportunity-pool.json 持久化字段无 sk-* 原文
 - `PATCH /api/opportunities/:id` 更新 `note`，持久化字段无 sk-* 原文
 - `buildOpportunityContextForPrompt` 输入含 sk-* 的 note，输出字符串无 sk-* 原文
 - `buildKickoffUserPrompt` / `buildLocalKickoff` 输入含 sk-* 的字段，输出字符串无 sk-* 原文
