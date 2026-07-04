@@ -24,6 +24,7 @@ const LLM_TEST_KEYS = [
   "STRATEGY_OS_SEARCH_BASE_URL",
   "STRATEGY_OS_SEARCH_TIMEOUT_MS",
   "STRATEGY_OS_SEARCH_MAX_RESULTS",
+  "STRATEGY_OS_SEARCH_FRESHNESS",
   "LLM_API_KEY",
   "LLM_API_BASE_URL",
   "LLM_MODEL"
@@ -284,6 +285,11 @@ test("useSearch=true calls search client and returns public search metadata", as
         return {
           provider: "tavily",
           query,
+          plannedQueries: ["Anthropic AI news Claude product launch recent"],
+          intent: "news",
+          freshness: "oneMonth",
+          recency: { required: true, reason: "新闻与发布信息需要近期结果。", filteredOldCount: 0, missingDateCount: 0 },
+          filters: { blockedTopicCount: 0, duplicateCount: 0 },
           warning: null,
           results: [{ title: "Anthropic news", url: "https://example.com/a", snippet: "news", source: "example.com" }]
         };
@@ -294,6 +300,9 @@ test("useSearch=true calls search client and returns public search metadata", as
   assert.equal(called, true);
   assert.equal(result.search.used, true);
   assert.equal(result.search.resultCount, 1);
+  assert.equal(result.search.intent, "news");
+  assert.equal(result.search.freshness, "oneMonth");
+  assert.equal(result.search.recency.required, true);
   assert.equal(JSON.stringify(result.search).includes("sk-"), false);
   assert.ok(result.answer.includes("参考来源"));
 });
@@ -408,6 +417,9 @@ test("search results are injected into LLM prompt without API key and with trunc
         query,
         plannedQueries: ["Anthropic AI news Claude product launch recent"],
         intent: "news",
+        freshness: "oneMonth",
+        recency: { required: true, reason: "新闻与发布信息需要近期结果。", filteredOldCount: 2, missingDateCount: 1 },
+        filters: { blockedTopicCount: 0, duplicateCount: 1 },
         warning: null,
         results: [{ title: "Anthropic update", url: "https://example.com/news", snippet: longSnippet, source: "example.com" }]
       })
@@ -418,6 +430,9 @@ test("search results are injected into LLM prompt without API key and with trunc
   assert.ok(capturedPrompt.includes("【外部搜索结果摘要】"));
   assert.ok(capturedPrompt.includes("搜索意图：news"));
   assert.ok(capturedPrompt.includes("实际搜索词：Anthropic AI news Claude product launch recent"));
+  assert.ok(capturedPrompt.includes("搜索时间范围：oneMonth"));
+  assert.ok(capturedPrompt.includes("时效性过滤：过旧 2 条，缺少日期 1 条。"));
+  assert.ok(capturedPrompt.includes("相关性过滤：无关财经 0 条，重复 1 条。"));
   assert.ok(capturedPrompt.includes("搜索结果只是参考"));
   assert.ok(capturedPrompt.includes("A股、行情、股票、盘面热点"));
   assert.equal(capturedPrompt.includes("sk-llm-key"), false);
@@ -494,6 +509,7 @@ test("load-env reads .env into a clean env without leaking keys", () => {
       "STRATEGY_OS_SEARCH_ENABLED=true",
       "STRATEGY_OS_SEARCH_PROVIDER=tavily",
       "STRATEGY_OS_SEARCH_API_KEY=sk-search-file",
+      "STRATEGY_OS_SEARCH_FRESHNESS=oneMonth",
       "UNRELATED_PASSWORD=hunter2"
     ].join("\n")
   );
@@ -508,6 +524,7 @@ test("load-env reads .env into a clean env without leaking keys", () => {
   assert.equal(freshEnv.STRATEGY_OS_SEARCH_ENABLED, "true");
   assert.equal(freshEnv.STRATEGY_OS_SEARCH_PROVIDER, "tavily");
   assert.equal(freshEnv.STRATEGY_OS_SEARCH_API_KEY, "sk-search-file");
+  assert.equal(freshEnv.STRATEGY_OS_SEARCH_FRESHNESS, "oneMonth");
   // 白名单外的变量不应被注入。
   assert.equal(freshEnv.UNRELATED_PASSWORD, undefined);
 });

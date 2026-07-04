@@ -15,7 +15,8 @@ const {
   clearHistory,
   buildClipboardPayload,
   handleCopyClick,
-  renderSearchSources
+  renderSearchSources,
+  renderSearchProcess
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -64,7 +65,8 @@ function makeFakeNodes() {
     copyButton: fakeEl(),
     answerLoading: fakeEl(),
     webSearchToggle: fakeEl({ checked: false }),
-    searchSources: fakeEl()
+    searchSources: fakeEl(),
+    searchProcess: fakeEl()
   };
 }
 
@@ -571,6 +573,19 @@ test("normalizeHistoryItem: preserves safe search summary fields only", () => {
     searchUsed: true,
     searchWarning: null,
     searchResultCount: 2,
+    searchIntent: "news",
+    searchPlannedQueries: ["Q1", "Q2", "Q3", "Q4"],
+    searchFreshness: "oneMonth",
+    searchRecency: {
+      required: true,
+      reason: "新闻与发布信息需要近期结果。",
+      filteredOldCount: 1,
+      missingDateCount: 2,
+      oldestKeptDate: "2026-07-01",
+      newestKeptDate: "2026-07-03",
+      raw: "drop"
+    },
+    searchFilters: { blockedTopicCount: 3, duplicateCount: 4, raw: "drop" },
     searchSources: [
       { title: "A", url: "https://example.com/a", source: "example.com", raw: "sk-raw" }
     ]
@@ -578,8 +593,16 @@ test("normalizeHistoryItem: preserves safe search summary fields only", () => {
 
   assert.equal(item.searchUsed, true);
   assert.equal(item.searchResultCount, 2);
+  assert.equal(item.searchIntent, "news");
+  assert.deepEqual(item.searchPlannedQueries, ["Q1", "Q2", "Q3"]);
+  assert.equal(item.searchFreshness, "oneMonth");
+  assert.equal(item.searchRecency.filteredOldCount, 1);
+  assert.equal(item.searchRecency.missingDateCount, 2);
+  assert.equal(item.searchFilters.blockedTopicCount, 3);
+  assert.equal(item.searchFilters.duplicateCount, 4);
   assert.deepEqual(item.searchSources, [{ title: "A", url: "https://example.com/a", source: "example.com" }]);
   assert.equal(JSON.stringify(item).includes("sk-raw"), false);
+  assert.equal(JSON.stringify(item).includes("drop"), false);
 });
 
 test("normalizeHistoryItem: createdAt 缺失时回填当前时间", () => {
@@ -852,6 +875,38 @@ test("renderSearchSources: 默认包含'已参考 N 条外部结果' 摘要", ()
   assert.ok(html.includes("已参考 2 条外部结果"), "应包含'已参考 2 条外部结果'");
 });
 
+test("renderSearchProcess: search.used=false 时返回空字符串", () => {
+  assert.equal(renderSearchProcess({ used: false }), "");
+  assert.equal(renderSearchProcess(null), "");
+});
+
+test("renderSearchProcess: 渲染搜索意图、搜索词、时间范围和过滤摘要", () => {
+  const html = renderSearchProcess({
+    used: true,
+    intent: "ai-opportunity",
+    plannedQueries: ["AI Agent 商业机会", "大模型应用 新产品", "第三条", "第四条"],
+    freshness: "oneWeek",
+    warning: "搜索结果时效性较弱，已保留少量参考来源。",
+    recency: {
+      required: true,
+      reason: "趋势和新机会判断需要近期产品与市场信号。",
+      filteredOldCount: 2,
+      missingDateCount: 1
+    },
+    filters: { blockedTopicCount: 3, duplicateCount: 4 }
+  });
+
+  assert.ok(html.includes("搜索过程"));
+  assert.ok(html.includes("AI 机会"));
+  assert.ok(html.includes("AI Agent 商业机会"));
+  assert.ok(html.includes("大模型应用 新产品"));
+  assert.equal(html.includes("第四条"), false, "最多显示 3 条 plannedQueries");
+  assert.ok(html.includes("最近一周"));
+  assert.ok(html.includes("已过滤 3 条无关财经结果"));
+  assert.ok(html.includes("已过滤 2 条过旧结果"));
+  assert.ok(html.includes("搜索结果时效性较弱，请谨慎参考"));
+});
+
 // ============== V0.3.6 sources panel HTML / CSS 静态断言 ==============
 
 test("HTML 含参考来源容器 #searchSources（默认 hidden）", () => {
@@ -861,15 +916,25 @@ test("HTML 含参考来源容器 #searchSources（默认 hidden）", () => {
   assert.ok(/hidden\b/.test(inner), "#searchSources 默认应隐藏");
 });
 
+test("HTML 含搜索过程容器 #searchProcess（默认 hidden）", () => {
+  const startIdx = indexHtml.indexOf('id="searchProcess"');
+  assert.ok(startIdx > 0, "缺少 #searchProcess 容器");
+  const inner = indexHtml.slice(startIdx, startIdx + 800);
+  assert.ok(/hidden\b/.test(inner), "#searchProcess 默认应隐藏");
+});
+
 test("HTML 回答区按顺序：question-echo → answerLoading → answerOutput → searchSources", () => {
   // V0.3.6：参考来源放在回答正文之后，loading 之前（即紧贴 #answerOutput 之后）。
   // 这样复制按钮复制的是回答正文，不带 sources 区域。
   const idxEcho = indexHtml.indexOf('id="questionEcho"');
   const idxLoading = indexHtml.indexOf('id="answerLoading"');
   const idxOutput = indexHtml.indexOf('id="answerOutput"');
+  const idxProcess = indexHtml.indexOf('id="searchProcess"');
   const idxSources = indexHtml.indexOf('id="searchSources"');
   assert.ok(idxEcho > 0 && idxOutput > 0 && idxSources > 0, "缺少必要 ID");
   assert.ok(idxEcho < idxOutput, "question-echo 必须在 answerOutput 之前");
+  assert.ok(idxOutput < idxProcess, "searchProcess 应在 answerOutput 之后");
+  assert.ok(idxProcess < idxSources, "searchProcess 应在 searchSources 之前");
   assert.ok(idxOutput < idxSources, "searchSources 应在 answerOutput 之后");
   // loading 是动态显示的，位置不强制
   if (idxLoading > 0) {
@@ -882,6 +947,11 @@ test("CSS 包含参考来源样式（.search-sources / .search-source-item）", 
     /\.search-sources[\s\S]{0,200}?\{/i.test(stylesCss) ||
     /\.search-source-item[\s\S]{0,200}?\{/i.test(stylesCss);
   assert.ok(hasSources, "缺少参考来源样式");
+});
+
+test("CSS 包含搜索过程样式（.search-process）", () => {
+  assert.ok(/\.search-process\s*\{[\s\S]{0,400}?display\s*:\s*none/i.test(stylesCss), "搜索过程容器默认应隐藏");
+  assert.ok(/\.search-process:not\(\[hidden\]\)/.test(stylesCss), "搜索过程应通过 hidden 状态控制显示");
 });
 
 test("CSS 包含 .search-source-item link 样式（链接可见但不刺眼）", () => {
@@ -902,6 +972,11 @@ test("CSS .search-sources 容器默认 hidden（display:none）", () => {
 test("app.js 含 renderSearchSources 与 searchSources 节点引用", () => {
   assert.ok(appJsText.includes("renderSearchSources"), "app.js 应暴露 renderSearchSources");
   assert.ok(appJsText.includes("searchSources"), "app.js 应引用 #searchSources 节点");
+});
+
+test("app.js 含 renderSearchProcess 与 searchProcess 节点引用", () => {
+  assert.ok(appJsText.includes("renderSearchProcess"), "app.js 应暴露 renderSearchProcess");
+  assert.ok(appJsText.includes("searchProcess"), "app.js 应引用 #searchProcess 节点");
 });
 
 test("app.js: 当 search.used=true 且 sources>0 时调用 renderSearchSources，否则清空", () => {
@@ -965,18 +1040,46 @@ test("createHistoryStore.push: 写入时 searchSources 最多保留 5 条", () =
   assert.equal(list[0].searchSources[4].title, "T5");
 });
 
+test("createHistoryStore.push: 保存搜索过程摘要但不保存 raw response", () => {
+  const storage = makeMemoryStorage();
+  const store = createHistoryStore({ storage, maxSize: 20 });
+  store.push({
+    question: "Q1",
+    answer: "A1",
+    source: "llm",
+    searchUsed: true,
+    searchIntent: "ai-opportunity",
+    searchPlannedQueries: ["Q1", "Q2", "Q3", "Q4"],
+    searchFreshness: "oneWeek",
+    searchRecency: { required: true, filteredOldCount: 2, missingDateCount: 1 },
+    searchFilters: { blockedTopicCount: 3, duplicateCount: 4 },
+    rawResponse: { apiKey: "sk-raw" }
+  });
+
+  const item = store.list()[0];
+  assert.equal(item.searchIntent, "ai-opportunity");
+  assert.deepEqual(item.searchPlannedQueries, ["Q1", "Q2", "Q3"]);
+  assert.equal(item.searchFreshness, "oneWeek");
+  assert.equal(item.searchRecency.filteredOldCount, 2);
+  assert.equal(item.searchFilters.duplicateCount, 4);
+  assert.equal(JSON.stringify(item).includes("sk-raw"), false);
+});
+
 test("buildClipboardPayload: 传入 searchSources 时不写入剪贴板文本", () => {
   const payload = buildClipboardPayload({
     answer: "# 标题\n\n结论：今天轻量。",
     question: "今天适合做什么？",
     searchSources: [
       { title: "T1", url: "https://e.com/1", source: "e.com" }
-    ]
+    ],
+    searchPlannedQueries: ["AI Agent 商业机会"]
   });
   assert.equal(payload.text, "# 标题\n\n结论：今天轻量。");
   // raw JSON / sources 任何字段都不应进剪贴板
   const dumped = JSON.stringify(payload);
   assert.equal(dumped.includes("searchSources"), false, "searchSources 不应进入复制 payload");
+  assert.equal(dumped.includes("searchPlannedQueries"), false, "plannedQueries 不应进入复制 payload");
+  assert.equal(payload.text.includes("AI Agent 商业机会"), false, "搜索词不应进入复制文本");
   assert.equal(dumped.includes("https://e.com/1"), false, "来源 URL 不应进入复制 payload");
 });
 
@@ -1007,6 +1110,11 @@ test("restoreHistoryItem: 不调用 fetch（点击历史项不重新请求）", 
     answer: "A1",
     source: "llm",
     searchUsed: true,
+    searchIntent: "news",
+    searchPlannedQueries: ["Anthropic AI news"],
+    searchFreshness: "oneMonth",
+    searchRecency: { required: true, filteredOldCount: 1, missingDateCount: 0 },
+    searchFilters: { blockedTopicCount: 0, duplicateCount: 1 },
     searchSources: [
       { title: "T1", url: "https://e.com/1", source: "e.com" }
     ]
@@ -1025,4 +1133,7 @@ test("restoreHistoryItem: 不调用 fetch（点击历史项不重新请求）", 
   const entry = app.historyStore.list()[0];
   app.restoreHistoryItem(entry);
   assert.equal(fetchCalled, 0, "restoreHistoryItem 不应调用 fetch");
+  assert.equal(nodes.searchProcess.hidden, false, "历史恢复应恢复搜索过程");
+  assert.ok(nodes.searchProcess.innerHTML.includes("搜索过程"));
+  assert.ok(nodes.searchProcess.innerHTML.includes("Anthropic AI news"));
 });

@@ -24,7 +24,8 @@ function readSearchConfig(env = process.env) {
     apiKey: String(env.STRATEGY_OS_SEARCH_API_KEY || "").trim(),
     baseUrl: String(env.STRATEGY_OS_SEARCH_BASE_URL || "").trim(),
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS,
-    maxResults: Number.isFinite(maxResults) && maxResults > 0 ? Math.min(Math.floor(maxResults), MAX_SEARCH_RESULTS) : DEFAULT_MAX_RESULTS
+    maxResults: Number.isFinite(maxResults) && maxResults > 0 ? Math.min(Math.floor(maxResults), MAX_SEARCH_RESULTS) : DEFAULT_MAX_RESULTS,
+    freshness: String(env.STRATEGY_OS_SEARCH_FRESHNESS || "").trim()
   };
 }
 
@@ -85,9 +86,24 @@ function resultSkeleton(config, query, plan = null) {
     query: String(query || ""),
     plannedQueries: plan && Array.isArray(plan.queries) ? plan.queries : [],
     intent: plan ? plan.intent : "general",
+    freshness: plan ? plan.freshness : config.freshness || "",
+    recency: buildRecencyMeta(plan),
+    filters: { blockedTopicCount: 0, duplicateCount: 0 },
     results: [],
     warning: null,
     errorCode: null
+  };
+}
+
+function buildRecencyMeta(plan, overrides = {}) {
+  return {
+    required: Boolean(plan && plan.recencyRequired),
+    reason: (plan && plan.recencyReason) || "",
+    filteredOldCount: 0,
+    missingDateCount: 0,
+    oldestKeptDate: null,
+    newestKeptDate: null,
+    ...overrides
   };
 }
 
@@ -117,7 +133,7 @@ function classifyNetworkError(error) {
 async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetch, abortImpl = globalThis.AbortController } = {}) {
   const config = readSearchConfig(env);
   const q = String(query || "").trim();
-  const plan = planSearchQueries(q);
+  const plan = planSearchQueries(q, { defaultFreshness: config.freshness });
 
   if (!config.enabled) return unavailable(config, q, "disabled", "联网搜索未启用，已使用本地上下文回答。");
   if (!config.provider) return unavailable(config, q, "missing-provider");
@@ -129,11 +145,11 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
   const queries = plan.queries.slice(0, 3);
   const attempts = [];
   for (const plannedQuery of queries) {
-    attempts.push(await searchProvider({ config, query: plannedQuery, fetchImpl, abortImpl }));
+    attempts.push(await searchProvider({ config, plan, query: plannedQuery, fetchImpl, abortImpl }));
   }
 
-  const results = dedupeResults(attempts.flatMap((item) => item.results || []));
-  if (!results.length) {
+  const deduped = dedupeResultsWithStats(attempts.flatMap((item) => item.results || []));
+  if (!deduped.results.length) {
     const failed = attempts.find((item) => item.warning);
     return {
       ...resultSkeleton(config, q, plan),
@@ -142,28 +158,140 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
     };
   }
 
-  const filtered = filterSearchResultsByRelevance(results, plan, config.maxResults);
+  const relevant = filterSearchResultsByRelevance(deduped.results, plan, MAX_SEARCH_RESULTS);
+  const recent = filterSearchResultsByRecency(relevant.results, plan, config.maxResults);
+  const warning = recent.weak
+    ? "搜索结果时效性较弱，已保留少量参考来源。"
+    : relevant.weak
+      ? "搜索结果相关性较弱，已保留少量结果供参考。"
+      : null;
   return {
     ...resultSkeleton(config, q, plan),
-    results: filtered.results,
-    warning: filtered.weak ? "搜索结果相关性较弱，已保留少量结果供参考。" : null,
-    errorCode: filtered.weak ? "weak-relevance" : null
+    results: recent.results,
+    recency: buildRecencyMeta(plan, recent.meta),
+    filters: {
+      blockedTopicCount: relevant.blockedTopicCount || 0,
+      duplicateCount: deduped.duplicateCount
+    },
+    warning,
+    errorCode: recent.weak ? "weak-recency" : relevant.weak ? "weak-relevance" : null
+  };
+}
+
+function parseResultDate(result) {
+  const explicit = result && result.publishedAt ? Date.parse(result.publishedAt) : NaN;
+  if (Number.isFinite(explicit)) return new Date(explicit);
+  const text = `${result && result.title ? result.title : ""} ${result && result.snippet ? result.snippet : ""}`;
+  const match = text.match(/(20\d{2})(?:\s*年|\-|\/)?\s*(\d{1,2})?/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = match[2] ? Number(match[2]) : 1;
+  const parsed = new Date(Date.UTC(year, Math.max(0, month - 1), 1));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function recencyWindowDays(plan) {
+  const question = String(plan && plan.originalQuestion ? plan.originalQuestion : "");
+  if (/今天|今日|这两天|最近两天/.test(question)) return 7;
+  if (plan && plan.intent === "news") return 30;
+  if (plan && plan.intent === "ai-opportunity") return 180;
+  if (plan && plan.intent === "technical-docs") return 365;
+  return Infinity;
+}
+
+function filterSearchResultsByRecency(results, plan, maxResults = DEFAULT_MAX_RESULTS, now = new Date()) {
+  const items = Array.isArray(results) ? results : [];
+  if (!plan || !plan.recencyRequired) {
+    const sliced = sortResults(items).slice(0, maxResults);
+    return { results: sliced, weak: false, meta: recencyMetaFor(sliced, 0, countMissingDates(sliced)) };
+  }
+
+  const windowMs = recencyWindowDays(plan) * 24 * 60 * 60 * 1000;
+  const threshold = Number.isFinite(windowMs) ? new Date(now.getTime() - windowMs) : null;
+  let filteredOldCount = 0;
+  let missingDateCount = 0;
+  const kept = [];
+  for (const item of items) {
+    const date = parseResultDate(item);
+    if (!date) {
+      missingDateCount += 1;
+      kept.push(item);
+      continue;
+    }
+    if (threshold && date < threshold) {
+      filteredOldCount += 1;
+      continue;
+    }
+    kept.push(item);
+  }
+
+  if (kept.length) {
+    const sliced = sortResults(kept).slice(0, maxResults);
+    return { results: sliced, weak: false, meta: recencyMetaFor(sliced, filteredOldCount, missingDateCount) };
+  }
+
+  const fallback = sortResults(items).slice(0, Math.min(2, maxResults));
+  return {
+    results: fallback,
+    weak: items.length > 0,
+    meta: recencyMetaFor(fallback, filteredOldCount, countMissingDates(fallback))
+  };
+}
+
+function sortResults(results) {
+  return (Array.isArray(results) ? results : []).slice().sort((a, b) => {
+    const dateA = parseResultDate(a);
+    const dateB = parseResultDate(b);
+    if (dateA && dateB && dateA.getTime() !== dateB.getTime()) return dateB - dateA;
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    const summaryA = String(a.snippet || "").length;
+    const summaryB = String(b.snippet || "").length;
+    if (summaryA !== summaryB) return summaryB - summaryA;
+    return String(b.source || "").length - String(a.source || "").length;
+  });
+}
+
+function countMissingDates(results) {
+  return (Array.isArray(results) ? results : []).filter((item) => !parseResultDate(item)).length;
+}
+
+function recencyMetaFor(results, filteredOldCount, missingDateCount) {
+  const dates = (Array.isArray(results) ? results : [])
+    .map(parseResultDate)
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  return {
+    filteredOldCount,
+    missingDateCount,
+    oldestKeptDate: dates[0] ? dates[0].toISOString().slice(0, 10) : null,
+    newestKeptDate: dates[dates.length - 1] ? dates[dates.length - 1].toISOString().slice(0, 10) : null
   };
 }
 
 function dedupeResults(results) {
+  return dedupeResultsWithStats(results).results;
+}
+
+function dedupeResultsWithStats(results) {
   const seen = new Set();
-  return (Array.isArray(results) ? results : []).filter((item) => {
+  let duplicateCount = 0;
+  const deduped = (Array.isArray(results) ? results : []).filter((item) => {
     const key = String(item.url || item.title || "").trim().toLowerCase();
-    if (!key || seen.has(key)) return false;
+    if (!key) return false;
+    if (seen.has(key)) {
+      duplicateCount += 1;
+      return false;
+    }
     seen.add(key);
     return true;
   });
+  return { results: deduped, duplicateCount };
 }
 
-function searchProvider({ config, query, fetchImpl, abortImpl }) {
+function searchProvider({ config, plan, query, fetchImpl, abortImpl }) {
   if (config.provider === "tavily") return searchTavily({ config, query, fetchImpl, abortImpl });
-  return searchBocha({ config, query, fetchImpl, abortImpl });
+  return searchBocha({ config, plan, query, fetchImpl, abortImpl });
 }
 
 async function searchTavily({ config, query, fetchImpl, abortImpl }) {
@@ -225,11 +353,11 @@ async function searchTavily({ config, query, fetchImpl, abortImpl }) {
   };
 }
 
-async function searchBocha({ config, query, fetchImpl, abortImpl }) {
+async function searchBocha({ config, plan, query, fetchImpl, abortImpl }) {
   const url = config.baseUrl || DEFAULT_BOCHA_URL;
   const body = JSON.stringify({
     query,
-    freshness: "oneYear",
+    freshness: (plan && plan.freshness) || config.freshness || "oneYear",
     summary: true,
     count: Math.min(Math.max(config.maxResults, 1), MAX_SEARCH_RESULTS)
   });
@@ -290,6 +418,9 @@ function toPublicSearchMeta(search) {
     query: String(result.query || ""),
     plannedQueries: Array.isArray(result.plannedQueries) ? result.plannedQueries.slice(0, 4) : [],
     intent: result.intent || "general",
+    freshness: result.freshness || "",
+    recency: result.recency || buildRecencyMeta(null),
+    filters: result.filters || { blockedTopicCount: 0, duplicateCount: 0 },
     resultCount: sources.length,
     warning: result.warning || null,
     sources
@@ -308,7 +439,10 @@ module.exports = {
   shouldUseWebSearch,
   searchWeb,
   dedupeResults,
+  dedupeResultsWithStats,
+  filterSearchResultsByRecency,
   normalizeResults,
   normalizeBochaResults,
+  parseResultDate,
   toPublicSearchMeta
 };

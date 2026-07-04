@@ -21,6 +21,7 @@ const LLM_TEST_KEYS = [
   "STRATEGY_OS_SEARCH_BASE_URL",
   "STRATEGY_OS_SEARCH_TIMEOUT_MS",
   "STRATEGY_OS_SEARCH_MAX_RESULTS",
+  "STRATEGY_OS_SEARCH_FRESHNESS",
   "LLM_API_KEY",
   "LLM_API_BASE_URL",
   "LLM_MODEL"
@@ -190,6 +191,10 @@ test("ask UI API returns public search metadata when useSearch=true", async () =
       assert.equal(response.status, 200);
       assert.equal(payload.search.used, true);
       assert.equal(payload.search.resultCount, 1);
+      assert.equal(payload.search.intent, "news");
+      assert.equal(payload.search.freshness, "oneMonth");
+      assert.equal(payload.search.recency.required, true);
+      assert.ok(payload.search.filters);
       assert.equal(payload.search.sources[0].source, "example.com");
       assert.equal(JSON.stringify(payload).includes("sk-search-ui"), false);
     });

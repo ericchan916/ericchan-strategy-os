@@ -16,6 +16,7 @@ function printConfig(config) {
   console.log(`baseUrl: ${config.baseUrl || "(默认)"}`);
   console.log(`timeoutMs: ${config.timeoutMs}`);
   console.log(`maxResults: ${config.maxResults}`);
+  console.log(`freshness: ${config.freshness || "(由 Search Planner 决定)"}`);
 }
 
 async function main() {

@@ -80,6 +80,11 @@ function normalizeHistoryItem(input) {
           source: typeof item.source === "string" ? item.source : ""
         }))
     : [];
+  const searchPlannedQueries = Array.isArray(raw.searchPlannedQueries)
+    ? raw.searchPlannedQueries.slice(0, 3).map((item) => String(item || "")).filter(Boolean)
+    : [];
+  const searchRecencyRaw = raw.searchRecency && typeof raw.searchRecency === "object" ? raw.searchRecency : {};
+  const searchFiltersRaw = raw.searchFilters && typeof raw.searchFilters === "object" ? raw.searchFilters : {};
   return {
     id: typeof raw.id === "string" && raw.id ? raw.id : makeHistoryId(),
     question,
@@ -90,6 +95,21 @@ function normalizeHistoryItem(input) {
     searchWarning,
     searchResultCount,
     searchSources,
+    searchIntent: typeof raw.searchIntent === "string" ? raw.searchIntent : "",
+    searchPlannedQueries,
+    searchFreshness: typeof raw.searchFreshness === "string" ? raw.searchFreshness : "",
+    searchRecency: {
+      required: searchRecencyRaw.required === true,
+      reason: typeof searchRecencyRaw.reason === "string" ? searchRecencyRaw.reason : "",
+      filteredOldCount: Number.isFinite(Number(searchRecencyRaw.filteredOldCount)) ? Number(searchRecencyRaw.filteredOldCount) : 0,
+      missingDateCount: Number.isFinite(Number(searchRecencyRaw.missingDateCount)) ? Number(searchRecencyRaw.missingDateCount) : 0,
+      oldestKeptDate: searchRecencyRaw.oldestKeptDate == null ? null : String(searchRecencyRaw.oldestKeptDate),
+      newestKeptDate: searchRecencyRaw.newestKeptDate == null ? null : String(searchRecencyRaw.newestKeptDate)
+    },
+    searchFilters: {
+      blockedTopicCount: Number.isFinite(Number(searchFiltersRaw.blockedTopicCount)) ? Number(searchFiltersRaw.blockedTopicCount) : 0,
+      duplicateCount: Number.isFinite(Number(searchFiltersRaw.duplicateCount)) ? Number(searchFiltersRaw.duplicateCount) : 0
+    },
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
   };
 }
@@ -305,6 +325,79 @@ function showSearchSources(node, markup) {
   node.hidden = false;
 }
 
+// ============== Search process panel (V0.3.8) ==============
+
+function intentLabel(intent) {
+  const labels = {
+    "ai-opportunity": "AI 机会",
+    "project-research": "项目调研",
+    news: "新闻",
+    "competitor-research": "竞品研究",
+    "technical-docs": "技术文档",
+    general: "普通搜索"
+  };
+  return labels[intent] || "普通搜索";
+}
+
+function freshnessLabel(freshness) {
+  const labels = {
+    oneDay: "最近一天",
+    oneWeek: "最近一周",
+    oneMonth: "最近一月",
+    oneYear: "最近一年",
+    noLimit: "不限制"
+  };
+  return labels[freshness] || (freshness ? String(freshness) : "由问题决定");
+}
+
+function renderSearchProcess(search) {
+  if (!search || search.used !== true) return "";
+  const queries = Array.isArray(search.plannedQueries)
+    ? search.plannedQueries.slice(0, 3).filter(Boolean)
+    : [];
+  const recency = search.recency && typeof search.recency === "object" ? search.recency : {};
+  const filters = search.filters && typeof search.filters === "object" ? search.filters : {};
+  const blocked = Number.isFinite(Number(filters.blockedTopicCount)) ? Number(filters.blockedTopicCount) : 0;
+  const duplicate = Number.isFinite(Number(filters.duplicateCount)) ? Number(filters.duplicateCount) : 0;
+  const old = Number.isFinite(Number(recency.filteredOldCount)) ? Number(recency.filteredOldCount) : 0;
+  const missing = Number.isFinite(Number(recency.missingDateCount)) ? Number(recency.missingDateCount) : 0;
+  const warning = typeof search.warning === "string" ? search.warning : "";
+  const queryHtml = queries.length
+    ? `<ol class="search-process-query-list">${queries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
+    : "";
+  const warningHtml = /时效性较弱/.test(warning)
+    ? `<li class="search-process-warning">搜索结果时效性较弱，请谨慎参考。</li>`
+    : "";
+
+  return `<details class="search-process-details">
+  <summary>搜索过程</summary>
+  <ul class="search-process-list">
+    <li><strong>搜索意图：</strong>${escapeHtml(intentLabel(search.intent))}</li>
+    <li><strong>实际搜索词：</strong>${queryHtml || "（无）"}</li>
+    <li><strong>时间范围：</strong>${escapeHtml(freshnessLabel(search.freshness))}</li>
+    <li><strong>过滤说明：</strong>已过滤 ${blocked} 条无关财经结果，已过滤 ${old} 条过旧结果，去重 ${duplicate} 条，${missing} 条结果缺少发布时间。</li>
+    ${recency.reason ? `<li><strong>时效性原因：</strong>${escapeHtml(recency.reason)}</li>` : ""}
+    ${warningHtml}
+  </ul>
+</details>`;
+}
+
+function hideSearchProcess(node) {
+  if (!node) return;
+  node.innerHTML = "";
+  node.hidden = true;
+}
+
+function showSearchProcess(node, markup) {
+  if (!node) return;
+  if (!markup) {
+    hideSearchProcess(node);
+    return;
+  }
+  node.innerHTML = markup;
+  node.hidden = false;
+}
+
 // ============== Loading state helper (V0.3.4-hotfix) ==============
 
 function buildLoadingMarkup() {
@@ -350,6 +443,7 @@ function createApp(deps) {
   const answerLoading = nodes.answerLoading;
   const webSearchToggle = nodes.webSearchToggle;
   const searchSourcesNode = nodes.searchSources;
+  const searchProcessNode = nodes.searchProcess;
 
   // 找 storage；浏览器用 window.localStorage，测试里可注入。
   let storage = deps.storage;
@@ -408,6 +502,11 @@ function createApp(deps) {
       return;
     }
     showSearchSources(searchSourcesNode, renderSearchSources(list));
+  }
+
+  function applySearchProcess(search) {
+    if (!searchProcessNode) return;
+    showSearchProcess(searchProcessNode, renderSearchProcess(search));
   }
 
   function setInFlight(value) {
@@ -546,10 +645,16 @@ function createApp(deps) {
       used: entry.searchUsed === true,
       warning: entry.searchWarning || null,
       resultCount: entry.searchResultCount || 0,
-      sources: Array.isArray(entry.searchSources) ? entry.searchSources : []
+      sources: Array.isArray(entry.searchSources) ? entry.searchSources : [],
+      intent: entry.searchIntent || "",
+      plannedQueries: Array.isArray(entry.searchPlannedQueries) ? entry.searchPlannedQueries : [],
+      freshness: entry.searchFreshness || "",
+      recency: entry.searchRecency || null,
+      filters: entry.searchFilters || null
     };
     setStatus(statusFromSource(entry.source, warning, search), warning || search.warning ? "error" : null);
     applySearchSources(search);
+    applySearchProcess(search);
     setCurrentAnswer(entry.answer || "", entry.source || "local");
     state.inFlight = false;
     if (askButton) askButton.disabled = false;
@@ -595,6 +700,8 @@ function createApp(deps) {
       questionEcho.hidden = false;
       questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(value)}`;
     }
+    applySearchSources(null);
+    applySearchProcess(null);
     setCurrentAnswer("", "");
     try {
       if (!fetchImpl) throw new Error("fetch 不可用。");
@@ -623,6 +730,7 @@ function createApp(deps) {
       state.currentSource = source;
       setStatus(statusFromSource(source, warning, search), warning || (search && search.warning) ? "error" : null);
       applySearchSources(search);
+      applySearchProcess(search);
       if (copyButton && state.currentAnswer.trim()) {
         copyButton.disabled = false;
         copyButton.hidden = false;
@@ -637,7 +745,12 @@ function createApp(deps) {
         searchUsed: Boolean(search && search.used),
         searchWarning: search && search.warning ? search.warning : null,
         searchResultCount: search && Number.isFinite(Number(search.resultCount)) ? Number(search.resultCount) : 0,
-        searchSources: search && Array.isArray(search.sources) ? search.sources.slice(0, 5) : []
+        searchSources: search && Array.isArray(search.sources) ? search.sources.slice(0, 5) : [],
+        searchIntent: search && typeof search.intent === "string" ? search.intent : "",
+        searchPlannedQueries: search && Array.isArray(search.plannedQueries) ? search.plannedQueries.slice(0, 3) : [],
+        searchFreshness: search && typeof search.freshness === "string" ? search.freshness : "",
+        searchRecency: search && search.recency && typeof search.recency === "object" ? search.recency : null,
+        searchFilters: search && search.filters && typeof search.filters === "object" ? search.filters : null
       });
       renderHistory();
       return { submitted: true, source, warning: warning || null, search: search || null };
@@ -646,6 +759,8 @@ function createApp(deps) {
         answerOutput.textContent = "回答生成失败，请检查终端日志或先运行 npm run today。";
         answerOutput.hidden = false;
       }
+      applySearchSources(null);
+      applySearchProcess(null);
       setStatus((error && error.message) || "回答生成失败。", "error");
       return { submitted: false, reason: (error && error.message) || "unknown" };
     } finally {
@@ -716,6 +831,7 @@ function createApp(deps) {
     renderHistory();
     // V0.3.6：默认隐藏参考来源；恢复历史或新回答时由 applySearchSources 决定显隐。
     if (searchSourcesNode) hideSearchSources(searchSourcesNode);
+    if (searchProcessNode) hideSearchProcess(searchProcessNode);
   }
 
   return {
@@ -832,6 +948,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const answerLoading = document.querySelector("#answerLoading");
   const webSearchToggle = document.querySelector("#webSearchToggle");
   const searchSourcesNode = document.querySelector("#searchSources");
+  const searchProcessNode = document.querySelector("#searchProcess");
 
   const app = createApp({
     nodes: {
@@ -847,7 +964,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       copyButton,
       answerLoading,
       webSearchToggle,
-      searchSources: searchSourcesNode
+      searchSources: searchSourcesNode,
+      searchProcess: searchProcessNode
     }
   });
   app.mount();
@@ -877,5 +995,6 @@ module.exports = {
   applyInlineMarkdown,
   // V0.3.6 搜索来源展示
   renderSearchSources,
+  renderSearchProcess,
   isSafeExternalUrl
 };

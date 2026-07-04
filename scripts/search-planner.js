@@ -92,6 +92,7 @@ function planSearchQueries(question, _context = null) {
   const intent = classifySearchIntent(originalQuestion);
   const allowFinance = isFinanceQuestion(originalQuestion);
   const blockedTopics = allowFinance || intent !== "ai-opportunity" ? [] : FINANCE_TERMS.slice();
+  const recency = planRecency(originalQuestion, intent, _context);
   let queries = [originalQuestion];
 
   if (intent === "ai-opportunity") {
@@ -119,8 +120,34 @@ function planSearchQueries(question, _context = null) {
     intent,
     queries: compactQueries(queries).slice(0, 4),
     blockedTopics,
+    freshness: recency.freshness,
+    recencyRequired: recency.required,
+    recencyReason: recency.reason,
     allowFinance
   };
+}
+
+function planRecency(question, intent, context = null) {
+  const text = String(question || "");
+  const configured = context && typeof context.defaultFreshness === "string" && context.defaultFreshness
+    ? context.defaultFreshness
+    : "";
+  if (/今天|今日|这两天|最近两天/i.test(text)) {
+    return { freshness: "oneWeek", required: true, reason: "问题要求今天或最近两天的信息，需要优先近期结果。" };
+  }
+  if (intent === "news") {
+    return { freshness: "oneMonth", required: true, reason: "新闻与发布信息需要近期结果。" };
+  }
+  if (intent === "ai-opportunity") {
+    return { freshness: "oneMonth", required: true, reason: "趋势和新机会判断需要近期产品与市场信号。" };
+  }
+  if (intent === "technical-docs") {
+    return { freshness: "oneYear", required: true, reason: "API / SDK / 当前版本需要尽量新的文档。" };
+  }
+  if (intent === "project-research" || intent === "competitor-research") {
+    return { freshness: configured || "oneYear", required: false, reason: "项目与竞品研究可参考稍旧资料，但优先近期信息。" };
+  }
+  return { freshness: configured || "noLimit", required: false, reason: "普通搜索不强制时效性。" };
 }
 
 function scoreResult(result) {
@@ -133,23 +160,29 @@ function scoreResult(result) {
 
 function filterSearchResultsByRelevance(results, plan, maxResults = 5) {
   const items = Array.isArray(results) ? results : [];
-  if (!plan || plan.allowFinance || plan.intent !== "ai-opportunity") return { results: items.slice(0, maxResults), weak: false };
+  if (!plan || plan.allowFinance || plan.intent !== "ai-opportunity") {
+    return { results: items.slice(0, maxResults), weak: false, blockedTopicCount: 0 };
+  }
 
+  let blockedTopicCount = 0;
   const filtered = items.filter((item) => {
     const text = `${item.title || ""} ${item.snippet || ""} ${item.source || ""}`;
     const hasFinance = hasAny(text, FINANCE_TERMS);
     const hasRelevance = hasAny(removeFinanceTerms(text), RELEVANCE_TERMS);
-    return !hasFinance || hasRelevance;
+    const keep = !hasFinance || hasRelevance;
+    if (!keep) blockedTopicCount += 1;
+    return keep;
   });
 
-  if (filtered.length) return { results: filtered.slice(0, maxResults), weak: false };
+  if (filtered.length) return { results: filtered.slice(0, maxResults), weak: false, blockedTopicCount };
 
   return {
     results: items
       .slice()
       .sort((a, b) => scoreResult(b) - scoreResult(a))
       .slice(0, Math.min(2, maxResults)),
-    weak: items.length > 0
+    weak: items.length > 0,
+    blockedTopicCount
   };
 }
 
@@ -159,5 +192,6 @@ module.exports = {
   classifySearchIntent,
   filterSearchResultsByRelevance,
   isFinanceQuestion,
+  planRecency,
   planSearchQueries
 };

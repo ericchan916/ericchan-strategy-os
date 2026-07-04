@@ -23,6 +23,19 @@ test("planner classifies common search intents", () => {
   assert.equal(planSearchQueries("API 文档怎么接？").intent, "technical-docs");
 });
 
+test("planner sets recency requirements by intent", () => {
+  assert.equal(planSearchQueries("最近 Anthropic 有什么新闻？").recencyRequired, true);
+  assert.equal(planSearchQueries("最近有什么 AI 机会？").recencyRequired, true);
+  assert.equal(planSearchQueries("API 文档怎么接？").recencyRequired, true);
+  assert.equal(planSearchQueries("普通战略问题").recencyRequired, false);
+});
+
+test("today and recent wording use narrower freshness", () => {
+  assert.equal(planSearchQueries("今天有什么趋势？").freshness, "oneWeek");
+  assert.equal(planSearchQueries("这两天 AI 新闻有什么？").freshness, "oneWeek");
+  assert.equal(planSearchQueries("最近 Anthropic 有什么新闻？").freshness, "oneMonth");
+});
+
 test("ai opportunity search blocks finance pollution by default", () => {
   const plan = planSearchQueries("最近有什么机会？");
 

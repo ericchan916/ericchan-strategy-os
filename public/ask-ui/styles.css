@@ -1208,6 +1208,48 @@ h2 {
   white-space: nowrap;
 }
 
+.search-process {
+  display: none;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.search-process:not([hidden]) {
+  display: block;
+}
+
+.search-process details {
+  border: 1px dashed var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.58);
+  padding: 8px 10px;
+}
+
+.search-process summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.search-process-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+
+.search-process-query-list {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.search-process-warning {
+  color: var(--accent-dark);
+}
+
 /* ---------------- Uiverse 3D box spinner (by bociKond) ----------------
    6 张方形面板组成一个 3D 盒子旋转。
    - 颜色：深墨绿（与页面主色一致，白卡背景里克制、不抢戏）。

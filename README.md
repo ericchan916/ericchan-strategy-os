@@ -859,6 +859,7 @@ STRATEGY_OS_SEARCH_API_KEY=
 STRATEGY_OS_SEARCH_BASE_URL=
 STRATEGY_OS_SEARCH_TIMEOUT_MS=15000
 STRATEGY_OS_SEARCH_MAX_RESULTS=5
+STRATEGY_OS_SEARCH_FRESHNESS=
 ```
 
 当前支持的 provider：
@@ -874,7 +875,10 @@ STRATEGY_OS_SEARCH_PROVIDER=bocha
 STRATEGY_OS_SEARCH_API_KEY=你的 Bocha API Key
 STRATEGY_OS_SEARCH_BASE_URL=https://api.bochaai.com/v1/web-search
 STRATEGY_OS_SEARCH_MAX_RESULTS=5
+STRATEGY_OS_SEARCH_FRESHNESS=
 ```
+
+`STRATEGY_OS_SEARCH_FRESHNESS` 留空时由 Search Planner 根据问题类型决定；可选值包括 `oneDay` / `oneWeek` / `oneMonth` / `oneYear` / `noLimit`。
 
 使用方式：
 
@@ -883,9 +887,21 @@ npm run ask -- --search "最近 Anthropic 有什么新闻？"
 npm run ask:ui
 ```
 
-网页里勾选“本次联网搜索”后，`POST /api/ask` 会传入 `useSearch=true`。返回内容会包含安全的 `search` 摘要：是否实际使用、搜索词、结果数量、warning、来源标题 / URL / 域名。不会返回 API Key，也不会返回 provider 原始响应。
+网页里勾选“本次联网搜索”后，`POST /api/ask` 会传入 `useSearch=true`。返回内容会包含安全的 `search` 摘要：是否实际使用、搜索词、结果数量、warning、来源标题 / URL / 域名、搜索意图、实际搜索词、时间范围和过滤摘要。不会返回 API Key，也不会返回 provider 原始响应。
 
 搜索失败时，页面会显示中文提示：“联网搜索暂时不可用，已使用本地上下文回答。” Ask Mode 仍会基于本地上下文继续回答。
+
+## V0.3.8 搜索过程透明化与时效性控制
+
+V0.3.8 继续保持默认不联网：只有勾选“本次联网搜索”或 CLI 使用 `--search` 时才触发搜索。
+
+这版新增两个控制点：
+
+- 搜索过程透明化：回答下方会显示一个轻量“搜索过程”折叠区，包含搜索意图、实际搜索词、时间范围、过滤了多少条无关财经结果、去重多少条、过滤多少条过旧结果，以及多少条结果缺少发布时间。
+- 时效性控制：`news` / `ai-opportunity` / `technical-docs` 会优先较新结果。Bocha 的 `freshness` 不再固定为 `oneYear`，而是由 Search Planner 根据问题选择，例如“今天 / 这两天”优先 `oneWeek`，“最近新闻”优先 `oneMonth`，技术文档默认 `oneYear`。
+- 过旧结果处理：有 `publishedAt` 且明显超出时效窗口的结果会被过滤；没有日期的结果不会直接删除，但会计入 `missingDateCount`。如果过滤后结果整体偏旧，页面会提示“搜索结果时效性较弱，请谨慎参考。”
+- 历史记录只保存轻量搜索过程摘要：`intent`、最多 3 条 `plannedQueries`、`freshness`、`recency`、`filters`。不会保存 raw response、snippet、provider 原始 payload 或 API Key。
+- 复制按钮仍只复制回答正文，不复制搜索过程、搜索词、来源或 raw JSON。
 
 ## V0.3.7 搜索意图改写与相关性过滤
 
@@ -897,7 +913,7 @@ Search Planner 会做三件事：
 - 把宽泛问题改写成更贴近 EricChan 战略OS的搜索词。例如“今天有什么趋势？”不会直接搜索原句，而会改写到 AI Agent、大模型应用、独立开发者、商业机会、个人 OS / OPC 等方向。
 - 对结果做轻量相关性过滤。宽泛趋势类问题会过滤明显 A股 / 股票 / 行情 / 盘面热点污染；如果用户明确问财经，则不做这类过滤。
 
-搜索结果仍然只是补充证据，不替代战略判断。`search` 返回中会包含 `intent` 与 `plannedQueries`，前端暂不展示这些调试字段，历史记录也不保存完整搜索响应。
+搜索结果仍然只是补充证据，不替代战略判断。`search` 返回中会包含 `intent`、`plannedQueries`、`freshness`、`recency` 与 `filters`；前端只展示轻量搜索过程，不展示完整搜索响应。
 
 ## V0.3.6 精修搜索来源展示体验
 

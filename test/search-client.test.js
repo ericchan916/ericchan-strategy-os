@@ -5,12 +5,15 @@ const test = require("node:test");
 
 const {
   DEFAULT_BOCHA_URL,
+  filterSearchResultsByRecency,
+  parseResultDate,
   readSearchConfig,
   shouldUseWebSearch,
   searchWeb,
   toPublicSearchMeta
 } = require("../scripts/search-client");
 const { isPlaceholderKey } = require("../scripts/check-search");
+const { planSearchQueries } = require("../scripts/search-planner");
 
 test("readSearchConfig defaults to disabled", () => {
   const cfg = readSearchConfig({});
@@ -19,6 +22,7 @@ test("readSearchConfig defaults to disabled", () => {
   assert.equal(cfg.apiKey, "");
   assert.equal(cfg.timeoutMs, 15000);
   assert.equal(cfg.maxResults, 5);
+  assert.equal(cfg.freshness, "");
 });
 
 test("shouldUseWebSearch recognizes explicit and current-info triggers", () => {
@@ -163,7 +167,7 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(requestOptions.headers["content-type"], "application/json");
   assert.deepEqual(JSON.parse(requestOptions.body), {
     query: "EricChan Strategy OS",
-    freshness: "oneYear",
+    freshness: "noLimit",
     summary: true,
     count: 3
   });
@@ -175,6 +179,43 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(result.results[0].publishedAt, "2026-07-01T00:00:00+08:00");
   assert.equal(result.results[1].source, "news.example");
   assert.equal(JSON.stringify(toPublicSearchMeta(result)).includes("test-bocha-key"), false);
+});
+
+test("bocha request uses planner freshness for recent news", async () => {
+  const requestBodies = [];
+  const result = await searchWeb({
+    query: "最近 Anthropic 有什么新闻？",
+    env: {
+      STRATEGY_OS_SEARCH_ENABLED: "true",
+      STRATEGY_OS_SEARCH_PROVIDER: "bocha",
+      STRATEGY_OS_SEARCH_API_KEY: "test-bocha-key",
+      STRATEGY_OS_SEARCH_MAX_RESULTS: "2"
+    },
+    fetchImpl: async (_url, options) => {
+      requestBodies.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          webPages: {
+            value: [
+              {
+                name: "Anthropic launches a Claude update in 2026",
+                url: "https://example.com/anthropic",
+                siteName: "Example",
+                summary: "Anthropic Claude AI news",
+                datePublished: "2026-07-01T00:00:00Z"
+              }
+            ]
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(result.intent, "news");
+  assert.equal(result.freshness, "oneMonth");
+  assert.equal(requestBodies[0].freshness, "oneMonth");
 });
 
 test("wide opportunity search uses planned queries, dedupes urls, and filters finance noise", async () => {
@@ -222,15 +263,22 @@ test("wide opportunity search uses planned queries, dedupes urls, and filters fi
   });
 
   assert.equal(requestBodies.length, 3);
+  assert.ok(requestBodies.every((body) => body.freshness === "oneWeek"));
   assert.equal(requestBodies.some((body) => body.query === "今天有什么趋势？"), false);
   assert.equal(result.intent, "ai-opportunity");
+  assert.equal(result.freshness, "oneWeek");
   assert.ok(result.plannedQueries.some((item) => /AI|Agent|大模型|独立开发者|商业机会/i.test(item)));
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].url, "https://ai.example/agent");
   assert.equal(JSON.stringify(result.results).includes("A股"), false);
+  assert.equal(result.filters.blockedTopicCount, 1);
+  assert.equal(result.filters.duplicateCount, 7);
+  assert.equal(result.recency.missingDateCount, 1);
   const meta = toPublicSearchMeta(result);
   assert.equal(meta.used, true);
   assert.equal(meta.intent, "ai-opportunity");
+  assert.equal(meta.freshness, "oneWeek");
+  assert.equal(meta.filters.blockedTopicCount, 1);
   assert.ok(meta.plannedQueries.length > 1);
 });
 
@@ -290,6 +338,49 @@ test("bocha real data wrapper response is normalized", async () => {
   assert.equal(result.results[1].source, "agent.example");
   assert.equal(JSON.stringify(result.results).includes("log-should-not-leak"), false);
   assert.equal(JSON.stringify(result.results).includes("success"), false);
+});
+
+test("recency filter removes old news but keeps recent and undated results", () => {
+  const plan = planSearchQueries("最近 Anthropic 有什么新闻？");
+  const result = filterSearchResultsByRecency(
+    [
+      { title: "Old Anthropic news", url: "https://example.com/old", snippet: "AI", publishedAt: "2020-01-01T00:00:00Z" },
+      { title: "Recent Anthropic news", url: "https://example.com/recent", snippet: "AI", publishedAt: "2026-07-01T00:00:00Z" },
+      { title: "Undated Anthropic page", url: "https://example.com/undated", snippet: "AI Claude" }
+    ],
+    plan,
+    5,
+    new Date("2026-07-04T00:00:00Z")
+  );
+
+  assert.equal(result.weak, false);
+  assert.deepEqual(result.results.map((item) => item.url).sort(), ["https://example.com/recent", "https://example.com/undated"]);
+  assert.equal(result.meta.filteredOldCount, 1);
+  assert.equal(result.meta.missingDateCount, 1);
+  assert.equal(result.meta.newestKeptDate, "2026-07-01");
+});
+
+test("recency filter warns and keeps fallback when all results are old", () => {
+  const plan = planSearchQueries("今天有什么趋势？");
+  const result = filterSearchResultsByRecency(
+    [
+      { title: "AI Agent 2021 report", url: "https://example.com/2021", snippet: "AI Agent", publishedAt: "2021-01-01T00:00:00Z" },
+      { title: "AI tools 2020 report", url: "https://example.com/2020", snippet: "AI tools", publishedAt: "2020-01-01T00:00:00Z" }
+    ],
+    plan,
+    5,
+    new Date("2026-07-04T00:00:00Z")
+  );
+
+  assert.equal(result.weak, true);
+  assert.equal(result.results.length, 2);
+  assert.equal(result.meta.filteredOldCount, 2);
+});
+
+test("parseResultDate extracts year and month from title when publishedAt is missing", () => {
+  const parsed = parseResultDate({ title: "AI Agent 2026年6月产品更新", snippet: "" });
+  assert.ok(parsed instanceof Date);
+  assert.equal(parsed.toISOString().slice(0, 7), "2026-06");
 });
 
 test("bocha count is capped at 50", async () => {
