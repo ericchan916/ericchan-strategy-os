@@ -1541,12 +1541,32 @@ function createApp(deps) {
     }
   }
 
+  // V0.6.6：把 loading 文本更新 + 显隐封装成 helper；ask 与机会草稿复用同一套 DOM
+  function showAnswerLoading(text) {
+    if (!answerLoading) return;
+    if (text) {
+      const textEl = answerLoading.querySelector(".loading-text");
+      if (textEl) textEl.textContent = text;
+    }
+    answerLoading.hidden = false;
+    // 同期把当前答案区收起，避免 loading 与空态文字叠在同一个滚动区造成视觉噪音
+    if (answerOutput && state.inFlight) answerOutput.hidden = true;
+  }
+
+  function hideAnswerLoading() {
+    if (answerLoading) answerLoading.hidden = true;
+    if (answerOutput) answerOutput.hidden = false;
+  }
+
   function setInFlight(value) {
     state.inFlight = !!value;
     if (askButton) askButton.disabled = state.inFlight;
     for (const btn of state.recommendedButtons) btn.disabled = state.inFlight;
     if (answerLoading) {
       if (state.inFlight) {
+        // V0.6.6：复用 helper，文本保留 DOM 默认文案的"正在生成战略判断……"
+        const textEl = answerLoading.querySelector(".loading-text");
+        if (textEl) textEl.textContent = "正在生成战略判断……";
         answerLoading.hidden = false;
         if (answerOutput) answerOutput.hidden = true;
       } else {
@@ -1680,6 +1700,10 @@ function createApp(deps) {
           source: redactPromptText(String(s.source || "")).slice(0, 80)
         }))
       : [];
+    // V0.6.6：调用 ask loading 同一套 DOM 展示"正在生成机会草稿……"
+    // 先暂时把 #addOpportunityContainer 隐藏，让 loading 在答案区成主视觉
+    if (addOpportunityContainer) addOpportunityContainer.hidden = true;
+    showAnswerLoading("正在生成机会草稿……");
     // V0.3.11-hotfix-3：先调 /api/opportunities/draft 拿智能草稿；失败 fallback 本地规则
     let draft = null;
     if (fetchImpl) {
@@ -1706,6 +1730,8 @@ function createApp(deps) {
         draft = null;
       }
     }
+    // 不论成功 / fallback 都关掉 loading，避免 draft 完成后还显示 loading 抖动
+    hideAnswerLoading();
     const markup = buildAddOpportunityFormMarkup({
       question: state.currentQuestion,
       answer: state.currentAnswer,
@@ -2256,6 +2282,7 @@ function createApp(deps) {
     closeGoalEditor,
     saveGoalFromInput,
     clearCurrentGoal,
+    openAddOpportunityForm,
     clearSelectedQuestion,
     selectQuestionButton,
     historyStore,

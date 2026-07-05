@@ -1848,6 +1848,53 @@ V0.6.3-hotfix 修复的是安全回归，不新增功能。
 - 默认不联网原则不变；LLM 动态回答、按需联网搜索、Goal 匹配度、今日优先级、固定视口工作台不变。
 - loading 动画未修改；`.env`、`opportunity-pool.json`、`data/opportunities/backups` 不提交。
 
+## V0.6.6 优化机会草稿 Loading 与答案阅读层级
+
+V0.6.6 复用现有 loading 视觉语言 + 给答案区加克制高光系统；loading 动画本体 / keyframes 一律不碰。
+
+**机会草稿 Loading 视觉统一**
+
+- 关键决策：**不新建第二套 spinner**。新增 helper `showAnswerLoading(text)` / `hideAnswerLoading()`，让初始提问与机会草稿共用 `#answerLoading` 同一 DOM 节点。
+- 只有文案切换：`textContent` 写入 `.loading-text` span（已被加上 `id="answerLoadingText"` 便于 JS 精确锁）
+- 默认文案 `"正在生成战略判断……"`；草稿场景切到 `"正在生成机会草稿……"`
+- `openAddOpportunityForm` 顶部：`addOpportunityContainer.hidden = true` + `showAnswerLoading("正在生成机会草稿……")`；无论 fetch 成功 / fallback，`hideAnswerLoading()` + 渲染表单
+- loading DOM / `<div class="loading-spinner">` 6 个子 div / `@keyframes loading-spinner` 及所有 hamster* / spoke keyframes 全部不动
+- `prefers-reduced-motion` 媒体查询下 spinner `animation: none` 兜底保留
+
+**Loading 状态答案框布局升级**
+
+- `#answer-loading` 从 V0.3.11-hotfix-2 的 `min-height: 220px; padding: 36px 32px` 升到 **`min-height: 360px; padding: 64px 32px 56px`** ——让 loading 占据答案区主舞台，避免之前 220px 卡 + 空态文字叠出的"底部大空白"
+- `setInFlight(true)` 同时隐藏 `#answerOutput`，让 loading 成为单主视觉
+- `.loading-inner` gap 18→22px；`.loading-text` 12.5px→13px，更清晰不贴边
+- 不影响 fixed viewport / 三个局部滚动区 / body 不滚动
+- 普通回答完成后 `#answerOutput` 立刻恢复，layout 不会跳
+
+**答案易读性 + 重点高光**
+
+- `.answer strong`（`<strong>**xxx**</strong>` 直接打的关键句）：
+  - 颜色：`var(--ink)` → `var(--accent-dark)`（非黑色重点色）
+  - 背景：`linear-gradient(180deg, transparent 56%, rgba(184, 222, 200, 0.55) 56%)` —— 透明过渡到 accent-soft 半透明，制造"高光笔"效果
+  - `box-decoration-break: clone` 让多行 strong 的高光在每行独立包裹，不破洞
+  - `mix-blend-mode: multiply` 高光与底色自然融合，不粗暴盖色
+- `.answer mark`：默认状态升级为 `accent-dark` + 半透明背景 + 同样用 box-decoration-break + multiply
+- `.answer em`：去 italic、加 accent-dark / 600 字重
+- `.answer h2`：顶加 22px accent 顶边标记，文字变 `accent-dark`，把段落章节拉出更强层级
+- `.answer h1`：同样 `accent-dark`
+- `.answer p`：颜色 ink、margin 14px ——段落节奏更舒服
+- `.answer code / pre`：`mix-blend-mode: normal` 覆写，确保代码块不被高光笔涂掉
+
+**保留不变（防回归）**
+
+- loading 动画本体：`<div class="loading-spinner">` 6 子 div + 11 个 `@keyframes`（hamster/head/eye/ear/body/limb×4/tail/spoke）+ `@keyframes loading-spinner` 一律不碰
+- Goal idle/edit：`.goal-form.is-open` class 切换 + 默认 `max-height:0` + `tabindex="-1"` 全部保留
+- Codex / Claude Code 任务按钮：HTML 已删，不再恢复
+- 默认不联网 / sk-* 脱敏 / Bocha / Tavily / 后端逻辑 / API / opportunity-pool.json：零改动
+
+**回归断言**
+
+- `npm test`：641 → 654（13 个新增 V0.6.6 测试覆盖 HTML loadingText id / min-height ≥ 360 / `.answer strong` 高光系统 / `.answer mark` / `.answer h2` 顶边 / ask / draft / Copy 不携带高亮污染 / 全局回归 / loading keyframes 完整保留 / reduced-motion 兜底）
+- `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`
+
 ## V0.6.5 精修 Goal 展示并简化任务按钮
 
 V0.6.5 真正把 Goal 编辑表单从 idle 状态脱掉布局、移除两个多余任务按钮；不动后端、不动 loading、不改 API。

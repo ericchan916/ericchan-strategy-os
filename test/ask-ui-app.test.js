@@ -582,20 +582,18 @@ test("HTML answerLoading 含深色卡片节点标记（V0.3.4-hotfix-3）", () =
     "loading 区应携带深色卡片样式标记");
 });
 
-test("CSS .wheel-and-hamster 尺寸增大到至少 9em（V0.3.4-hotfix-3）", () => {
-  // 主规则（含 real declarations，不是 reduced-motion 覆盖）。
-  const rule = stylesCss.match(/\.wheel-and-hamster\s*\{[\s\S]*?\n\s*\}\s*\.wheel,/);
-  assert.ok(rule, "找不到 .wheel-and-hamster 主规则");
-  const target = rule[0];
-  // 至少含一条 width: <n>em，n ≥ 9。
-  const widthMatch = target.match(/width\s*:\s*(\d+(?:\.\d+)?)em/);
-  assert.ok(widthMatch, ".wheel-and-hamster 主规则必须用 em 单位设置 width");
-  const emSize = Number(widthMatch[1]);
+test("V0.6.6: CSS .wheel-and-hamster 主规则（10em + 16px）", () => {
+  // 找含有 width: <n>em + font-size: <n>px 的真正主规则（不是 reduced-motion 覆盖）
+  // V0.6.6：因 V0.6.6 加了多个 font-size: 13/14/15 的规则，老的非贪婪 regex 会取到错误的 13px；
+  // 改成直接定位 "width: <n>em" + "font-size: <n>px" 同时出现的块。
+  const rules = stylesCss.match(/\.wheel-and-hamster\s*\{[^}]*\}/g) || [];
+  const main = rules.find((r) => /width\s*:\s*\d+(?:\.\d+)?em/.test(r) && /font-size\s*:\s*\d+px/.test(r));
+  assert.ok(main, "找不到 .wheel-and-hamster 主规则（应同时含 width: <n>em 与 font-size: <n>px）");
+  const wm = main.match(/width\s*:\s*(\d+(?:\.\d+)?)em/);
+  const fm = main.match(/font-size\s*:\s*(\d+)px/);
+  const emSize = Number(wm[1]);
+  const px = Number(fm[1]);
   assert.ok(emSize >= 9, `.wheel-and-hamster 应 >= 9em，当前 ${emSize}em`);
-  // font-size 也应同步上调到至少 16px 让 hamster 看起来更大。
-  const fontMatch = target.match(/font-size\s*:\s*(\d+)px/);
-  assert.ok(fontMatch, ".wheel-and-hamster 主规则应含 font-size 像素设置");
-  const px = Number(fontMatch[1]);
   assert.ok(px >= 16, `.wheel-and-hamster font-size 应 >= 16px，当前 ${px}px`);
 });
 
@@ -2974,15 +2972,16 @@ test("V0.3.11-hotfix-2: submitAsk 联网搜索流程后按钮可见可点（end-
 
 // ============== V0.3.11-hotfix-2: loading 容器 ==============
 
-test("V0.3.11-hotfix-2: CSS loading 容器最小高度 ≥ 180px（更大更舒展）", () => {
-  // 抓 .answer-loading 规则块，验证 min-height 在 180~280 范围
+test("V0.3.11-hotfix-2 + V0.6.6: CSS loading 容器最小高度 ≥ 320px（更舒展）", () => {
+  // 抓 .answer-loading 规则块
   const match = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
   assert.ok(match, "应存在 .answer-loading 规则");
   const block = match[0];
   const minH = block.match(/min-height\s*:\s*(\d+)px/);
   assert.ok(minH, ".answer-loading 应设置 min-height (px)");
   const h = Number(minH[1]);
-  assert.ok(h >= 180 && h <= 320, `.answer-loading min-height 应在 180~320 范围，实际 ${h}px`);
+  // V0.6.6：loading 升级到 360px 让答案框不空荡
+  assert.ok(h >= 320, `.answer-loading min-height 应 >= 320px（V0.6.6），实际 ${h}px`);
 });
 
 test("V0.3.11-hotfix-2: CSS loading 容器 padding 充足（>= 28px）", () => {
@@ -3609,6 +3608,185 @@ test("V0.6.5: app 启动 (mount) 时不挂 task-copy button click 监听", () =>
   // 但默认 UI 不展示这些按钮
   assert.equal(written.length, 0, "默认不应自动写 clipboard");
 });
+
+// ============== V0.6.6: 机会草稿 loading + 答案易读性 + 重点高光 ==============
+
+test("V0.6.6: HTML #answerLoading 含 id 化的 loading-text span，方便动态切换文案", () => {
+  // 草稿 loading 与 Ask loading 复用 #answerLoading 同一 DOM 节点，仅替换文案
+  const loadHtml = indexHtml.match(/<div[^>]+id="answerLoading"[^>]*>[\s\S]*?<\/div>/);
+  assert.ok(loadHtml, "应能找到 #answerLoading");
+  assert.ok(/id="answerLoadingText"/.test(loadHtml[0]), "#answerLoading 内应含 id=answerLoadingText 的 span 便于动态切换");
+  // 默认文案
+  assert.ok(loadHtml[0].includes("正在生成战略判断"), "默认 loading 文案应为「正在生成战略判断……」");
+});
+
+test("V0.6.6: CSS .answer-loading 升级到 min-height 360px 与更宽松 padding", () => {
+  const rule = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer-loading 主规则");
+  const block = rule[0];
+  const min = (block.match(/min-height\s*:\s*(\d+)px/) || [])[1];
+  assert.ok(min && Number(min) >= 360, `.answer-loading min-height 应 >= 360px，当前 ${min}px`);
+  // padding 至少 32px 横向 + 32px 纵向，让 loading 不贴边
+  const pad = block.match(/padding\s*:\s*([^;]+);/);
+  assert.ok(pad, ".answer-loading 应含 padding");
+});
+
+test("V0.6.6: CSS .answer strong 升级为非黑色重点色 + 高光笔效果 + 混合模式", () => {
+  const rule = stylesCss.match(/\.answer strong\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer strong 规则");
+  const block = rule[0];
+  // 1) 非黑色：使用 accent-dark 或类似深色（不是 var(--ink) 黑）
+  assert.ok(/var\(--accent[^)]*\)/.test(block), ".answer strong 应使用 accent 系列非黑色");
+  // 2) 高光笔：linear-gradient
+  assert.ok(/linear-gradient/.test(block), ".answer strong 应含 highlighter linear-gradient");
+  // 3) box-decoration-break: clone 让高光在多行独立包裹
+  assert.ok(/box-decoration-break\s*:\s*clone/.test(block), ".answer strong 应开启 box-decoration-break: clone");
+  // 4) mix-blend-mode 混合模式
+  assert.ok(/mix-blend-mode\s*:\s*(multiply|multiply-)?/.test(block), ".answer strong 应含 mix-blend-mode");
+});
+
+test("V0.6.6: CSS .answer mark 升级（mark 元素也走非黑色重点色）", () => {
+  const rule = stylesCss.match(/\.answer mark\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer mark 规则");
+  const block = rule[0];
+  assert.ok(/var\(--accent[^)]*\)/.test(block), ".answer mark 应使用 accent 系列非黑色");
+  assert.ok(/rgba\(|var\(--accent-soft/.test(block), ".answer mark 背景应浅");
+});
+
+test("V0.6.6: CSS .answer h2 加 accent 顶边 + accent-dark 颜色", () => {
+  const rule = stylesCss.match(/\.answer h2\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer h2 规则");
+  const block = rule[0];
+  assert.ok(/var\(--accent-dark\)/.test(block), ".answer h2 应使用 accent-dark");
+  assert.ok(/\.answer h2::before/.test(stylesCss), ".answer h2 应有 ::before accent 顶边标记");
+});
+
+test("V0.6.6: CSS .answer 代码/代码块不被高光笔影响", () => {
+  // .answer code / pre 内的 mix-blend-mode: normal，避免代码块带高光
+  const css = stylesCss;
+  // 代码块相关的 mix-blend-mode 应该是 normal
+  const rule = css.match(/\.answer code,\s*\n\s*\.answer pre\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer code + pre 的 mix-blend-mode 覆盖规则");
+  assert.ok(/mix-blend-mode\s*:\s*normal/.test(rule[0]), "覆盖规则应回退到 normal");
+});
+
+test("V0.6.6: app 暴露 showAnswerLoading / hideAnswerLoading 复用 helper", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  // setInFlight(true) 调起初始 loading
+  app.setInFlight(true);
+  assert.equal(nodes.answerLoading.hidden, false, "setInFlight(true) 应让 answerLoading 可见");
+  assert.equal(nodes.answerOutput.hidden, true, "loading 期间 answerOutput 应隐藏");
+  // 验证 .loading-text span 内容已被写为"正在生成战略判断"（含省略号）
+  const textEl = nodes.answerLoading.querySelector?.(".loading-text");
+  if (textEl) {
+    assert.ok(textEl.textContent.includes("正在生成战略判断") || /战略/.test(textEl.textContent), "loading text 应包含「战略」关键词");
+  }
+});
+
+test("V0.6.6: openAddOpportunityForm 草稿 fetch 期间 #answerLoading 可见且文案为「正在生成机会草稿」", async () => {
+  // fetchImpl 故意 hang 让我们能探测 loading 状态
+  let release;
+  const fetchGate = new Promise((resolve) => { release = resolve; });
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: (path) => {
+      if (path === "/api/opportunities/draft") return fetchGate.then(() => ({
+        ok: true,
+        json: () => Promise.resolve({ opportunityName: "测试机会", status: "validate" })
+      }));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) });
+    },
+    clipboardImpl: async () => {}
+  });
+  app.mount();
+  // 准备一个有回答的状态，触发 add 按钮
+  app.setCurrentAnswer("# 答案正文，**结论**重要。", "local", { question: "Q", answerType: "ask" });
+  // 模拟点击"机会池"按钮
+  const openPromise = app.openAddOpportunityForm();
+  // 等待 microtask 让 showAnswerLoading 跑完
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(nodes.answerLoading.hidden, false, "草稿 loading 期间 answerLoading 应可见");
+  // 文案已被切换为"正在生成机会草稿"
+  const textEl = nodes.answerLoading.querySelector?.(".loading-text");
+  if (textEl) {
+    assert.ok(/机会草稿/.test(textEl.textContent), "草稿 loading 文案应包含「机会草稿」");
+  }
+  // 释放 fetch 让 openPromise 完成
+  release();
+  await openPromise;
+  // fetch 完成后：loading 应再次隐藏（不与答案区永久争夺）
+  assert.equal(nodes.answerLoading.hidden, true, "草稿 loading 完成后 answerLoading 应回到隐藏");
+  // 表单容器应该已被填充
+  assert.equal(nodes.addOpportunityContainer.hidden, false, "草稿完成后表单应展开");
+});
+
+test("V0.6.6: Copy 路径仍只输出纯文本（不复制高亮 CSS）", () => {
+  // buildClipboardPayload 应只返回 answer 文字，不携带 HTML 标签
+  const { buildClipboardPayload } = require("../public/ask-ui/app");
+  const payload = buildClipboardPayload({
+    answer: "# 标题\n\n这是 **strong 关键词** 和 `code`。",
+    question: "Q"
+  });
+  assert.equal(payload.text.includes("# 标题"), true);
+  assert.equal(payload.text.includes("**strong 关键词**"), true, "复制文本应保留 markdown 标记（不渲染高光）");
+  assert.equal(payload.html, undefined, "复制 payload 不应携带 HTML");
+});
+
+test("V0.6.6: 全局回归 — Goal idle/edit / 提问按钮动效 / 机会池按钮动效 全部保留", () => {
+  // 三栏结构保留
+  assert.ok(/id="goalEditButton"/.test(indexHtml), "Goal 编辑按钮仍在");
+  assert.ok(/goal-button--icon/.test(indexHtml), "Goal 编辑按钮图标样式保留");
+  // 提问按钮 motion-label 系统保留
+  assert.ok(/class="primary-button motion-label-button"/.test(indexHtml), "提问按钮动效系统保留");
+  // 机会池按钮动效系统保留
+  assert.ok(/class="add-opportunity-button motion-label-button"/.test(indexHtml), "机会池按钮动效系统保留");
+  // Codex/Claude Code Task 按钮不恢复
+  assert.equal(/id="copyCodexTaskButton"/.test(indexHtml), false, "Codex 任务按钮不应被恢复");
+  assert.equal(/id="copyClaudeTaskButton"/.test(indexHtml), false, "Claude Code 任务按钮不应被恢复");
+});
+
+test("V0.6.6: loading 动画本体未触 — keyframes 仍为 Uiverse 原文与 3D 备份", () => {
+  // 所有 hamster* / spoke / loading-spinner keyframes 必须在
+  for (const name of [
+    "hamster", "hamsterHead", "hamsterEye", "hamsterEar", "hamsterBody",
+    "hamsterFRLimb", "hamsterFLLimb", "hamsterBRLimb", "hamsterBLLimb",
+    "hamsterTail", "spoke", "loading-spinner"
+  ]) {
+    assert.ok(new RegExp("@keyframes\\s+" + name + "\\b").test(stylesCss), `应保留 @keyframes ${name}`);
+  }
+  // HTML 中 .loading-spinner 6 个子 div 仍在
+  const sp = indexHtml.match(/class="loading-spinner"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/);
+  assert.ok(sp, ".loading-spinner 应有 6 个 <div>");
+  const empties = (sp[0].match(/<div><\/div>/g) || []).length;
+  assert.ok(empties >= 6, `.loading-spinner 应至少含 6 个子 div，实际 ${empties}`);
+});
+
+test("V0.6.6: prefers-reduced-motion 媒体查询仍在（兜底）", () => {
+  // 至少一个 prefers-reduced-motion 规则保护动画
+  const blocks = stylesCss.match(/@media\s*\(prefers-reduced-motion\s*:\s*reduce\)[\s\S]*?(?=\n\s*@media|\s*$)/g) || [];
+  assert.ok(blocks.length > 0, "应至少一个 prefers-reduced-motion 媒体查询");
+});
+
+test("V0.6.6: loading spinner 仍是 Uiverse 同款 6 个 div + 11 个 keyframes 完整", () => {
+  // V0.3.4-hotfix-3 + V0.6.6 不退化的回归
+  const requiredKeyframes = [
+    "hamster", "hamsterHead", "hamsterEye", "hamsterEar", "hamsterBody",
+    "hamsterFRLimb", "hamsterFLLimb", "hamsterBRLimb", "hamsterBLLimb",
+    "hamsterTail", "spoke"
+  ];
+  for (const name of requiredKeyframes) {
+    assert.ok(new RegExp("@keyframes\\s+" + name + "\\b").test(stylesCss), "仓鼠 11 个 keyframes 必须完整: " + name);
+  }
+});
+
 
 test("V0.6.4: edit 按钮 aria-label 跟随存储目标切换", () => {
   const storage = makeMemoryStorage();

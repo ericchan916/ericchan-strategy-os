@@ -1442,7 +1442,6 @@ h2 {
   margin: 26px 0 12px;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 700;
-  color: var(--ink);
   letter-spacing: 0;
 }
 
@@ -1452,22 +1451,13 @@ h2 {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.answer h2 {
-  font-size: 18px;
-}
-
 .answer h3 {
   font-size: 16px;
-}
-
-.answer p {
-  margin: 12px 0;
-}
-
-.answer strong {
   color: var(--ink);
-  font-weight: 700;
 }
+
+/* .answer strong / .answer p 旧规则删除：V0.6.6 在本文件下方重写为非黑色重点色 + 高光系统 */
+
 
 .answer ul,
 .answer ol {
@@ -1507,6 +1497,85 @@ h2 {
   padding: 0;
   background: transparent;
   color: inherit;
+}
+
+/* ---------------- V0.6.6 答案易读性 + 重点高光 ----------------
+   1) strong / mark 升级为非黑重点色 + linear-gradient 高光 + mix-blend-mode: multiply（高光与文本融合，不破坏字形）
+   2) box-decoration-break: clone 让高光在每行独立包裹（多行 strong 不破洞）
+   3) h2 章节标题添加 accent 顶边
+   4) 列表项 marker 沿用 accent，自然延伸
+   5) 段落节奏微调，提高可扫读性
+   ------------------------------------------------------- */
+
+.answer strong {
+  color: var(--accent-dark);
+  font-weight: 700;
+  /* 高光笔效果：透明到 accent 半透明的纵向渐变，70% 处开始填色 */
+  background-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 56%,
+    rgba(184, 222, 200, 0.55) 56%,
+    rgba(184, 222, 200, 0.55) 96%,
+    transparent 96%
+  );
+  padding: 0 3px;
+  margin: 0 -1px;
+  border-radius: 2px;
+  /* 高光继承文本行内；multiply 让底色纸张略加深而非粗暴盖色 */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  mix-blend-mode: multiply;
+}
+
+.answer mark {
+  color: var(--accent-dark);
+  font-weight: 600;
+  background: rgba(184, 222, 200, 0.45);
+  padding: 0 3px;
+  border-radius: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  mix-blend-mode: multiply;
+}
+
+.answer em {
+  font-style: normal;
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.answer h2 {
+  position: relative;
+  margin-top: 32px;
+  padding-top: 12px;
+  color: var(--accent-dark);
+}
+
+.answer h2::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.answer h1 {
+  color: var(--accent-dark);
+}
+
+.answer p {
+  margin: 14px 0;
+  color: var(--ink);
+}
+
+/* code / pre 在 highlight 之下覆写，确保它们不被 highlighter 影响 */
+.answer code,
+.answer pre {
+  mix-blend-mode: normal;
 }
 
 /* ---------------- Footer ---------------- */
@@ -1727,8 +1796,9 @@ h2 {
   align-items: center;
   justify-content: center;
   /* V0.3.11-hotfix-2：放大外层白色框，让 loading 不再贴边 / 不再拥挤 */
-  min-height: 220px;
-  padding: 36px 32px;
+  /* V0.6.6：升级到 360px 让 loading 占据答案区主舞台，避免底部大空白 */
+  min-height: 360px;
+  padding: 64px 32px 56px;
   border-radius: var(--radius-md);
   background: #ffffff;
   border: 1px solid var(--line-soft);
@@ -1740,21 +1810,27 @@ h2 {
   display: flex;
 }
 
+/* V0.6.6：loading 期间把空态答案卡隐藏，避免与 loading 一起呈现造成底部空白 */
+.answer.is-loading,
+.output-panel.is-loading .answer:not(.is-loading-placeholder) {
+  display: none;
+}
+
 .loading-inner {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   /* V0.3.11-hotfix-2：放大图形与文字之间的留白 */
-  gap: 18px;
+  gap: 22px;
   padding: 12px 8px;
 }
 
 .loading-text {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--muted);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 /* ------------------------------------------------------------------
