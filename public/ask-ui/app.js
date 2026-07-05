@@ -1609,14 +1609,16 @@ function createApp(deps) {
     let draft = null;
     if (fetchImpl) {
       try {
+        const draftRequestBody = {
+          question: state.currentQuestion,
+          answer: state.currentAnswer.slice(0, 4000),
+          search: state.currentSearch || null
+        };
+        if (state.currentGoal) draftRequestBody.currentGoal = state.currentGoal;
         const response = await fetchImpl("/api/opportunities/draft", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            question: state.currentQuestion,
-            answer: state.currentAnswer.slice(0, 4000),
-            search: state.currentSearch || null
-          })
+          body: JSON.stringify(draftRequestBody)
         });
         const payload = await (response && typeof response.json === "function"
           ? response.json()

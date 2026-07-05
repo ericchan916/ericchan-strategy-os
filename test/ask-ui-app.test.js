@@ -2373,6 +2373,67 @@ test("V0.5: submitAsk 会把 currentGoal 传给 /api/ask", async () => {
   assert.equal(captured.useSearch, undefined, "默认不联网不应被 currentGoal 改变");
 });
 
+test("V0.5.1: 清除 currentGoal 后 submitAsk 不再带 currentGoal", async () => {
+  let captured = null;
+  const nodes = makeFakeNodes();
+  nodes.questionInput.value = "今天适合做什么？";
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: (path, init = {}) => {
+      if (path === "/api/ask") captured = JSON.parse(init.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ answer: "回答", source: "local", search: null, warning: null })
+      });
+    }
+  });
+  app.mount();
+  app.setCurrentGoal("用战略OS筛选适合独立开发者的小型 AI 产品");
+  app.clearCurrentGoal();
+  await app.submitAsk();
+  assert.equal(Object.prototype.hasOwnProperty.call(captured, "currentGoal"), false);
+});
+
+test("V0.5.1: ＋机会池智能草稿请求会带 currentGoal，清除后不带", async () => {
+  const calls = [];
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: (path, init = {}) => {
+      if (path === "/api/opportunities/draft") {
+        calls.push(JSON.parse(init.body));
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            opportunityName: "AI 机会简报助手",
+            oneLineSummary: "面向独立开发者的小型 AI 产品验证。",
+            note: "Goal 匹配：下一步应压到 7 天内可验证。",
+            nextAction: "7 天内先完成一个最小页面验证。",
+            suggestedTags: ["独立开发者", "可快速验证"],
+            draftSource: "local-rule"
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    }
+  });
+  app.mount();
+  app.setCurrentGoal("用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP");
+  app.setCurrentAnswer("可以做一个 AI 机会简报助手，先做最小页面验证。", "local", {
+    question: "最近有什么适合独立开发者做的小型 AI 项目？"
+  });
+  nodes.addOpportunityButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls[0].currentGoal, "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP");
+
+  app.clearCurrentGoal();
+  nodes.addOpportunityButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[1], "currentGoal"), false);
+});
+
 test("V0.5: history restore 不改变 currentGoal", () => {
   const { app } = makeAskApp();
   app.setCurrentGoal("当前目标 A");

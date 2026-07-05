@@ -1074,11 +1074,15 @@ function readDraftSystemPrompt() {
   ].join("\n");
 }
 
-function buildDraftUserPrompt({ question, answer, search } = {}) {
+function buildDraftUserPrompt({ question, answer, search, currentGoal = "" } = {}) {
   const q = String(question || "").slice(0, 1000);
   const a = String(answer || "").slice(0, 2000);
+  const goal = sanitizeCurrentGoal(currentGoal);
   const searchUsed = search && search.used ? "本次已联网搜索" : "未使用联网搜索";
-  return `问题：${q}\n回答：${a}\n${searchUsed}\n请按系统提示输出严格 JSON。`;
+  const goalText = goal
+    ? `当前目标：${goal}\n草稿应判断机会是否服务当前目标；如果目标强调 7 天验证 / 独立开发者 / 小型 AI 产品，oneLineSummary、note、nextAction 要体现这个约束，但不要机械复制整句 Goal。\n`
+    : "";
+  return `问题：${q}\n回答：${a}\n${goalText}${searchUsed}\n请按系统提示输出严格 JSON。`;
 }
 
 function parseLlmDraftJson(raw) {
@@ -1135,15 +1139,16 @@ function pickDraftFields(parsed) {
   };
 }
 
-function buildDraftByRule({ question, answer, search }) {
+function buildDraftByRule({ question, answer, search, currentGoal = "" }) {
   const { deriveOpportunityDraftFromAnswer } = require("./opportunity-store");
-  return deriveOpportunityDraftFromAnswer({ question, answer, search });
+  return deriveOpportunityDraftFromAnswer({ question, answer, search, currentGoal });
 }
 
 async function generateOpportunityDraft({
   question = "",
   answer = "",
   search = null,
+  currentGoal = "",
   env = process.env,
   deps = {}
 } = {}) {
@@ -1156,11 +1161,11 @@ async function generateOpportunityDraft({
     llmConfig = null;
   }
   if (!isConfigured(llmConfig)) {
-    const rule = buildDraftByRule({ question, answer, search }) || {};
+    const rule = buildDraftByRule({ question, answer, search, currentGoal }) || {};
     return { ...redactSecretLikeText(rule), draftSource: "fallback" };
   }
   try {
-    const userPrompt = buildDraftUserPrompt({ question, answer, search });
+    const userPrompt = buildDraftUserPrompt({ question, answer, search, currentGoal });
     const raw = await callChatCompletion({
       config: llmConfig,
       systemPrompt: readDraftSystemPrompt(),
@@ -1180,7 +1185,7 @@ async function generateOpportunityDraft({
   } catch (error) {
     logLlmError(error);
   }
-  const rule = buildDraftByRule({ question, answer, search }) || {};
+  const rule = buildDraftByRule({ question, answer, search, currentGoal }) || {};
   return { ...redactSecretLikeText(rule), draftSource: "local-rule" };
 }
 

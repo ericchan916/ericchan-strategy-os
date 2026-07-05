@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt, sanitizeCurrentGoal, generateKickoffPackageForOpportunity, buildKickoffUserPrompt, buildLocalKickoff, buildSparseKickoff } = require("../scripts/ask-strategy-os");
+const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt, sanitizeCurrentGoal, generateKickoffPackageForOpportunity, buildKickoffUserPrompt, buildLocalKickoff, buildSparseKickoff, buildDraftUserPrompt, generateOpportunityDraft } = require("../scripts/ask-strategy-os");
 const llmClient = require("../scripts/llm-client");
 const loadEnv = require("../scripts/load-env");
 const http = require("node:http");
@@ -730,6 +730,18 @@ test("V0.5: buildLlmUserPrompt 注入 currentGoal 并脱敏", () => {
   assert.equal(prompt.includes("sk-promptGoal123456"), false);
 });
 
+test("V0.5.1: buildLlmUserPrompt 明确要求判断 Goal 冲突与偏离", () => {
+  const prompt = buildLlmUserPrompt({
+    context: { contextText: "", opportunityPool: null, report: null },
+    type: "new-project-decision",
+    question: "我是不是应该做一个新的 AI 产品？",
+    currentGoal: "当前主要目标是沉淀个人网站和小Chan数字分身能力，不优先做新项目。"
+  });
+  assert.ok(prompt.includes("如果问题与当前目标冲突，要指出冲突"));
+  assert.ok(prompt.includes("如果无关，要说明是否值得偏离"));
+  assert.ok(prompt.includes("不要强行把所有问题都套进目标"));
+});
+
 test("V0.5: 未设置 currentGoal 时 prompt 不包含空目标段", () => {
   const prompt = buildLlmUserPrompt({
     context: { contextText: "", opportunityPool: null, report: null },
@@ -750,6 +762,35 @@ test("V0.5: askStrategyOs 本地 fallback 会体现 currentGoal", () => {
   assert.ok(result.answer.includes("当前目标锚点"));
   assert.ok(result.answer.includes("优先寻找 7 天内验证的 AI 工具型 MVP"));
   assert.equal(result.answer.includes("sk-localGoal123456"), false);
+});
+
+test("V0.5.1: draft prompt 会使用 currentGoal 但不机械泄露 sk-*", () => {
+  const prompt = buildDraftUserPrompt({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "可以做一个 AI 机会简报助手，先做最小页面验证。",
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP sk-draftGoal123456"
+  });
+  assert.ok(prompt.includes("当前目标"));
+  assert.ok(prompt.includes("7 天验证"));
+  assert.ok(prompt.includes("不要机械复制整句 Goal"));
+  assert.equal(prompt.includes("sk-draftGoal123456"), false);
+});
+
+test("V0.5.1: generateOpportunityDraft 规则 fallback 会让草稿围绕 currentGoal", async () => {
+  const result = await generateOpportunityDraft({
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    answer: "可以做一个 AI 机会简报助手。它帮助独立开发者把 AI 趋势压成小型产品机会。下一步先做一个最小页面验证。",
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP sk-ruleDraftGoal123456",
+    env: { STRATEGY_OS_LLM_ENABLED: "false" }
+  });
+  assert.equal(result.draftSource, "fallback");
+  assert.ok(result.opportunityName.includes("AI 机会简报助手"));
+  assert.match(result.oneLineSummary, /独立开发者/);
+  assert.match(result.note, /Goal 匹配/);
+  assert.match(result.nextAction, /7\s*天/);
+  assert.ok(result.suggestedTags.includes("独立开发者"));
+  assert.ok(result.suggestedTags.includes("可快速验证"));
+  assert.equal(JSON.stringify(result).includes("sk-ruleDraftGoal123456"), false);
 });
 
 test("buildLlmUserPrompt: 用户编辑机会后，prompt 包含新 note", () => {

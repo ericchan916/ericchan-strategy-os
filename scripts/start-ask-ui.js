@@ -187,10 +187,12 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
         const question = String(raw.question || "").slice(0, 1000);
         const answer = String(raw.answer || "").slice(0, 4000);
         const search = raw.search && typeof raw.search === "object" ? raw.search : null;
+        const currentGoal = String(raw.currentGoal || "").slice(0, 300);
         const result = await generateOpportunityDraft({
           question,
           answer,
           search,
+          currentGoal,
           env: process.env
         });
         sendJson(res, 200, pickDraftResponse(result));

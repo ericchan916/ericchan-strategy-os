@@ -336,17 +336,61 @@ function escapeRegex(s) {
   return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function summarizeGoalForDraft(currentGoal) {
+  const goal = String(redactSecretLikeText(currentGoal || "")).replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!goal) return null;
+  return {
+    text: goal,
+    independent: /独立开发|一人|OPC|独立|indie/i.test(goal),
+    smallAiProduct: /(小型|轻量|AI|大模型|Agent|工具|产品|MVP)/i.test(goal),
+    sevenDayValidation: /(7\s*天|七天|一周|快速验证|可验证|MVP)/i.test(goal)
+  };
+}
+
+function applyGoalToOpportunityDraft(draft, goalInfo) {
+  if (!goalInfo || !draft || typeof draft !== "object" || draft.draftWarning) return draft;
+  const next = { ...draft };
+  const goalHints = [];
+  if (goalInfo.independent && !/独立开发|一人|OPC|indie/i.test(next.oneLineSummary || "")) {
+    next.oneLineSummary = `面向独立开发者的${String(next.oneLineSummary || "").replace(/^一个面向独立开发者的/, "")}`;
+  }
+  if (goalInfo.smallAiProduct) goalHints.push("适合作为小型 AI 产品方向评估");
+  if (goalInfo.sevenDayValidation) goalHints.push("下一步应压到 7 天内可验证");
+  if (goalHints.length) {
+    const hint = `Goal 匹配：${goalHints.join("，")}。`;
+    if (!String(next.note || "").includes("Goal 匹配")) {
+      next.note = `${String(next.note || "").trim()}\n${hint}`.trim().slice(0, 300);
+    }
+  }
+  if (goalInfo.sevenDayValidation && !/(7\s*天|七天|一周)/.test(next.nextAction || "")) {
+    next.nextAction = `7 天内先完成：${String(next.nextAction || "做一个最小验证动作").replace(/^7\s*天内先完成[:：]\s*/, "")}`.slice(0, 500);
+  }
+  const tags = Array.isArray(next.suggestedTags) ? [...next.suggestedTags] : [];
+  for (const tag of ["独立开发者", "可快速验证"]) {
+    if (tags.length < 5 && !tags.includes(tag) && ((tag === "独立开发者" && goalInfo.independent) || (tag === "可快速验证" && goalInfo.sevenDayValidation))) {
+      tags.push(tag);
+    }
+  }
+  next.suggestedTags = tags;
+  next.oneLineSummary = String(next.oneLineSummary || "").slice(0, 80);
+  next.note = String(next.note || "").slice(0, 300);
+  next.nextAction = String(next.nextAction || "").slice(0, 500);
+  return next;
+}
+
 function deriveOpportunityDraftFromAnswer({
   question = "",
   answer = "",
   search = null,
-  recommendedQuestions = null
+  recommendedQuestions = null,
+  currentGoal = ""
 } = {}) {
   // 安全脱敏：防止 API Key 串进入 draft
   const safeQ = sanitizeAnswerForDraft(question);
   const safeA = sanitizeAnswerForDraft(answer);
   const q = String(safeQ || "").trim();
   const a = String(safeA || "").trim();
+  const goalInfo = summarizeGoalForDraft(currentGoal);
   const hasSearch = !!(search && search.used === true);
   const safeSources = hasSearch && Array.isArray(search.sources) ? search.sources.slice(0, 5).map((u) => {
     const item = u && typeof u === "object" ? u : {};
@@ -588,7 +632,7 @@ function deriveOpportunityDraftFromAnswer({
   // ---- 6) source 标识 ----
   const source = hasSearch ? "search" : "ask-mode";
 
-  return {
+  return applyGoalToOpportunityDraft({
     opportunityName: name,
     draftWarning: null,
     oneLineSummary: oneLineSummary.slice(0, 80),
@@ -601,7 +645,7 @@ function deriveOpportunityDraftFromAnswer({
     sourceQuestion: q.slice(0, 1000),
     sourceAnswerSummary: summarizeAnswer(a, 600),
     sourceUrls: safeSources
-  };
+  }, goalInfo);
 }
 
 // V0.3.10：新增机会
