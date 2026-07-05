@@ -130,6 +130,85 @@ h1 {
   box-shadow: 0 0 0 3px rgba(20, 86, 74, 0.15);
 }
 
+.goal-anchor {
+  margin-top: 8px;
+  width: min(760px, 100%);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.goal-view,
+.goal-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.goal-label {
+  flex: 0 0 auto;
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.goal-text {
+  min-width: 0;
+  max-width: 520px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-text[data-empty="true"] {
+  color: var(--muted-soft);
+}
+
+.goal-button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--accent-dark);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 5px 8px;
+}
+
+.goal-button:hover,
+.goal-button:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.goal-button--muted {
+  color: var(--muted);
+}
+
+.goal-form input {
+  width: min(520px, 100%);
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+
+.goal-form input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(20, 86, 74, 0.1);
+}
+
 /* ---------------- V0.4.1: Three-column layout ---------------- */
 
 .layout {
@@ -254,6 +333,20 @@ h1 {
     min-height: 100vh;
     overflow: visible;
     padding: 32px 0 24px;
+  }
+
+  .goal-anchor {
+    width: 100%;
+  }
+
+  .goal-view,
+  .goal-form {
+    flex-wrap: wrap;
+  }
+
+  .goal-text {
+    max-width: 100%;
+    flex: 1 1 220px;
   }
 
   .layout {

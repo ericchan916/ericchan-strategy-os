@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt, generateKickoffPackageForOpportunity, buildKickoffUserPrompt, buildLocalKickoff, buildSparseKickoff } = require("../scripts/ask-strategy-os");
+const { askStrategyOs, askStrategyOsAsync, classifyQuestion, buildLlmUserPrompt, sanitizeCurrentGoal, generateKickoffPackageForOpportunity, buildKickoffUserPrompt, buildLocalKickoff, buildSparseKickoff } = require("../scripts/ask-strategy-os");
 const llmClient = require("../scripts/llm-client");
 const loadEnv = require("../scripts/load-env");
 const http = require("node:http");
@@ -717,6 +717,41 @@ test("buildLlmUserPrompt: prompt 中不出现 raw JSON 字段名", () => {
   }
 });
 
+test("V0.5: buildLlmUserPrompt 注入 currentGoal 并脱敏", () => {
+  const prompt = buildLlmUserPrompt({
+    context: { contextText: "", opportunityPool: null, report: null },
+    type: "today-action",
+    question: "今天适合做什么？",
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品 sk-promptGoal123456"
+  });
+  assert.ok(prompt.includes("【当前目标】"));
+  assert.ok(prompt.includes("用战略OS筛选适合独立开发者的小型 AI 产品"));
+  assert.ok(prompt.includes("方向锚点"));
+  assert.equal(prompt.includes("sk-promptGoal123456"), false);
+});
+
+test("V0.5: 未设置 currentGoal 时 prompt 不包含空目标段", () => {
+  const prompt = buildLlmUserPrompt({
+    context: { contextText: "", opportunityPool: null, report: null },
+    type: "general-strategy-question",
+    question: "q"
+  });
+  assert.equal(prompt.includes("【当前目标】"), false);
+});
+
+test("V0.5: askStrategyOs 本地 fallback 会体现 currentGoal", () => {
+  const fixture = createFixture();
+  const result = askStrategyOs({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "今天适合做什么？",
+    currentGoal: "优先寻找 7 天内验证的 AI 工具型 MVP sk-localGoal123456"
+  });
+  assert.ok(result.answer.includes("当前目标锚点"));
+  assert.ok(result.answer.includes("优先寻找 7 天内验证的 AI 工具型 MVP"));
+  assert.equal(result.answer.includes("sk-localGoal123456"), false);
+});
+
 test("buildLlmUserPrompt: 用户编辑机会后，prompt 包含新 note", () => {
   // 模拟用户编辑：第二次 build 时 notes 已被更新
   const ctx = {
@@ -775,6 +810,17 @@ test("buildKickoffUserPrompt: 不注入 API Key / raw search response 字段", (
   assert.equal(prompt.includes("rawResponse"), false);
 });
 
+test("V0.5: buildKickoffUserPrompt 包含脱敏 currentGoal", () => {
+  const prompt = buildKickoffUserPrompt({
+    name: "AI 机会简报",
+    oneLine: "做一个小验证",
+    currentGoal: "用战略OS筛选可变现 AI 工具 sk-kickoffPrompt123456"
+  });
+  assert.ok(prompt.includes("当前目标"));
+  assert.ok(prompt.includes("用战略OS筛选可变现 AI 工具"));
+  assert.equal(prompt.includes("sk-kickoffPrompt123456"), false);
+});
+
 test("buildLocalKickoff: 包含 10 个小节", () => {
   const text = buildLocalKickoff({
     name: "X",
@@ -791,6 +837,25 @@ test("buildLocalKickoff: 包含 10 个小节", () => {
   assert.ok(text.includes("X"), "应包含机会名");
   assert.ok(text.includes("做 X"), "应包含 next");
   assert.ok(text.includes("y"), "应包含一句话");
+});
+
+test("V0.5: buildLocalKickoff / buildSparseKickoff 包含当前目标关系且脱敏", () => {
+  const local = buildLocalKickoff({
+    name: "AI 机会简报",
+    oneLine: "做一个小验证",
+    currentGoal: "用战略OS筛选独立开发者 AI 产品 sk-localKickoffGoal123456"
+  });
+  assert.ok(local.includes("与当前目标的关系"));
+  assert.ok(local.includes("用战略OS筛选独立开发者 AI 产品"));
+  assert.equal(local.includes("sk-localKickoffGoal123456"), false);
+
+  const sparse = buildSparseKickoff({
+    name: "稀疏机会",
+    currentGoal: "优先寻找 7 天内验证的 AI 工具 sk-sparseGoal123456"
+  });
+  assert.ok(sparse.includes("与当前目标的关系"));
+  assert.ok(sparse.includes("优先寻找 7 天内验证的 AI 工具"));
+  assert.equal(sparse.includes("sk-sparseGoal123456"), false);
 });
 
 test("buildSparseKickoff: 信息不足时给保守版开工包 + 中文提示", () => {
@@ -896,8 +961,8 @@ test("V0.3.11-hotfix: 风险与卡点主动生成至少 3 条具体风险", () =
     sourceQuestion: "",
     sourceUrls: []
   });
-  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
-  assert.ok(riskMatch, "应有'9. 风险与卡点'小节");
+  const riskMatch = text.match(/10\.\s*风险与卡点([\s\S]*?)(?=\n11\.)/);
+  assert.ok(riskMatch, "应有'10. 风险与卡点'小节");
   const riskBody = riskMatch[1];
   // 至少 3 条 (以 "- " 开头)
   const bullets = riskBody.split(/\n/).filter((line) => /^\s*[-•]/.test(line));
@@ -920,7 +985,7 @@ test("V0.3.11-hotfix: 目标用户在信息不足时给出暂定推断", () => {
     sourceUrls: []
   });
   // 目标用户小节不应是空
-  const targetMatch = text.match(/3\.\s*目标用户([\s\S]*?)(?=\n4\.)/);
+  const targetMatch = text.match(/4\.\s*目标用户([\s\S]*?)(?=\n5\.)/);
   assert.ok(targetMatch);
   const targetBody = targetMatch[1].trim();
   assert.ok(targetBody.length > 20, `目标用户应有具体内容: ${targetBody.length}`);
@@ -940,7 +1005,7 @@ test("V0.3.11-hotfix: 最小 MVP 在信息不足时给出暂定推断", () => {
     sourceQuestion: "",
     sourceUrls: []
   });
-  const mvpMatch = text.match(/4\.\s*最小 MVP([\s\S]*?)(?=\n5\.)/);
+  const mvpMatch = text.match(/5\.\s*最小 MVP([\s\S]*?)(?=\n6\.)/);
   assert.ok(mvpMatch);
   const mvpBody = mvpMatch[1].trim();
   assert.ok(mvpBody.length > 20, `MVP 应有具体内容: ${mvpBody.length}`);
@@ -958,7 +1023,7 @@ test("V0.3.11-hotfix: 第一版功能边界在信息不足时给出暂定推断"
     sourceQuestion: "",
     sourceUrls: []
   });
-  const scopeMatch = text.match(/5\.\s*第一版功能边界([\s\S]*?)(?=\n6\.)/);
+  const scopeMatch = text.match(/6\.\s*第一版功能边界([\s\S]*?)(?=\n7\.)/);
   assert.ok(scopeMatch);
   const scopeBody = scopeMatch[1].trim();
   assert.ok(scopeBody.length > 20);
@@ -983,7 +1048,7 @@ test("V0.3.11-hotfix: buildSparseKickoff 也满足'不逃避生成'", () => {
     assert.ok(body.length >= 5, `小节 ${i + 1} 内容过短: "${body}"`);
   }
   // 风险小节也应有 ≥3 条
-  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  const riskMatch = text.match(/10\.\s*风险与卡点([\s\S]*?)(?=\n11\.)/);
   if (riskMatch) {
     const bullets = riskMatch[1].split(/\n/).filter((line) => /^\s*[-•]/.test(line));
     assert.ok(bullets.length >= 3, `稀疏模板风险条目 ≥ 3: ${bullets.length}`);
@@ -1014,7 +1079,7 @@ test("V0.3.11-hotfix: 风险小节包含通用独立开发者项目风险", () =
     sourceQuestion: "",
     sourceUrls: []
   });
-  const riskMatch = text.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  const riskMatch = text.match(/10\.\s*风险与卡点([\s\S]*?)(?=\n11\.)/);
   assert.ok(riskMatch);
   const riskBody = riskMatch[1];
   // 至少包含一些独立开发者常见风险关键词
@@ -1029,8 +1094,8 @@ test("V0.3.11-hotfix: generateKickoffPackageForOpportunity 数据稀疏时也生
   });
   const sections = result.answer.split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\.\s/.test(s));
   assert.ok(sections.length >= 10, `应 ≥10 小节: ${sections.length}`);
-  // 9. 风险与卡点 至少 3 条
-  const riskMatch = result.answer.match(/9\.\s*风险与卡点([\s\S]*?)(?=\n10\.)/);
+  // 10. 风险与卡点 至少 3 条
+  const riskMatch = result.answer.match(/10\.\s*风险与卡点([\s\S]*?)(?=\n11\.)/);
   if (riskMatch) {
     const bullets = riskMatch[1].split(/\n/).filter((line) => /^\s*[-•]/.test(line));
     assert.ok(bullets.length >= 3, `生成器风险条目 ≥ 3: ${bullets.length}`);

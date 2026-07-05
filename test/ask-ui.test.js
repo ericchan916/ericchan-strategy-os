@@ -168,6 +168,28 @@ test("ask UI API returns a Chinese Ask Mode answer", async () => {
   });
 });
 
+test("V0.5: ask UI API accepts currentGoal without writing strategy files", async () => {
+  const fixture = createFixture();
+  const beforePool = fs.readFileSync(fixture.poolPath, "utf8");
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "POST",
+      path: "/api/ask",
+      body: {
+        question: "今天适合做什么？",
+        currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品 sk-goalServer123456"
+      }
+    });
+    const payload = JSON.parse(response.body);
+
+    assert.equal(response.status, 200);
+    assert.ok(payload.answer.includes("当前目标锚点"));
+    assert.ok(payload.answer.includes("用战略OS筛选适合独立开发者的小型 AI 产品"));
+    assert.equal(JSON.stringify(payload).includes("sk-goalServer123456"), false);
+  });
+  assert.equal(fs.readFileSync(fixture.poolPath, "utf8"), beforePool, "currentGoal 不应写入 opportunity-pool.json");
+});
+
 test("ask UI API returns public search metadata when useSearch=true", async () => {
   const fixture = createFixture();
   const oldEnv = {

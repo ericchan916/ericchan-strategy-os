@@ -54,6 +54,8 @@ function applyQuestionToComposer({ text, input, button, state }) {
 // storage 注入是为了能在 Node 测试里跑，且不依赖 window/localStorage。
 
 const HISTORY_KEY = "strategyOsAskHistory";
+const CURRENT_GOAL_KEY = "strategyOsCurrentGoal";
+const CURRENT_GOAL_MAX_LENGTH = 200;
 const DEFAULT_HISTORY_MAX = 20;
 const OPPORTUNITY_STATUS_LABELS = {
   inbox: "待处理",
@@ -315,6 +317,43 @@ function redactPromptText(value) {
   return String(value || "").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]");
 }
 
+function normalizeCurrentGoal(value) {
+  return redactPromptText(String(value || "").replace(/\s+/g, " ").trim())
+    .slice(0, CURRENT_GOAL_MAX_LENGTH)
+    .trim();
+}
+
+function loadCurrentGoal(storage) {
+  if (!storage || typeof storage.getItem !== "function") return "";
+  try {
+    return normalizeCurrentGoal(storage.getItem(CURRENT_GOAL_KEY));
+  } catch {
+    return "";
+  }
+}
+
+function saveCurrentGoal(storage, value) {
+  const goal = normalizeCurrentGoal(value);
+  if (!storage) return goal;
+  try {
+    if (goal) {
+      if (typeof storage.setItem === "function") storage.setItem(CURRENT_GOAL_KEY, goal);
+    } else if (typeof storage.removeItem === "function") {
+      storage.removeItem(CURRENT_GOAL_KEY);
+    } else if (typeof storage.setItem === "function") {
+      storage.setItem(CURRENT_GOAL_KEY, "");
+    }
+  } catch {
+    // localStorage 不可用时静默退化，Goal 只作为本地方向锚点。
+  }
+  return goal;
+}
+
+function goalPromptSection(currentGoal) {
+  const goal = normalizeCurrentGoal(currentGoal);
+  return goal ? `\n当前目标：\n${goal}\n` : "";
+}
+
 function inferTaskTitle({ question, answer, fallback } = {}) {
   const safeAnswer = redactPromptText(answer);
   const heading = safeAnswer.match(/^#\s*(.+)$/m);
@@ -327,15 +366,17 @@ function normalizeKickoffAnswer(answer) {
   return safe || "（开工包正文为空。请先检查项目现状、目标和边界，再决定是否执行。）";
 }
 
-function buildCodexTaskPrompt({ question, answer } = {}) {
+function buildCodexTaskPrompt({ question, answer, currentGoal } = {}) {
   const title = inferTaskTitle({ question, answer, fallback: "Codex 工程任务" });
   const kickoff = normalizeKickoffAnswer(answer);
+  const goalSection = goalPromptSection(currentGoal);
   return `任务标题：
 ${title}
 
 任务背景：
 以下是 EricChan·战略OS 生成的开工包，请基于它执行。开工包不足时，先做现状检查，不要凭空扩大需求。
 这份提示词偏 Codex 工程执行，适合代码、脚本、测试、Git 和安全边界类任务。
+${goalSection}
 
 开工包正文：
 ${kickoff}
@@ -372,11 +413,13 @@ Git 要求：
 - 工作区状态`;
 }
 
-function buildClaudeCodeTaskPrompt({ question, answer } = {}) {
+function buildClaudeCodeTaskPrompt({ question, answer, currentGoal } = {}) {
   const title = inferTaskTitle({ question, answer, fallback: "Claude Code 前端任务" });
   const kickoff = normalizeKickoffAnswer(answer);
+  const goalSection = goalPromptSection(currentGoal);
   return `任务标题：
 ${title}
+${goalSection}
 
 当前开工包正文：
 ${kickoff}
@@ -1061,6 +1104,12 @@ function createApp(deps) {
   const opportunityToggle = nodes.opportunityToggle;
   const opportunityBody = nodes.opportunityBody;
   const opportunityPanelNode = nodes.opportunityPanel;
+  const currentGoalText = nodes.currentGoalText;
+  const goalEditButton = nodes.goalEditButton;
+  const goalClearButton = nodes.goalClearButton;
+  const goalForm = nodes.goalForm;
+  const goalInput = nodes.goalInput;
+  const goalCancelButton = nodes.goalCancelButton;
   // V0.3.11-hotfix-3：输入框右侧 × 清空按钮
   const clearInputButton = nodes.clearInputButton;
   const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
@@ -1088,6 +1137,7 @@ function createApp(deps) {
     currentSource: "",
     currentSearch: null,
     currentQuestion: "",
+    currentGoal: "",
     opportunities: []
   };
 
@@ -1151,6 +1201,44 @@ function createApp(deps) {
     opportunityStatus.textContent = message || "";
     if (tone === "error") opportunityStatus.setAttribute("data-tone", "error");
     else opportunityStatus.removeAttribute("data-tone");
+  }
+
+  function renderCurrentGoal() {
+    const goal = normalizeCurrentGoal(state.currentGoal);
+    state.currentGoal = goal;
+    if (currentGoalText) {
+      currentGoalText.textContent = goal || "未设置";
+      currentGoalText.title = goal || "未设置";
+      currentGoalText.setAttribute("data-empty", goal ? "false" : "true");
+    }
+    if (goalEditButton) goalEditButton.textContent = goal ? "修改" : "设置目标";
+    if (goalClearButton) goalClearButton.hidden = !goal;
+    if (goalForm) goalForm.hidden = true;
+  }
+
+  function openGoalEditor() {
+    if (!goalForm || !goalInput) return;
+    goalInput.value = state.currentGoal || "";
+    goalForm.hidden = false;
+    if (typeof goalInput.focus === "function") goalInput.focus();
+    if (typeof goalInput.setSelectionRange === "function") {
+      try { goalInput.setSelectionRange(0, goalInput.value.length); } catch {}
+    }
+  }
+
+  function saveGoalFromInput() {
+    const next = normalizeCurrentGoal(goalInput ? goalInput.value : "");
+    state.currentGoal = saveCurrentGoal(storage, next);
+    renderCurrentGoal();
+    setStatus(state.currentGoal ? "当前目标已保存。" : "当前目标已清除。");
+    return state.currentGoal;
+  }
+
+  function clearCurrentGoal() {
+    state.currentGoal = saveCurrentGoal(storage, "");
+    renderCurrentGoal();
+    setStatus("当前目标已清除。");
+    return "";
   }
 
   function applyOpportunityPanel(data) {
@@ -1266,7 +1354,8 @@ function createApp(deps) {
     try {
       const response = await fetchImpl(`/api/opportunities/${encodeURIComponent(id)}/kickoff`, {
         method: "POST",
-        headers: { "content-type": "application/json" }
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(state.currentGoal ? { currentGoal: state.currentGoal } : {})
       });
       const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
       if (!response || !response.ok) throw new Error((payload && payload.error) || "开工包生成失败。");
@@ -1789,7 +1878,11 @@ function createApp(deps) {
     const builder = kind === "claude" ? buildClaudeCodeTaskPrompt : buildCodexTaskPrompt;
     const button = kind === "claude" ? copyClaudeTaskButton : copyCodexTaskButton;
     const meta = TASK_COPY_BUTTON_META[kind] || TASK_COPY_BUTTON_META.codex;
-    const prompt = builder({ question: state.currentQuestion, answer: state.currentAnswer });
+    const prompt = builder({
+      question: state.currentQuestion,
+      answer: state.currentAnswer,
+      currentGoal: state.currentGoal
+    });
     const result = await handleCopyClick({ answer: prompt, clipboardImpl });
     if (button) {
       if (result.ok) {
@@ -1844,6 +1937,7 @@ function createApp(deps) {
       if (!fetchImpl) throw new Error("fetch 不可用。");
       const requestBody = { question: value };
       if (useSearch) requestBody.useSearch = true;
+      if (state.currentGoal) requestBody.currentGoal = state.currentGoal;
       const response = await fetchImpl("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1939,6 +2033,32 @@ function createApp(deps) {
   }
 
   function mount() {
+    state.currentGoal = loadCurrentGoal(storage);
+    renderCurrentGoal();
+    if (goalEditButton) {
+      goalEditButton.addEventListener("click", () => openGoalEditor());
+    }
+    if (goalClearButton) {
+      goalClearButton.addEventListener("click", () => clearCurrentGoal());
+    }
+    if (goalCancelButton) {
+      goalCancelButton.addEventListener("click", () => renderCurrentGoal());
+    }
+    if (goalForm) {
+      goalForm.addEventListener("submit", (event) => {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        saveGoalFromInput();
+      });
+    }
+    if (goalInput) {
+      goalInput.addEventListener("keydown", (event) => {
+        if (!event || event.isComposing) return;
+        if (event.key === "Escape") {
+          if (typeof event.preventDefault === "function") event.preventDefault();
+          renderCurrentGoal();
+        }
+      });
+    }
     if (input) {
       input.addEventListener("input", () => {
         if (!state.inFlight) {
@@ -2051,6 +2171,14 @@ function createApp(deps) {
     setGlobalStatus,
     setInFlight,
     setCurrentAnswer,
+    setCurrentGoal(value) {
+      state.currentGoal = saveCurrentGoal(storage, value);
+      renderCurrentGoal();
+      return state.currentGoal;
+    },
+    openGoalEditor,
+    saveGoalFromInput,
+    clearCurrentGoal,
     clearSelectedQuestion,
     selectQuestionButton,
     historyStore,
@@ -2165,6 +2293,12 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   const opportunityStatus = document.querySelector("#opportunityStatus");
   const addOpportunityButton = document.querySelector("#addOpportunityButton");
   const addOpportunityContainer = document.querySelector("#addOpportunityContainer");
+  const currentGoalText = document.querySelector("#currentGoalText");
+  const goalEditButton = document.querySelector("#goalEditButton");
+  const goalClearButton = document.querySelector("#goalClearButton");
+  const goalForm = document.querySelector("#goalForm");
+  const goalInput = document.querySelector("#goalInput");
+  const goalCancelButton = document.querySelector("#goalCancelButton");
 
   const app = createApp({
     nodes: {
@@ -2190,7 +2324,13 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
       opportunityEmpty,
       opportunityStatus,
       addOpportunityButton,
-      addOpportunityContainer
+      addOpportunityContainer,
+      currentGoalText,
+      goalEditButton,
+      goalClearButton,
+      goalForm,
+      goalInput,
+      goalCancelButton
     }
   });
   app.mount();
@@ -2212,6 +2352,9 @@ module.exports = {
   buildClipboardPayload,
   handleCopyClick,
   redactPromptText,
+  normalizeCurrentGoal,
+  loadCurrentGoal,
+  saveCurrentGoal,
   buildCodexTaskPrompt,
   buildClaudeCodeTaskPrompt,
   buildLoadingMarkup,
@@ -2238,5 +2381,7 @@ module.exports = {
   // V0.4.2 折叠状态记忆
   loadOpportunityCollapsed,
   saveOpportunityCollapsed,
-  OPPORTUNITY_COLLAPSED_KEY
+  OPPORTUNITY_COLLAPSED_KEY,
+  CURRENT_GOAL_KEY,
+  CURRENT_GOAL_MAX_LENGTH
 };

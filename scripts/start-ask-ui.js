@@ -113,7 +113,12 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           sendJson(res, 400, { error: "请输入问题。" });
           return;
         }
-        const result = await askStrategyOsAsync({ rootDir, question, useSearch: payload.useSearch === true });
+        const result = await askStrategyOsAsync({
+          rootDir,
+          question,
+          useSearch: payload.useSearch === true,
+          currentGoal: payload.currentGoal
+        });
         const responseBody = {
           type: result.type,
           answer: result.answer,
@@ -247,7 +252,12 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           sendJson(res, 404, { error: "没有找到这个机会，可能已被删除。" });
           return;
         }
-        const result = await generateKickoffPackageForOpportunity({ opportunity: target, env: process.env });
+        const payload = JSON.parse((await readBody(req, 200 * 1024)) || "{}");
+        const result = await generateKickoffPackageForOpportunity({
+          opportunity: target,
+          env: process.env,
+          currentGoal: payload.currentGoal
+        });
         const body = {
           answer: result.answer,
           source: result.source,

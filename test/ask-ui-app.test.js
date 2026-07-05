@@ -16,6 +16,9 @@ const {
   buildClipboardPayload,
   handleCopyClick,
   redactPromptText,
+  normalizeCurrentGoal,
+  loadCurrentGoal,
+  saveCurrentGoal,
   buildCodexTaskPrompt,
   buildClaudeCodeTaskPrompt,
   renderSearchSources,
@@ -28,7 +31,8 @@ const {
   PRESET_TAGS,
   OPPORTUNITY_TYPE_LABELS,
   OPPORTUNITY_SCORE_LABELS,
-  OPPORTUNITY_TITLE_OVERRIDES
+  OPPORTUNITY_TITLE_OVERRIDES,
+  CURRENT_GOAL_KEY
 } = require("../public/ask-ui/app");
 
 function makeKeyEvent({ key, shiftKey = false, ctrlKey = false, metaKey = false, isComposing = false }) {
@@ -109,7 +113,13 @@ function makeFakeNodes() {
     // V0.4.1
     opportunityToggle: fakeEl(),
     opportunityBody: fakeEl(),
-    opportunityPanel: fakeEl()
+    opportunityPanel: fakeEl(),
+    currentGoalText: fakeEl(),
+    goalEditButton: fakeEl(),
+    goalClearButton: fakeEl({ hidden: true }),
+    goalForm: fakeEl({ hidden: true }),
+    goalInput: fakeEl(),
+    goalCancelButton: fakeEl()
   };
 }
 
@@ -650,6 +660,36 @@ function makeMemoryStorage(initial = []) {
     }
   };
 }
+
+test("V0.5: normalizeCurrentGoal 限制长度并脱敏 sk-*", () => {
+  const long = `  用战略OS筛选适合独立开发者的小型 AI 产品 sk-goalSecret123456 ${"很长".repeat(120)}  `;
+  const goal = normalizeCurrentGoal(long);
+  assert.equal(goal.includes("sk-goalSecret123456"), false);
+  assert.ok(goal.includes("[redacted]"));
+  assert.ok(goal.length <= 200);
+});
+
+test("V0.5: currentGoal 可写入、读取和清除 localStorage", () => {
+  const storage = makeMemoryStorage();
+  const saved = saveCurrentGoal(storage, "  做一个 AI 机会发现与执行调度台  ");
+  assert.equal(saved, "做一个 AI 机会发现与执行调度台");
+  assert.equal(storage.getItem(CURRENT_GOAL_KEY), saved);
+  assert.equal(loadCurrentGoal(storage), saved);
+
+  const cleared = saveCurrentGoal(storage, "");
+  assert.equal(cleared, "");
+  assert.equal(storage.getItem(CURRENT_GOAL_KEY), null);
+});
+
+test("V0.5: localStorage 不可用时 currentGoal 静默 fallback", () => {
+  const brokenStorage = {
+    getItem() { throw new Error("blocked"); },
+    setItem() { throw new Error("blocked"); },
+    removeItem() { throw new Error("blocked"); }
+  };
+  assert.equal(loadCurrentGoal(brokenStorage), "");
+  assert.equal(saveCurrentGoal(brokenStorage, "目标 sk-brokenSecret123456"), "目标 [redacted]");
+});
 
 test("normalizeHistoryItem: 把任意对象转成标准结构", () => {
   const item = normalizeHistoryItem({
@@ -1907,15 +1947,19 @@ test("startAskUiServer: POST /api/opportunities/:id/kickoff 返回开工包（�
     const { status, json: k } = await httpRequest({
       port: 5310,
       method: "POST",
-      path: `/api/opportunities/${encodeURIComponent(id)}/kickoff`
+      path: `/api/opportunities/${encodeURIComponent(id)}/kickoff`,
+      body: { currentGoal: "用战略OS筛选 AI 短视频工具 sk-kickoffGoal123456" }
     });
     assert.equal(status, 200);
     assert.ok(k.answer.length > 100, "应有结构化开工包");
-    // 10 个小节
-    for (let i = 1; i <= 10; i += 1) {
+    // V0.5 增加"与当前目标的关系"，本地开工包为 11 个小节。
+    for (let i = 1; i <= 11; i += 1) {
       assert.ok(k.answer.includes(`${i}.`), `开工包应包含小节 ${i}.`);
     }
     assert.ok(k.answer.includes("AI 短视频选题助手"), "开工包应基于机会名称");
+    assert.ok(k.answer.includes("当前目标"), "开工包应体现 currentGoal");
+    assert.ok(k.answer.includes("用战略OS筛选 AI 短视频工具"), "开工包应包含脱敏后的 currentGoal");
+    assert.equal(k.answer.includes("sk-kickoffGoal123456"), false, "开工包不应含 sk-* 原文");
     assert.equal(k.opportunity.id, id, "应回传机会数据");
   } finally {
     await new Promise((resolve) => server.close(() => resolve()));
@@ -2257,6 +2301,91 @@ function makeAskApp(extraFetch) {
   return { app, nodes };
 }
 
+test("V0.5: 页面包含轻量当前目标区域", () => {
+  assert.ok(/id="currentGoalText"/.test(indexHtml), "应有当前目标文本节点");
+  assert.ok(/id="goalEditButton"/.test(indexHtml), "应有设置/修改目标按钮");
+  assert.ok(/id="goalClearButton"/.test(indexHtml), "应有清除目标按钮");
+  assert.ok(/当前目标/.test(indexHtml), "应显示当前目标文案");
+});
+
+test("V0.5: mount 从 localStorage 读取当前目标并更新 UI", () => {
+  const storage = makeMemoryStorage();
+  storage.setItem(CURRENT_GOAL_KEY, "优先寻找 7 天内验证的 AI 工具型 MVP");
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage,
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  assert.equal(app.state.currentGoal, "优先寻找 7 天内验证的 AI 工具型 MVP");
+  assert.equal(nodes.currentGoalText.textContent, "优先寻找 7 天内验证的 AI 工具型 MVP");
+  assert.equal(nodes.goalEditButton.textContent, "修改");
+  assert.equal(nodes.goalClearButton.hidden, false);
+});
+
+test("V0.5: 设置 / 修改 / 清除 currentGoal 更新 storage 和 UI", () => {
+  const storage = makeMemoryStorage();
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage,
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  assert.equal(nodes.currentGoalText.textContent, "未设置");
+  assert.equal(nodes.currentGoalText.getAttribute("data-empty"), "true");
+
+  app.openGoalEditor();
+  assert.equal(nodes.goalForm.hidden, false);
+  nodes.goalInput.value = "用战略OS筛选适合独立开发者的小型 AI 产品 sk-uiGoal123456";
+  app.saveGoalFromInput();
+  assert.equal(app.state.currentGoal.includes("sk-uiGoal123456"), false);
+  assert.equal(nodes.currentGoalText.textContent.includes("[redacted]"), true);
+  assert.equal(storage.getItem(CURRENT_GOAL_KEY), app.state.currentGoal);
+
+  app.clearCurrentGoal();
+  assert.equal(app.state.currentGoal, "");
+  assert.equal(nodes.currentGoalText.textContent, "未设置");
+  assert.equal(storage.getItem(CURRENT_GOAL_KEY), null);
+});
+
+test("V0.5: submitAsk 会把 currentGoal 传给 /api/ask", async () => {
+  let captured = null;
+  const nodes = makeFakeNodes();
+  nodes.questionInput.value = "今天适合做什么？";
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: (path, init = {}) => {
+      if (path === "/api/ask") captured = JSON.parse(init.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ answer: "回答", source: "local", search: null, warning: null })
+      });
+    }
+  });
+  app.mount();
+  app.setCurrentGoal("用战略OS筛选适合独立开发者的小型 AI 产品");
+  await app.submitAsk();
+  assert.equal(captured.question, "今天适合做什么？");
+  assert.equal(captured.currentGoal, "用战略OS筛选适合独立开发者的小型 AI 产品");
+  assert.equal(captured.useSearch, undefined, "默认不联网不应被 currentGoal 改变");
+});
+
+test("V0.5: history restore 不改变 currentGoal", () => {
+  const { app } = makeAskApp();
+  app.setCurrentGoal("当前目标 A");
+  app.restoreHistoryItem({
+    id: "h-goal",
+    question: "历史问题",
+    answer: "历史回答",
+    source: "local",
+    type: "ask"
+  });
+  assert.equal(app.state.currentGoal, "当前目标 A");
+});
+
 test("V0.3.11-hotfix-2: 初始无回答时加入机会池按钮隐藏", () => {
   const { nodes, app } = makeAskApp();
   const btn = nodes.addOpportunityButton;
@@ -2405,12 +2534,16 @@ test("V0.4.4: 点击 Codex 任务按钮写入脱敏任务提示词", async () =>
     question: "生成开工包",
     answerType: "kickoff-package"
   });
+  app.setCurrentGoal("推进 AI 机会发现 sk-goalCodex123456");
   const result = await app.handleCodexTaskCopy();
   assert.equal(result.ok, true);
   assert.ok(written.includes("测试要求"));
   assert.ok(written.includes("Git 要求"));
+  assert.ok(written.includes("当前目标"));
+  assert.ok(written.includes("推进 AI 机会发现"));
   assert.ok(written.includes("# 开工包"));
   assert.equal(written.includes("sk-codexSecret123456"), false);
+  assert.equal(written.includes("sk-goalCodex123456"), false);
   assert.equal(nodes.copyCodexTaskButton.textContent, "已复制");
 });
 
@@ -2430,11 +2563,15 @@ test("V0.4.4: 点击 Claude Code 任务按钮写入脱敏任务提示词", async
     question: "生成开工包",
     answerType: "kickoff-package"
   });
+  app.setCurrentGoal("做个人战略工作台 sk-goalClaude123456");
   const result = await app.handleClaudeCodeTaskCopy();
   assert.equal(result.ok, true);
   assert.ok(written.includes("真实网页验证要求"));
+  assert.ok(written.includes("当前目标"));
+  assert.ok(written.includes("做个人战略工作台"));
   assert.ok(written.includes("# 开工包"));
   assert.equal(written.includes("sk-claudeSecret123456"), false);
+  assert.equal(written.includes("sk-goalClaude123456"), false);
   assert.equal(nodes.copyClaudeTaskButton.textContent, "已复制");
 });
 
@@ -3982,6 +4119,14 @@ test("V0.4.6: shell/layout 形成固定视口工作台", () => {
   assert.ok(/flex\s*:\s*1\s+1\s+auto/i.test(layoutRule), ".layout 应占据剩余高度");
   assert.ok(/min-height\s*:\s*0/i.test(layoutRule), ".layout 应允许内部滚动区收缩");
   assert.ok(/overflow\s*:\s*hidden/i.test(layoutRule), ".layout 不应撑出整页滚动");
+});
+
+test("V0.5: currentGoal UI 单行省略，不撑破固定视口标题区", () => {
+  const textRule = cssRule(".goal-text");
+  assert.ok(/overflow\s*:\s*hidden/i.test(textRule), ".goal-text 应隐藏溢出");
+  assert.ok(/text-overflow\s*:\s*ellipsis/i.test(textRule), ".goal-text 应省略过长目标");
+  assert.ok(/white-space\s*:\s*nowrap/i.test(textRule), ".goal-text 桌面端应单行");
+  assert.ok(stylesCss.includes("@media (max-width: 900px)"), "应保留移动端策略");
 });
 
 test("V0.4.6: 战略回答有独立 output-scroll 滚动容器", () => {

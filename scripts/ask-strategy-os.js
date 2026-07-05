@@ -401,14 +401,16 @@ EricChan 可能被它的作品感、可展示性、个人使用价值或新机�
 function renderAnswer({ context, question }) {
   const type = classifyQuestion(question);
   if (!question) return listRecommendedQuestions(context.recommendedQuestions);
-  if (type === "today-action") return renderTodayAction(context);
-  if (type === "project-priority") return renderProjectPriority(context);
-  if (type === "new-project-decision") return renderNewProjectDecision(context);
-  if (type === "project-checkup") return renderProjectCheckup(context, question);
-  if (type === "kickoff-package") return renderKickoffPackage(context, question);
-  if (type === "agent-dispatch") return renderAgentDispatch(context);
-  if (type === "complexity-check") return renderComplexityCheck(context);
-  return renderGeneral(context, question);
+  let answer = "";
+  if (type === "today-action") answer = renderTodayAction(context);
+  else if (type === "project-priority") answer = renderProjectPriority(context);
+  else if (type === "new-project-decision") answer = renderNewProjectDecision(context);
+  else if (type === "project-checkup") answer = renderProjectCheckup(context, question);
+  else if (type === "kickoff-package") answer = renderKickoffPackage(context, question);
+  else if (type === "agent-dispatch") answer = renderAgentDispatch(context);
+  else if (type === "complexity-check") answer = renderComplexityCheck(context);
+  else answer = renderGeneral(context, question);
+  return appendCurrentGoalAnchor(answer, context);
 }
 
 function appendSearchSources(answer, search) {
@@ -441,10 +443,11 @@ async function resolveSearch({ question, env, deps = {} }) {
   }
 }
 
-function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env } = {}) {
+function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, currentGoal = "" } = {}) {
   // 同步入口：不调用 LLM，始终返回本地规则回答。
   // 服务端 /api/ask 应改用 askStrategyOsAsync 以启用 LLM 动态回答。
   const context = loadAskContext({ rootDir, date });
+  context.currentGoal = sanitizeCurrentGoal(currentGoal);
   return {
     type: classifyQuestion(question),
     answer: renderAnswer({ context, question }),
@@ -456,8 +459,9 @@ function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), questi
   };
 }
 
-async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, useSearch = false, deps = {} } = {}) {
+async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, useSearch = false, currentGoal = "", deps = {} } = {}) {
   const context = loadAskContext({ rootDir, date });
+  context.currentGoal = sanitizeCurrentGoal(currentGoal);
   const type = classifyQuestion(question);
   const explicitSearch = useSearch === true;
   const searchResult = explicitSearch ? await resolveSearch({ question, env, deps }) : null;
@@ -483,7 +487,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     const answer = await callChatCompletion({
       config: llmConfig,
       systemPrompt: readSystemPrompt(),
-      userPrompt: buildLlmUserPrompt({ context, type, question, search: searchResult }),
+      userPrompt: buildLlmUserPrompt({ context, type, question, search: searchResult, currentGoal: context.currentGoal }),
       fetchImpl: deps.fetch,
       abortImpl: deps.AbortController
     });
@@ -520,12 +524,13 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
 //  - 不联网（默认）
 //  - 不调用真实 Codex / WorkBuddy / MiniMax
 //  - 失败时回退到本地"保守开工包"模板，仍能给出结构化建议
-async function generateKickoffPackageForOpportunity({ opportunity, env = process.env, deps = {} } = {}) {
+async function generateKickoffPackageForOpportunity({ opportunity, env = process.env, currentGoal = "", deps = {} } = {}) {
   if (!opportunity || typeof opportunity !== "object") {
     const error = new Error("机会数据不完整。");
     error.statusCode = 400;
     throw error;
   }
+  const safeCurrentGoal = sanitizeCurrentGoal(currentGoal);
   const name = opportunity.displayTitle || opportunity.opportunityName || "未命名机会";
   const oneLine = String(opportunity.oneLineSummary || "").trim();
   const note = String(opportunity.notes || opportunity.note || "").trim();
@@ -538,7 +543,7 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
   const isSparse = !oneLine && !note && !next && tags.length === 0;
   if (isSparse) {
     return {
-      answer: buildSparseKickoff({ name, sourceQuestion }),
+      answer: buildSparseKickoff({ name, sourceQuestion, currentGoal: safeCurrentGoal }),
       source: "local",
       warning: "当前机会信息不足，以下是保守版开工包，建议先补充备注或标签。",
       opportunity
@@ -549,14 +554,14 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
   const llmEnabled = isConfigured(llmConfig);
   if (!llmEnabled) {
     return {
-      answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }),
+      answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal: safeCurrentGoal }),
       source: "local",
       warning: null,
       opportunity
     };
   }
   try {
-    const userPrompt = buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls });
+    const userPrompt = buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal: safeCurrentGoal });
     const answer = await callChatCompletion({
       config: llmConfig,
       systemPrompt: readKickoffSystemPrompt(),
@@ -571,18 +576,18 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
     logLlmError(error);
   }
   return {
-    answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }),
+    answer: buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal: safeCurrentGoal }),
     source: "local-fallback",
     warning: "LLM 动态开工包暂时不可用，已回退到本地规则版开工包。",
     opportunity
   };
 }
 
-function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
+function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal = "" }) {
   // V0.3.11 安全：脱敏所有可能含 API Key 的字段
   // V0.3.11-hotfix-4：先统一过 redactSecretLikeText（递归脱敏 sk-* 形态）
   const safeInput = redactSecretLikeText({
-    name, oneLine, note, next, tags, sourceQuestion, sourceUrls
+    name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal
   });
   const sanitize = (s) => String(s || "")
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
@@ -595,6 +600,7 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   const safeQuestion = sanitize(safeInput.sourceQuestion);
   const safeTags = Array.isArray(safeInput.tags) ? safeInput.tags.map((t) => sanitize(t)) : [];
   const safeSourceUrls = Array.isArray(safeInput.sourceUrls) ? safeInput.sourceUrls : [];
+  const safeCurrentGoal = sanitize(safeInput.currentGoal);
   const lines = [];
   lines.push("请基于下面这个机会卡数据，生成一份结构化开工包。");
   lines.push("");
@@ -604,6 +610,7 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   if (note) lines.push(`- 备注：${safeNote}`);
   if (next) lines.push(`- 下一步：${safeNext}`);
   if (safeTags.length) lines.push(`- 标签：${safeTags.join("、")}`);
+  if (safeCurrentGoal) lines.push(`- 当前目标：${safeCurrentGoal}`);
   if (sourceQuestion) lines.push(`- 原始问题：${safeQuestion}`);
   if (safeSourceUrls.length) {
     lines.push(`- 参考来源（最多 5 条）：`);
@@ -616,19 +623,21 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   lines.push("1. 项目一句话");
   lines.push("2. 为什么值得做");
   lines.push("3. 目标用户");
-  lines.push("4. 最小 MVP");
-  lines.push("5. 第一版功能边界");
-  lines.push("6. 不要做什么");
-  lines.push("7. 推荐执行工具");
-  lines.push("8. 第一轮验证路径");
-  lines.push("9. 风险与卡点");
-  lines.push("10. 下一步提示词草稿");
+  lines.push("4. 与当前目标的关系");
+  lines.push("5. 最小 MVP");
+  lines.push("6. 第一版功能边界");
+  lines.push("7. 不要做什么");
+  lines.push("8. 推荐执行工具");
+  lines.push("9. 第一轮验证路径");
+  lines.push("10. 风险与卡点");
+  lines.push("11. 下一步提示词草稿");
   lines.push("");
   lines.push("【硬约束 V0.3.11-hotfix】");
   lines.push("- 不要用「信息不足」替代生成。即使信息不完整，也必须输出可执行的保守版开工包。");
   lines.push("- 每个小节必须给出具体内容，可以标注「暂定 / 推断 / 保守判断」，但不允许整节只说「信息不足」。");
   lines.push("- 「风险与卡点」必须主动生成至少 3 条具体风险，不能等用户自己罗列。");
   lines.push("- 「目标用户」、「最小 MVP」、「第一版功能边界」即使信息不足，也要基于机会名/标签/备注做「暂定推断」并写明是推断。");
+  lines.push("- 如果给出了当前目标，必须说明这个项目是否服务当前目标；如果不服务，要建议观察或暂缓，而不是强行开工。");
   lines.push("- 内容必须基于上面机会卡数据生成，不要凭空发明数据。");
   lines.push("- 严格中文输出，不调用任何外部智能体，不真的去执行项目。");
   return lines.join("\n");
@@ -653,11 +662,11 @@ function readKickoffSystemPrompt() {
   ].join("\n");
 }
 
-function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls }) {
+function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal = "" }) {
   // V0.3.11 安全：脱敏所有可能含 API Key 的字段
   // V0.3.11-hotfix-4：先统一过 redactSecretLikeText
   const safeInput = redactSecretLikeText({
-    name, oneLine, note, next, tags, sourceQuestion, sourceUrls
+    name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal
   });
   const sanitize = (s) => String(s || "")
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[已脱敏]")
@@ -669,6 +678,7 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   const safeNext = sanitize(next);
   const safeQuestion = sanitize(sourceQuestion);
   const safeTags = (tags || []).map(sanitize);
+  const safeCurrentGoal = sanitize(safeInput.currentGoal);
   // V0.3.11-hotfix：根据 name + tags + note 推断目标用户、MVP、边界、风险
   const inferred = inferKickoffFields({ name: safeName, oneLine: safeOneLine, note: safeNote, next: safeNext, tags: safeTags });
 
@@ -685,36 +695,44 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
     lines.push(inferred.why);
   }
   lines.push("");
-  lines.push("3. 目标用户");
+  lines.push("3. 与当前目标的关系");
+  if (safeCurrentGoal) {
+    lines.push(`当前目标：${safeCurrentGoal}`);
+    lines.push("判断：只有当这个机会能帮助当前目标更快被验证时，才建议进入执行；否则先观察，不要强行开工。");
+  } else {
+    lines.push("当前未设置 Goal。先按机会本身做保守判断，不强行绑定方向。");
+  }
+  lines.push("");
+  lines.push("4. 目标用户");
   lines.push(inferred.targetUsers);
   lines.push("");
-  lines.push("4. 最小 MVP");
+  lines.push("5. 最小 MVP");
   if (safeNext) {
     lines.push(safeNext.slice(0, 200));
   } else {
     lines.push(inferred.mvp);
   }
   lines.push("");
-  lines.push("5. 第一版功能边界");
+  lines.push("6. 第一版功能边界");
   lines.push(inferred.scope);
   lines.push("");
-  lines.push("6. 不要做什么");
+  lines.push("7. 不要做什么");
   lines.push("- 不做账号系统。");
   lines.push("- 不做完整产品，先做最小验证。");
   lines.push("- 不直接派发外部 Agent / 智能体。");
   lines.push("- 不花时间打磨 UI，先验证假设。");
   lines.push("- 不接入付费数据源，第一版只用免费/已有数据。");
   lines.push("");
-  lines.push("7. 推荐执行工具");
+  lines.push("8. 推荐执行工具");
   lines.push("GPT 5.5 Thinking（总控判断）+ Codex（代码/脚本）+ 普通浏览器/LibreOffice（人工记录）。");
   lines.push("");
-  lines.push("8. 第一轮验证路径");
+  lines.push("9. 第一轮验证路径");
   lines.push("- Step 1：写一份 1 页验证计划（含假设、动作、判定标准）。");
   lines.push("- Step 2：花 1-2 天执行最小动作。");
   lines.push("- Step 3：收集反馈，决定继续 / 暂停 / 放弃。");
   lines.push("- 判定标准：能不能在 3-5 天内被 EricChan 实际用起来。");
   lines.push("");
-  lines.push("9. 风险与卡点");
+  lines.push("10. 风险与卡点");
   if (safeQuestion) {
     lines.push(`- 原始问题方向：${safeQuestion.slice(0, 120)}`);
   }
@@ -722,7 +740,7 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
     lines.push(`- ${r}`);
   }
   lines.push("");
-  lines.push("10. 下一步提示词草稿");
+  lines.push("11. 下一步提示词草稿");
   if (safeQuestion) {
     lines.push(`基于"${safeName}"这个机会，帮我做：${safeQuestion.slice(0, 100)}`);
   } else {
@@ -816,9 +834,10 @@ function inferKickoffFields({ name = "", oneLine = "", note = "", next = "", tag
   return { targetUsers, mvp, scope, risks, why };
 }
 
-function buildSparseKickoff({ name, sourceQuestion }) {
+function buildSparseKickoff({ name, sourceQuestion, currentGoal = "" }) {
   // V0.3.11-hotfix：信息稀疏时也用 inferKickoffFields 推断每节具体内容
   const inferred = inferKickoffFields({ name, oneLine: "", note: "", next: "", tags: [] });
+  const safeCurrentGoal = sanitizeCurrentGoal(currentGoal);
   const lines = [];
   lines.push(`# 开工包：${name}（保守版）`);
   lines.push("");
@@ -828,37 +847,45 @@ function buildSparseKickoff({ name, sourceQuestion }) {
   lines.push("2. 为什么值得做");
   lines.push(inferred.why);
   lines.push("");
-  lines.push("3. 目标用户");
+  lines.push("3. 与当前目标的关系");
+  if (safeCurrentGoal) {
+    lines.push(`当前目标：${safeCurrentGoal}`);
+    lines.push("判断：信息稀疏时先确认它是否真的服务当前目标，再决定是否补充机会卡。");
+  } else {
+    lines.push("当前未设置 Goal。先补充机会信息，再判断是否值得推进。");
+  }
+  lines.push("");
+  lines.push("4. 目标用户");
   lines.push(inferred.targetUsers);
   lines.push("");
-  lines.push("4. 最小 MVP");
+  lines.push("5. 最小 MVP");
   lines.push(inferred.mvp);
   lines.push("");
-  lines.push("5. 第一版功能边界");
+  lines.push("6. 第一版功能边界");
   lines.push(inferred.scope);
   lines.push("");
-  lines.push("6. 不要做什么");
+  lines.push("7. 不要做什么");
   lines.push("- 不做账号系统。");
   lines.push("- 不做完整产品。");
   lines.push("- 不直接派发 Agent。");
   lines.push("- 不花时间打磨 UI，先验证假设。");
   lines.push("- 不接入付费数据源，第一版只用免费/已有数据。");
   lines.push("");
-  lines.push("7. 推荐执行工具");
+  lines.push("8. 推荐执行工具");
   lines.push("GPT 5.5 Thinking（总控）+ Codex（执行）+ 浏览器（人工记录）。");
   lines.push("");
-  lines.push("8. 第一轮验证路径");
+  lines.push("9. 第一轮验证路径");
   lines.push("- Step 1：写一份 1 页验证计划。");
   lines.push("- Step 2：花 1-2 天执行最小动作。");
   lines.push("- Step 3：收集 3-5 个真实用户反馈，决定继续 / 暂停 / 放弃。");
   lines.push("");
-  lines.push("9. 风险与卡点");
+  lines.push("10. 风险与卡点");
   if (sourceQuestion) lines.push(`- 原始问题方向：${sourceQuestion.slice(0, 120)}`);
   for (const r of inferred.risks) {
     lines.push(`- ${r}`);
   }
   lines.push("");
-  lines.push("10. 下一步提示词草稿");
+  lines.push("11. 下一步提示词草稿");
   lines.push(`帮我把"${name}"拆成 3 个可执行的下一步动作。`);
   return lines.join("\n");
 }
@@ -873,10 +900,33 @@ function trimContext(text, max = 600) {
   return `${value.slice(0, max)}…`;
 }
 
-function buildLlmUserPrompt({ context, type, question, search = null }) {
+function sanitizeCurrentGoal(value) {
+  return String(redactSecretLikeText(String(value || "").replace(/\s+/g, " ").trim()))
+    .slice(0, 200)
+    .trim();
+}
+
+function appendCurrentGoalAnchor(answer, context) {
+  const goal = sanitizeCurrentGoal(context && context.currentGoal);
+  if (!goal) return answer;
+  return `${String(answer || "").trim()}
+
+当前目标锚点：${goal}
+- 回答会优先判断是否服务这个目标；不相关时，不会强行套进去。
+`;
+}
+
+function buildLlmUserPrompt({ context, type, question, search = null, currentGoal = "" }) {
+  const safeGoal = sanitizeCurrentGoal(currentGoal || (context && context.currentGoal));
   const lines = [];
   lines.push(`当前问题类型：${type}`);
   lines.push(`用户原始问题：${String(question || "").trim() || "（无）"}`);
+  if (safeGoal) {
+    lines.push("");
+    lines.push("【当前目标】");
+    lines.push(safeGoal);
+    lines.push("请把它作为方向锚点：优先判断回答是否服务当前目标；如果问题与当前目标冲突，要指出冲突；如果无关，要说明是否值得偏离；不要强行把所有问题都套进目标。");
+  }
   if (context.contextText) {
     lines.push("");
     lines.push("【用户上下文 / context.md】");
@@ -952,11 +1002,11 @@ function buildLlmUserPrompt({ context, type, question, search = null }) {
   return lines.join("\n");
 }
 
-async function tryLlmAnswerAsync({ config, context, type, question, deps = {} } = {}) {
+async function tryLlmAnswerAsync({ config, context, type, question, currentGoal = "", deps = {} } = {}) {
   const fetchImpl = deps.fetch || globalThis.fetch;
   const abortImpl = deps.AbortController || (typeof AbortController !== "undefined" ? AbortController : null);
   const systemPrompt = deps.systemPrompt || readSystemPrompt();
-  const userPrompt = buildLlmUserPrompt({ context, type, question });
+  const userPrompt = buildLlmUserPrompt({ context, type, question, currentGoal });
   return callChatCompletion({ config, systemPrompt, userPrompt, fetchImpl, abortImpl });
 }
 
@@ -1167,6 +1217,7 @@ module.exports = {
   renderProjectCheckup,
   readSystemPrompt,
   buildLlmUserPrompt,
+  sanitizeCurrentGoal,
   buildKickoffUserPrompt,
   generateKickoffPackageForOpportunity,
   buildLocalKickoff,

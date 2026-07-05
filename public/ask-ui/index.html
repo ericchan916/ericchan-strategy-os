@@ -16,6 +16,19 @@
         <span class="status-dot" aria-hidden="true"></span>
           <span id="globalStatusText">本地运行 · 中文问答 · 不自动派发智能体 · 默认不联网</span>
         </p>
+        <section class="goal-anchor" aria-label="当前目标">
+          <div id="goalView" class="goal-view">
+            <span class="goal-label">当前目标</span>
+            <span id="currentGoalText" class="goal-text" title="未设置">未设置</span>
+            <button id="goalEditButton" type="button" class="goal-button">设置目标</button>
+            <button id="goalClearButton" type="button" class="goal-button goal-button--muted" hidden>清除</button>
+          </div>
+          <form id="goalForm" class="goal-form" hidden autocomplete="off">
+            <input id="goalInput" type="text" maxlength="200" aria-label="当前目标输入框" placeholder="例如：用战略OS筛选适合独立开发者的小型 AI 产品" />
+            <button id="goalSaveButton" type="submit" class="goal-button">保存</button>
+            <button id="goalCancelButton" type="button" class="goal-button goal-button--muted">取消</button>
+          </form>
+        </section>
       </header>
 
       <div class="layout">
