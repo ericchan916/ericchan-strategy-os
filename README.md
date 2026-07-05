@@ -1790,6 +1790,19 @@ V0.6 让今日机会池根据当前 Goal 做轻量派生判断：不是项目管
 - 不新增 OKR、多目标、看板拖拽、数据库、自动派发或任务管理。
 - 默认不联网、固定视口工作台、loading 动画和 `opportunity-pool.json` 不提交原则不变。
 
+## V0.6.1-hotfix 恢复 LLM 与联网搜索链路
+
+V0.6.1-hotfix 修复的是运行链路稳定性，不新增功能。
+
+- `npm run llm:check` 和 `npm run search:check` 仍是首选诊断入口，只输出是否配置、状态码和安全化错误，不输出 API Key。
+- 普通 Ask 继续走 LLM 动态回答；LLM 成功时返回 `source="llm"`。
+- 勾选“本次联网搜索”或 CLI 使用 `--search` 后，搜索结果仍会作为补充上下文交给 LLM。
+- 如果带搜索结果的 LLM 请求首次超时，系统会自动用压缩版搜索上下文重试一次：保留关键来源，减少搜索质量 / 时效性细节，避免一次超时就直接退回本地规则。
+- 非超时错误（401 / 403 / 404 / 429 / 5xx 等）不会被压缩重试掩盖，仍按原诊断和 fallback 处理。
+- 搜索失败时仍显示中文 warning，Ask 本地 fallback 保留。
+- 默认不联网原则不变，搜索 checkbox 不会默认勾选。
+- 固定视口工作台、Goal 匹配度、今日优先级、Bocha / Tavily provider、loading 动画和 `opportunity-pool.json` 不提交原则不变。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

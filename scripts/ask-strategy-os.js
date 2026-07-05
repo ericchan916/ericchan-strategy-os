@@ -504,6 +504,36 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     }
   } catch (error) {
     logLlmError(error);
+    if (explicitSearch && shouldRetryLlmWithCompactSearch(error, searchResult)) {
+      try {
+        const answer = await callChatCompletion({
+          config: llmConfig,
+          systemPrompt: readSystemPrompt(),
+          userPrompt: buildLlmUserPrompt({
+            context,
+            type,
+            question,
+            search: compactSearchForLlmRetry(searchResult),
+            currentGoal: context.currentGoal
+          }),
+          fetchImpl: deps.fetch,
+          abortImpl: deps.AbortController
+        });
+        if (answer) {
+          return {
+            type,
+            answer,
+            source: "llm",
+            llmEnabled: true,
+            warning: null,
+            search: searchMeta,
+            context
+          };
+        }
+      } catch (retryError) {
+        logLlmError(retryError);
+      }
+    }
   }
 
   return {
@@ -986,28 +1016,31 @@ function buildLlmUserPrompt({ context, type, question, search = null, currentGoa
     }
   }
   if (search && Array.isArray(search.results) && search.results.length) {
+    const compact = search.compact === true;
+    const maxSearchResults = compact ? 3 : 5;
+    const snippetMax = compact ? 120 : 280;
     lines.push("");
     lines.push("【外部搜索结果摘要】");
     lines.push(`原始问题：${trimContext(question, 160)}`);
     lines.push(`搜索意图：${trimContext(search.intent || "general", 80)}`);
-    lines.push(`实际搜索词：${trimContext((search.plannedQueries || [search.query || question]).join(" / "), 360)}`);
+    lines.push(`实际搜索词：${trimContext((search.plannedQueries || [search.query || question]).join(" / "), compact ? 180 : 360)}`);
     if (search.freshness) lines.push(`搜索时间范围：${trimContext(search.freshness, 80)}`);
-    if (search.recency) {
+    if (search.recency && !compact) {
       lines.push(`时效性要求：${search.recency.required ? "需要近期结果" : "不强制近期"}；${trimContext(search.recency.reason || "", 180)}`);
       lines.push(`时效性过滤：过旧 ${Number(search.recency.filteredOldCount || 0)} 条，缺少日期 ${Number(search.recency.missingDateCount || 0)} 条。`);
     }
-    if (search.filters) {
+    if (search.filters && !compact) {
       lines.push(`相关性过滤：无关财经 ${Number(search.filters.blockedTopicCount || 0)} 条，重复 ${Number(search.filters.duplicateCount || 0)} 条。`);
     }
-    if (search.quality) {
+    if (search.quality && !compact) {
       lines.push(`搜索质量摘要：平均 ${Number(search.quality.averageScore || 0)}，最高 ${Number(search.quality.topSourceScore || 0)}，低质来源 ${Number(search.quality.lowQualityCount || 0)} 条。${trimContext(search.quality.weakReason || "", 120)}`);
     }
-    for (const item of search.results.slice(0, 5)) {
+    for (const item of search.results.slice(0, maxSearchResults)) {
       lines.push(`- 标题：${trimContext(item.title, 120)}`);
       lines.push(`  URL：${trimContext(item.url, 220)}`);
       lines.push(`  来源：${trimContext(item.source, 80)}`);
-      if (item.quality) lines.push(`  质量：${Number(item.quality.overallScore || 0)} / 100`);
-      if (item.snippet) lines.push(`  摘要：${trimContext(item.snippet, 280)}`);
+      if (item.quality && !compact) lines.push(`  质量：${Number(item.quality.overallScore || 0)} / 100`);
+      if (item.snippet) lines.push(`  摘要：${trimContext(item.snippet, snippetMax)}`);
     }
     lines.push("");
     lines.push("【使用外部搜索结果的规则】");
@@ -1024,6 +1057,32 @@ function buildLlmUserPrompt({ context, type, question, search = null, currentGoa
     lines.push("- 末尾最多列 3-5 个关键参考来源，不要堆长链接。");
   }
   return lines.join("\n");
+}
+
+function compactSearchForLlmRetry(search) {
+  const raw = search && typeof search === "object" ? search : {};
+  return {
+    ...raw,
+    compact: true,
+    plannedQueries: Array.isArray(raw.plannedQueries) ? raw.plannedQueries.slice(0, 2) : raw.plannedQueries,
+    results: Array.isArray(raw.results)
+      ? raw.results.slice(0, 3).map((item) => ({
+          title: item.title,
+          url: item.url,
+          source: item.source,
+          snippet: item.snippet,
+          quality: item.quality
+        }))
+      : []
+  };
+}
+
+function shouldRetryLlmWithCompactSearch(error, searchResult) {
+  return error
+    && error.code === "timeout"
+    && searchResult
+    && Array.isArray(searchResult.results)
+    && searchResult.results.length > 0;
 }
 
 async function tryLlmAnswerAsync({ config, context, type, question, currentGoal = "", deps = {} } = {}) {

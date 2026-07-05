@@ -443,6 +443,120 @@ test("search results are injected into LLM prompt without API key and with trunc
   assert.ok(capturedPrompt.length < longSnippet.length + 3000, "搜索摘要应被截断后注入 prompt");
 });
 
+test("V0.6.1-hotfix: search-augmented LLM timeout retries once with compact search prompt", async () => {
+  const fixture = createFixture();
+  const longSnippet = "适合独立开发者的小型 AI 产品机会。".repeat(80);
+  const prompts = [];
+  let fetchCalls = 0;
+  const fakeFetch = async (_url, options) => {
+    fetchCalls += 1;
+    const body = JSON.parse(options.body);
+    prompts.push(body.messages[1].content);
+    if (fetchCalls === 1) {
+      const error = new Error("aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "# LLM 回答\n\n结论：已用压缩搜索上下文恢复动态回答。" } }]
+      })
+    };
+  };
+
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    useSearch: true,
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-llm-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1",
+      STRATEGY_OS_SEARCH_API_KEY: "sk-search-secret"
+    },
+    deps: {
+      fetch: fakeFetch,
+      searchWeb: async ({ query }) => ({
+        provider: "bocha",
+        query,
+        plannedQueries: [
+          "AI Agent 产品趋势 独立开发者 商业机会 最近",
+          "大模型应用 新产品 AI 工具 创业机会 最近",
+          "AI coding agent workflow automation product launch recent",
+          "personal AI OS agent tools startup opportunities recent"
+        ],
+        intent: "ai-opportunity",
+        freshness: "oneMonth",
+        recency: { required: true, reason: "趋势和机会判断需要近期结果。", filteredOldCount: 3, missingDateCount: 2 },
+        filters: { blockedTopicCount: 4, duplicateCount: 1 },
+        quality: { averageScore: 72, topSourceScore: 86, lowQualityCount: 1, weakReason: "部分结果较泛。", hasHighConfidenceSources: true },
+        warning: null,
+        results: Array.from({ length: 5 }, (_, index) => ({
+          title: `AI opportunity ${index + 1}`,
+          url: `https://example.com/${index + 1}`,
+          snippet: longSnippet,
+          source: "example.com",
+          quality: { overallScore: 80 - index }
+        }))
+      })
+    }
+  });
+
+  assert.equal(fetchCalls, 2);
+  assert.equal(result.source, "llm");
+  assert.equal(result.warning, null);
+  assert.equal(result.search.used, true);
+  assert.ok(result.answer.includes("压缩搜索上下文"));
+  assert.ok(prompts[0].includes("搜索质量摘要"));
+  assert.ok(prompts[0].includes("AI opportunity 5"));
+  assert.equal(prompts[1].includes("搜索质量摘要：平均"), false);
+  assert.equal(prompts[1].includes("AI opportunity 4"), false);
+  assert.ok(prompts[1].length < prompts[0].length);
+  const serialized = JSON.stringify({ prompts, result });
+  assert.equal(serialized.includes("sk-llm-key"), false);
+  assert.equal(serialized.includes("sk-search-secret"), false);
+});
+
+test("V0.6.1-hotfix: non-timeout LLM errors do not retry compact search prompt", async () => {
+  const fixture = createFixture();
+  let fetchCalls = 0;
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "最近有什么适合独立开发者做的小型 AI 项目？",
+    useSearch: true,
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-llm-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+    },
+    deps: {
+      fetch: async () => {
+        fetchCalls += 1;
+        return { ok: false, status: 401, text: async () => "bad key sk-leaked-value" };
+      },
+      searchWeb: async ({ query }) => ({
+        provider: "bocha",
+        query,
+        plannedQueries: ["AI Agent 产品趋势 独立开发者 商业机会 最近"],
+        intent: "ai-opportunity",
+        warning: null,
+        results: [{ title: "AI opportunity", url: "https://example.com/a", snippet: "AI opportunity", source: "example.com" }]
+      })
+    }
+  });
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(result.source, "local-fallback");
+  assert.equal(result.warning, "LLM 动态回答暂时不可用，已回退到本地规则回答。");
+  assert.equal(JSON.stringify(result).includes("sk-leaked-value"), false);
+});
+
 test("API key is never included in the user prompt", () => {
   const fixture = createFixture();
   const result = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date });
