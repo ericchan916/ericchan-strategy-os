@@ -3631,34 +3631,38 @@ test("V0.6.6: CSS .answer-loading 升级到 min-height 360px 与更宽松 paddin
   assert.ok(pad, ".answer-loading 应含 padding");
 });
 
-test("V0.6.6: CSS .answer strong 升级为非黑色重点色 + 高光笔效果 + 混合模式", () => {
+test("V0.6.7: CSS .answer strong 升级为非黑色重点色 + 高光笔效果 + 混合模式", () => {
+  // V0.6.7 替换：accent-dark → --highlight-ink
   const rule = stylesCss.match(/\.answer strong\s*\{[^}]*\}/);
   assert.ok(rule, "应存在 .answer strong 规则");
   const block = rule[0];
-  // 1) 非黑色：使用 accent-dark 或类似深色（不是 var(--ink) 黑）
-  assert.ok(/var\(--accent[^)]*\)/.test(block), ".answer strong 应使用 accent 系列非黑色");
+  // 1) 非黑色：使用 highlight-ink（不再是 accent-dark）
+  assert.ok(/var\(--highlight-ink\)/.test(block), ".answer strong 应使用 --highlight-ink 暖色");
   // 2) 高光笔：linear-gradient
   assert.ok(/linear-gradient/.test(block), ".answer strong 应含 highlighter linear-gradient");
   // 3) box-decoration-break: clone 让高光在多行独立包裹
   assert.ok(/box-decoration-break\s*:\s*clone/.test(block), ".answer strong 应开启 box-decoration-break: clone");
   // 4) mix-blend-mode 混合模式
-  assert.ok(/mix-blend-mode\s*:\s*(multiply|multiply-)?/.test(block), ".answer strong 应含 mix-blend-mode");
+  assert.ok(/mix-blend-mode\s*:\s*multiply/i.test(block), ".answer strong 应含 mix-blend-mode: multiply");
 });
 
-test("V0.6.6: CSS .answer mark 升级（mark 元素也走非黑色重点色）", () => {
+test("V0.6.7: CSS .answer mark 升级（mark 元素也走非黑色重点色）", () => {
   const rule = stylesCss.match(/\.answer mark\s*\{[^}]*\}/);
   assert.ok(rule, "应存在 .answer mark 规则");
   const block = rule[0];
-  assert.ok(/var\(--accent[^)]*\)/.test(block), ".answer mark 应使用 accent 系列非黑色");
-  assert.ok(/rgba\(|var\(--accent-soft/.test(block), ".answer mark 背景应浅");
+  assert.ok(/var\(--highlight-ink\)/.test(block), ".answer mark 应使用 --highlight-ink");
+  assert.ok(/var\(--highlight-bg\)|rgba\(/.test(block), ".answer mark 背景应浅");
 });
 
-test("V0.6.6: CSS .answer h2 加 accent 顶边 + accent-dark 颜色", () => {
+test("V0.6.7: CSS .answer h2 改为 highlight-ink 颜色", () => {
   const rule = stylesCss.match(/\.answer h2\s*\{[^}]*\}/);
   assert.ok(rule, "应存在 .answer h2 规则");
   const block = rule[0];
-  assert.ok(/var\(--accent-dark\)/.test(block), ".answer h2 应使用 accent-dark");
-  assert.ok(/\.answer h2::before/.test(stylesCss), ".answer h2 应有 ::before accent 顶边标记");
+  assert.ok(/var\(--highlight-ink\)/.test(block), ".answer h2 应使用 --highlight-ink");
+  // h2 ::before 标记使用 highlight-ink
+  const beforeMatch = stylesCss.match(/\.answer h2::before\s*\{[^}]*\}/);
+  assert.ok(beforeMatch, ".answer h2 应有 ::before 顶边标记");
+  assert.ok(/var\(--highlight-ink\)/.test(beforeMatch[0]), ".answer h2::before 应使用 --highlight-ink");
 });
 
 test("V0.6.6: CSS .answer 代码/代码块不被高光笔影响", () => {
@@ -4849,5 +4853,311 @@ test("V0.4.2 F22a: storage=null 时 mount 不崩，折叠状态使用默认（�
   app.mount();
   // 默认展开：body.hidden 应为 false（makeFakeNodes 默认值）
   assert.equal(nodes.opportunityBody.hidden, false, "storage=null 时默认展开");
+});
+
+// =================================================================
+// V0.6.7 战略回答区布局与短回答约束
+// =================================================================
+
+// 目标 1：初始 empty answer box 高度与 loading 一致
+test("V0.6.7 T1a: .answer.empty 使用与 .answer-loading 一致的 min-height（>= 320px）", () => {
+  const rule = stylesCss.match(/\.answer\.empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.answer--empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.is-empty\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer.empty / .answer--empty / .answer.is-empty 规则");
+  const block = rule[0];
+  const m = block.match(/min-height\s*:\s*(\d+)px/);
+  assert.ok(m, ".answer.empty 应有显式 min-height 数字");
+  const height = Number(m[1]);
+  assert.ok(height >= 320, `.answer.empty 高度应 >= 320px（避免与 loading 跳变），实际 ${height}px`);
+});
+
+test("V0.6.7 T1b: .answer-loading 维持 V0.6.6 的 360px 不退化", () => {
+  const rule = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer-loading 规则");
+  const m = rule[0].match(/min-height\s*:\s*(\d+)px/);
+  assert.ok(m, ".answer-loading 应有 min-height");
+  const height = Number(m[1]);
+  assert.ok(height >= 320, `.answer-loading 高度应 >= 320px，实际 ${height}px`);
+});
+
+test("V0.6.7 T1c: .answer.empty 与 .answer-loading min-height 数值一致（无跳变）", () => {
+  const emptyRule = stylesCss.match(/\.answer\.empty\s*\{[^}]*\}/) ||
+                    stylesCss.match(/\.answer\.answer--empty\s*\{[^}]*\}/) ||
+                    stylesCss.match(/\.answer\.is-empty\s*\{[^}]*\}/);
+  const loadingRule = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(emptyRule && loadingRule, "empty 与 loading 规则都应存在");
+  const emptyM = emptyRule[0].match(/min-height\s*:\s*(\d+)px/);
+  const loadingM = loadingRule[0].match(/min-height\s*:\s*(\d+)px/);
+  assert.ok(emptyM && loadingM, "empty 与 loading 都应有 min-height 数字");
+  assert.equal(emptyM[1], loadingM[1], "empty 与 loading min-height 应一致");
+});
+
+// 目标 2：边框约束（empty / loading / answered 三态统一）
+test("V0.6.7 T2a: .answer.empty 应有明确边框（border 1px+ line/accent-soft）", () => {
+  const rule = stylesCss.match(/\.answer\.empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.answer--empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.is-empty\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 empty answer 规则");
+  const block = rule[0];
+  const borderMatch = block.match(/border\s*:\s*(\d+)px[^;]*var\(--line/);
+  assert.ok(borderMatch, ".answer.empty 应使用 var(--line*) 边框（不黑、不重卡片）");
+  const width = Number(borderMatch[1]);
+  assert.ok(width >= 1 && width <= 2, `边框宽度 1-2px 克制，实际 ${width}px`);
+});
+
+test("V0.6.7 T2b: .answer-loading 也使用同色系边框（统一三态）", () => {
+  const rule = stylesCss.match(/\.answer-loading\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer-loading 规则");
+  const block = rule[0];
+  const borderMatch = block.match(/border\s*:\s*(\d+)px[^;]*var\(--line/);
+  assert.ok(borderMatch, ".answer-loading 应使用 var(--line*) 边框");
+});
+
+test("V0.6.7 T2c: 空状态文案视觉居中略上（flex / grid / padding-top）", () => {
+  // .answer.empty 应有 display: flex + justify-content: center + align-items: ?，或 padding-top 足够
+  const rule = stylesCss.match(/\.answer\.empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.answer--empty\s*\{[^}]*\}/) ||
+               stylesCss.match(/\.answer\.is-empty\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 empty 规则");
+  const block = rule[0];
+  // 接受 display: flex + justify-content 或 padding-top 50px+
+  const hasFlex = /display\s*:\s*flex/.test(block) && /justify-content\s*:\s*center/.test(block);
+  const hasPaddingTop = /padding-top\s*:\s*(\d+)px/.test(block);
+  if (hasPaddingTop) {
+    const m = block.match(/padding-top\s*:\s*(\d+)px/);
+    const pt = Number(m[1]);
+    assert.ok(pt >= 50, `padding-top 应 >= 50px（视觉居中略上），实际 ${pt}px`);
+  }
+  assert.ok(hasFlex || hasPaddingTop, "空状态应通过 flex 居中或较大 padding-top");
+});
+
+// 目标 3：淡橙 / 橙黄高亮（替换 V0.6.6 绿色高光）
+test("V0.6.7 T3a: CSS 定义淡橙 / 橙黄 highlight 颜色变量（--highlight-ink / --highlight-bg）", () => {
+  assert.ok(/--highlight-ink\s*:/.test(stylesCss), "应定义 --highlight-ink");
+  assert.ok(/--highlight-bg\s*:/.test(stylesCss), "应定义 --highlight-bg");
+  // highlight-bg 应是橙色系
+  const bgMatch = stylesCss.match(/--highlight-bg\s*:\s*rgba?\(([^)]+)\)/);
+  assert.ok(bgMatch, "--highlight-bg 应是 rgba(...) 形式");
+  // 期望 R > G > B（暖色），示例：R245, G178, B87
+  const parts = bgMatch[1].split(",").map((s) => Number(s.trim()));
+  assert.ok(parts.length >= 3, "应至少有 R,G,B");
+  assert.ok(parts[0] > parts[1] && parts[1] >= parts[2], `高亮背景应偏暖色 (R>G>=B)，实际 ${parts.slice(0,3).join(",")}`);
+});
+
+test("V0.6.7 T3b: .answer strong 使用 --highlight-ink / --highlight-bg（不再只用 accent-dark）", () => {
+  const rule = stylesCss.match(/\.answer strong\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer strong 规则");
+  const block = rule[0];
+  assert.ok(/var\(--highlight-ink\)/.test(block), ".answer strong 应使用 --highlight-ink 文字色");
+  assert.ok(/var\(--highlight-bg\)|rgba\(.*rgba\(/i.test(block), ".answer strong 应使用 highlight 高光背景");
+  assert.ok(/mix-blend-mode\s*:\s*multiply/i.test(block), ".answer strong 应保留 mix-blend-mode: multiply");
+  assert.ok(/box-decoration-break\s*:\s*clone/i.test(block), ".answer strong 应保留 box-decoration-break: clone");
+});
+
+test("V0.6.7 T3c: .answer mark 使用 --highlight-ink / --highlight-bg", () => {
+  const rule = stylesCss.match(/\.answer mark\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer mark 规则");
+  const block = rule[0];
+  assert.ok(/var\(--highlight-ink\)/.test(block), ".answer mark 应使用 --highlight-ink 文字色");
+  assert.ok(/var\(--highlight-bg\)|rgba\(/i.test(block), ".answer mark 应使用 highlight 高光背景");
+});
+
+test("V0.6.7 T3d: 重点色不是黑色（高亮 ink ≠ var(--ink)）", () => {
+  const rootVars = stylesCss.match(/--highlight-ink\s*:\s*([^;]+);/);
+  assert.ok(rootVars, "应定义 --highlight-ink");
+  const value = rootVars[1].trim();
+  // 1) 不应是 var(--ink) 或 var(--ink)（黑）
+  assert.equal(/var\(\s*--ink\s*\)/.test(value), false,
+    "--highlight-ink 不应是 var(--ink)（黑）");
+  // 2) 偏暖色：检查 hex 形式若以 # 开头则 R > B
+  if (value.startsWith("#")) {
+    const hex = value.slice(1);
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      // 暖色 = 至少 R > B
+      assert.ok(r > b, `--highlight-ink 应偏暖（红 > 蓝），实际 ${value} (${r},${g},${b})`);
+    }
+  } else if (value.startsWith("rgb")) {
+    // 颜色值直接检验 R > B
+    const nums = value.match(/(\d+)/g);
+    if (nums && nums.length >= 3) {
+      const r = Number(nums[0]);
+      const b = Number(nums[2]);
+      assert.ok(r > b, `--highlight-ink 应偏暖，实际 ${value}`);
+    }
+  }
+});
+
+test("V0.6.7 T3e: .answer code / pre 强制 mix-blend-mode: normal（不被高光污染）", () => {
+  const rule = stylesCss.match(/\.answer code,\s*\n?\s*\.answer pre\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .answer code/pre 混合模式覆盖规则");
+  assert.ok(/mix-blend-mode\s*:\s*normal/.test(rule[0]), "覆盖规则应回退到 normal");
+});
+
+// 目标 4：复制内容不包含样式污染
+test("V0.6.7 T4a: 复制 buildClipboardPayload 仍只输出纯文本", () => {
+  const { buildClipboardPayload } = require("../public/ask-ui/app");
+  const r = buildClipboardPayload({ answer: "**bold** 普通文本" });
+  assert.equal(r.text.includes("<"), false, "纯文本不应含 <");
+  assert.equal(r.text.includes("linear-gradient"), false, "纯文本不应含 CSS");
+  assert.equal(r.text.includes("mix-blend-mode"), false, "纯文本不应含 CSS");
+});
+
+// 推荐问题位置不回归
+test("V0.6.7 T5a: 推荐问题节点 #recommendedQuestions 仍位于战略回答上方", () => {
+  const rIndex = indexHtml.indexOf('id="recommendedQuestions"');
+  const aIndex = indexHtml.indexOf('id="answerOutput"');
+  assert.ok(rIndex > 0 && aIndex > 0, "两个节点都应存在");
+  assert.ok(rIndex < aIndex, "推荐问题应早于战略回答节点");
+});
+
+// loading 动画本体不回归
+test("V0.6.7 T6a: loading-spinner 6 个 div 仍完整存在", () => {
+  const idx = indexHtml.indexOf('id="answerLoading"');
+  assert.ok(idx > 0, "找不到 #answerLoading");
+  const inner = indexHtml.slice(idx, idx + 2400);
+  const m = inner.match(/<div aria-hidden="true" class="loading-spinner"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/);
+  assert.ok(m, "loading-spinner 结构应存在");
+  const emptyDivs = (m[0].match(/<div><\/div>/g) || []).length;
+  assert.equal(emptyDivs, 6, `loading-spinner 应含 6 个 <div></div>，实际 ${emptyDivs}`);
+});
+
+test("V0.6.7 T6b: loading 关键 keyframes 仍为 Uiverse 原文（hamster + spinner 都有）", () => {
+  // V0.6.6 后两种 loading 实现都还在 styles.css
+  assert.ok(/@keyframes\s+loading-spinner\b/.test(stylesCss), "@keyframes loading-spinner 应存在");
+});
+
+// 短回答约束：检查 prompt 文件文本
+test("V0.6.7 T7a: 系统提示词文件含短回答约束字样（普通 / 搜索 Ask）", () => {
+  let combined = "";
+  try {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const promptPath = path.join(__dirname, "..", "prompts", "ask-mode-system-prompt.md");
+    combined = fs.readFileSync(promptPath, "utf8");
+  } catch {
+    combined = "";
+  }
+  // 综合检查：prompt 文件 / scripts
+  const sources = [
+    combined,
+    require("node:fs").readFileSync(
+      require("node:path").join(__dirname, "..", "scripts", "ask-strategy-os.js"), "utf8"
+    )
+  ].join("\n");
+  // 宽松检查：含"短回答" / "总长度" / "先给结论" / "最多 N 字" / "不要长铺垫" 等
+  const has = /短回答|回答更短|更短的|总长度控制在?\s*\d+-\d+\s*字|不要.{0,5}长铺垫|先.{0,3}给结论|最多\s*\d+\s*字/i.test(sources);
+  assert.ok(has, "V0.6.7 应在 prompt / fallback / scripts 中加入短回答约束语义");
+});
+
+test("V0.6.7 T7b: scripts/ask-strategy-os.js 包含普通 Ask 短回答约束（总长度 / 小段数）", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const text = fs.readFileSync(path.join(__dirname, "..", "scripts", "ask-strategy-os.js"), "utf8");
+  // 至少含一个明确的字符数 / 小段数 / bullet 数约束
+  const hasLength = /总.{0,8}长度.{0,8}\d+[-~]\d+\s*字|\d+[-~]\d+\s*字/i.test(text);
+  const hasSegments = /最多\s*\d+\s*个?小?段|最多\s*\d+\s*个?bullet/i.test(text);
+  const hasConclusion = /先.{0,3}给结论|必须.{0,3}先.{0,3}给结论/i.test(text);
+  assert.ok(hasLength || hasSegments || hasConclusion, "应含明确的短回答约束（字符数 / 段数 / 结论优先）");
+});
+
+test("V0.6.7 T7c: fallback 模板包含短回答提示语", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const text = fs.readFileSync(path.join(__dirname, "..", "scripts", "ask-strategy-os.js"), "utf8");
+  // fallback 模板里至少有一个模板含"短"或"简洁"或长度控制字样
+  const has = /短|简洁|不要长铺垫|控制.{0,5}短|简要/i.test(text);
+  assert.ok(has, "fallback 模板应含短回答语义");
+});
+
+// 开工包不受短回答约束误伤
+test("V0.6.7 T8a: 开工包 prompt 不应被普通 short-answer 模板替换", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const text = fs.readFileSync(path.join(__dirname, "..", "scripts", "ask-strategy-os.js"), "utf8");
+  // 开工包 prompt 与普通 prompt 是分开的 readKickoffSystemPrompt
+  assert.ok(/readKickoffSystemPrompt|generateKickoffPackageForOpportunity/.test(text), "开工包仍使用独立 prompt");
+  // 开工包 prompt 不应含 "260-420 中文字" 这种强约束
+  const kickoffMatch = text.match(/readKickoffSystemPrompt\s*\(\s*\)\s*\{[^]*?prompt\s*=[^]*?return[^]*?\};/);
+  if (kickoffMatch) {
+    assert.equal(/260-420|总长度控制在?\s*\d+-\d+/.test(kickoffMatch[0]), false, "开工包 prompt 不应被普通 260-420 字约束影响");
+  }
+});
+
+// 提问 / 机会池按钮动效不回归
+test("V0.6.7 T9a: askButton 仍含 hover / pressed 动效定义", () => {
+  assert.ok(/\.primary-button:hover/.test(stylesCss), ".primary-button:hover 应存在");
+  assert.ok(/\.primary-button:focus-visible/.test(stylesCss), "focus-visible 应存在");
+});
+
+test("V0.6.7 T9b: 机会池按钮（add-opportunity-button）仍含动效", () => {
+  assert.ok(/\.add-opportunity-button:hover/.test(stylesCss), "机会池按钮 hover 应保留");
+});
+
+// Codex / Claude Code 任务按钮不恢复
+test("V0.6.7 T10a: 不恢复 Codex / Claude Code 任务按钮", () => {
+  const lower = appJsText.toLowerCase();
+  assert.equal(/data-task-target=\"codex\"|data-task-target=\"workbuddy\"|task-claude/.test(lower), false, "不应再出现 Codex/WorkBuddy/Claude Code 任务按钮节点");
+  assert.equal(/dispatchToCodexCode|dispatchToCodex\b/.test(appJsText), false, "不应再出现 Codex 调度逻辑");
+});
+
+// sk-* 脱敏不回归
+test("V0.6.7 T11a: app.js 仍含 sk-* 脱敏逻辑", () => {
+  // 脱敏可能用 inline regex（/[A-Za-z]*sk-[A-Za-z0-9_-]+/）或 named function
+  const hasInlineRedact = /sk-[A-Za-z0-9_-]+\s*\)/.test(appJsText);
+  const hasRedactFn = /redactSecretLikeText/.test(appJsText);
+  const hasRedactCall = /\bredact\b|\[redacted\]/i.test(appJsText);
+  assert.ok(hasInlineRedact || hasRedactFn || hasRedactCall, "sk-* 脱敏逻辑应保留");
+});
+
+// 默认不联网
+test("V0.6.7 T12a: webSearchToggle 默认无 checked 属性", () => {
+  const match = indexHtml.match(/<input[^>]+id="webSearchToggle"[^>]*>/);
+  assert.ok(match, "#webSearchToggle 应存在");
+  assert.equal(/checked/i.test(match[0]), false, "webSearchToggle 默认不应 checked");
+});
+
+// fixed viewport 不回归
+test("V0.6.7 T13a: body 有 overflow: hidden 约束（fixed viewport）", () => {
+  assert.ok(/html,\s*\n?\s*body[\s\S]{0,200}overflow\s*:\s*hidden/i.test(stylesCss) ||
+            /body\s*\{[^}]*overflow\s*:\s*hidden/.test(stylesCss), "body 应有 overflow: hidden 兜底");
+});
+
+// 战略回答区边框约束（empty / loading / answered 三态统一）
+test("V0.6.7 T14a: .answer 主规则有边框（answered 状态同样有边框）", () => {
+  // 排除 .answer.empty 与 .answer-loading，匹配基础 .answer {
+  const rule = stylesCss.match(/\.answer\s*\{[^}]*\}/);
+  assert.ok(rule, ".answer 应存在");
+  assert.ok(/border\s*:/.test(rule[0]), ".answer 应有边框");
+  assert.ok(/var\(--line\)/.test(rule[0]), ".answer 边框应使用 var(--line*) 系列");
+});
+
+// 不重新引入仓鼠跑轮（保持 V0.6.6 选定的 3D 盒子）
+test("V0.6.7 T15a: 默认 loading 仍是 3D 盒子（HTML 中 class=loading-spinner）", () => {
+  assert.ok(/class="loading-spinner"/.test(indexHtml), "HTML 应含 .loading-spinner 容器");
+});
+
+// footer 不显示（fixed viewport 模式下 footer 隐藏）
+test("V0.6.7 T16a: .footer 默认 display: none", () => {
+  const rule = stylesCss.match(/\.footer\s*\{[^}]*\}/);
+  assert.ok(rule, ".footer 应存在");
+  assert.ok(/display\s*:\s*none/.test(rule[0]), ".footer 应默认隐藏");
+});
+
+// opportunity-pool.json 不回归
+test("V0.6.7 T17a: .gitignore 仍排除 opportunity-pool.json 与 backups", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const gi = fs.readFileSync(path.join(__dirname, "..", ".gitignore"), "utf8");
+  // 接受任一形式
+  const hasPool = /opportunity-pool\.json|opportunity[\\/]pool|opportunity-pool/.test(gi) ||
+                  /opportunities[\\/]\*\.json/.test(gi) ||
+                  /opportunities[\\/]/.test(gi);
+  const hasBackups = /backups/.test(gi);
+  assert.ok(hasPool, ".gitignore 应排除 opportunity-pool.json（或 opportunities/*.json）");
+  assert.ok(hasBackups, ".gitignore 应排除 backups 路径");
 });
 

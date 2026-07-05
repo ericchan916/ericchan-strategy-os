@@ -25,6 +25,10 @@
   --radius-lg: 14px;
   --content-width: 1600px;
   --composer-height: 132px;
+  /* V0.6.7：淡橙 / 橙黄高亮 — 普通战透回答 strong / mark / em / h2 的重点色 */
+  --highlight-ink: #7a4a12;
+  --highlight-bg: rgba(245, 178, 87, 0.28);
+  --highlight-bg-strong: rgba(255, 194, 102, 0.45);
 }
 
 * {
@@ -1411,7 +1415,7 @@ h2 {
 }
 
 .answer {
-  min-height: 280px;
+  min-height: 360px;
   width: 100%;
   padding: 28px 32px 30px;
   border-radius: var(--radius-md);
@@ -1423,9 +1427,20 @@ h2 {
   max-width: 70ch;
 }
 
+/* V0.6.7：空状态与 loading 状态尺寸一致，避免从空态跳变到 loading 时跳动 */
 .answer.empty {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 64px 32px 56px;
   color: var(--muted-soft);
   font-style: italic;
+  font-size: 14.5px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: #ffffff;
 }
 
 .answer > :first-child {
@@ -1499,24 +1514,26 @@ h2 {
   color: inherit;
 }
 
-/* ---------------- V0.6.6 答案易读性 + 重点高光 ----------------
-   1) strong / mark 升级为非黑重点色 + linear-gradient 高光 + mix-blend-mode: multiply（高光与文本融合，不破坏字形）
-   2) box-decoration-break: clone 让高光在每行独立包裹（多行 strong 不破洞）
-   3) h2 章节标题添加 accent 顶边
-   4) 列表项 marker 沿用 accent，自然延伸
-   5) 段落节奏微调，提高可扫读性
-   ------------------------------------------------------- */
+/* ---------------- V0.6.7 答案易读性 + 淡橙 / 橙黄高光 ----------------
+   替换 V0.6.6 的绿色高亮为淡橙 / 橙黄系：
+   - 文字色 --highlight-ink (#7a4a12 暖棕)
+   - 高光背景 --highlight-bg (rgba(245,178,87,0.28))
+   - 继续 mix-blend-mode: multiply 让高光与纸张融合
+   - box-decoration-break: clone 让多行 strong 各自包裹
+   - em / h2 / list marker 全部沿用同一暖色体系
+   - code / pre 强制 mix-blend-mode: normal 避免代码块被高光污染
+   ----------------------------------------------------------------------- */
 
 .answer strong {
-  color: var(--accent-dark);
+  color: var(--highlight-ink);
   font-weight: 700;
-  /* 高光笔效果：透明到 accent 半透明的纵向渐变，70% 处开始填色 */
+  /* 高光笔效果：透明到 highlight 半透明的纵向渐变，56% 处开始填色 */
   background-image: linear-gradient(
     180deg,
     transparent 0%,
-    transparent 56%,
-    rgba(184, 222, 200, 0.55) 56%,
-    rgba(184, 222, 200, 0.55) 96%,
+    transparent 54%,
+    var(--highlight-bg) 54%,
+    var(--highlight-bg) 96%,
     transparent 96%
   );
   padding: 0 3px;
@@ -1529,9 +1546,9 @@ h2 {
 }
 
 .answer mark {
-  color: var(--accent-dark);
+  color: var(--highlight-ink);
   font-weight: 600;
-  background: rgba(184, 222, 200, 0.45);
+  background: var(--highlight-bg);
   padding: 0 3px;
   border-radius: 2px;
   -webkit-box-decoration-break: clone;
@@ -1541,7 +1558,7 @@ h2 {
 
 .answer em {
   font-style: normal;
-  color: var(--accent-dark);
+  color: var(--highlight-ink);
   font-weight: 600;
 }
 
@@ -1549,7 +1566,7 @@ h2 {
   position: relative;
   margin-top: 32px;
   padding-top: 12px;
-  color: var(--accent-dark);
+  color: var(--highlight-ink);
 }
 
 .answer h2::before {
@@ -1559,12 +1576,12 @@ h2 {
   left: 0;
   width: 22px;
   height: 2px;
-  background: var(--accent);
+  background: var(--highlight-ink);
   border-radius: 2px;
 }
 
 .answer h1 {
-  color: var(--accent-dark);
+  color: var(--highlight-ink);
 }
 
 .answer p {

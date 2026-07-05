@@ -1895,6 +1895,57 @@ V0.6.6 复用现有 loading 视觉语言 + 给答案区加克制高光系统；l
 - `npm test`：641 → 654（13 个新增 V0.6.6 测试覆盖 HTML loadingText id / min-height ≥ 360 / `.answer strong` 高光系统 / `.answer mark` / `.answer h2` 顶边 / ask / draft / Copy 不携带高亮污染 / 全局回归 / loading keyframes 完整保留 / reduced-motion 兜底）
 - `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`
 
+## V0.6.7 优化战略回答区布局与短回答约束
+
+V0.6.7 解决三个日用层问题：初始空状态回答框与 loading 尺寸不对、答案可读性不够、回答过长。前端改成淡橙 / 橙黄高光 + 边框约束，prompt 与 fallback 引入短回答约束；开工包不受影响。
+
+### 1. 初始空状态答案框与 loading 状态尺寸一致
+
+- `.answer` 与 `.answer.empty` 都使用 `min-height: 360px`，与 `.answer-loading` 一致，避免页面从空态切换到 loading 时跳动
+- `.answer.empty` 用 flex column + justify-content: center 让空状态文案视觉居中略上；padding 64px 32px 56px 留呼吸
+- `border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: #ffffff` —— 边框与 answered / loading 三态统一（仅颜色 / 粗细微调），不重卡片化
+
+### 2. 战略回答区边框约束
+
+- `.answer` 主规则使用 `border: 1px solid var(--line)`（k 优线）
+- `.answer.empty` 与 `.answer-loading` 用更浅的 `var(--line-soft)`，仍保持 1px 克制
+- 三态边框颜色统一为 var(--line*) 系列，不用纯黑
+- 不增加强阴影，不重卡片化，不与 Goal / 机会池卡片混淆
+
+### 3. 答案重点高亮改为淡橙 / 橙黄系
+
+- 新增 CSS variables：`--highlight-ink: #7a4a12`（暖棕）+ `--highlight-bg: rgba(245, 178, 87, 0.28)`（淡橙高光）+ `--highlight-bg-strong: rgba(255, 194, 102, 0.45)`（强调 mark）
+- `.answer strong`：`color: var(--highlight-ink)` + `background-image: linear-gradient` 高光笔（54% 处填色，96% 处透明）+ `box-decoration-break: clone` + `mix-blend-mode: multiply`
+- `.answer mark`、`em`、`h1`/`h2`（连同 `h2::before` 顶边线）全部切换到 `--highlight-ink`
+- `.answer code` / `.answer pre` 强制 `mix-blend-mode: normal`，代码块不被高光笔污染
+- V0.6.6 的绿色高光系统被完整替换；不再用 accent-dark / var(--accent) 作 strong 主色
+- 复制内容仍只走 `buildClipboardPayload` 纯文本，不带 CSS / HTML 高亮污染
+
+### 4. 普通 / 搜索 / fallback Ask 更短
+
+在 `prompts/ask-mode-system-prompt.md` 与 `scripts/ask-strategy-os.js` 的 `ASK_MODE_SYSTEM_PROMPT_FALLBACK` 中加入短回答约束：
+
+- **普通 Ask**：总长度控制在 260-420 中文字，最多 4 个小段，最多 5 个 bullet；**必须先给结论**再给理由 / 下一步；只保留三类信息（判断 / 理由 / 下一步）
+- **联网 Ask**：总长度 400-600 中文字，只列最关键的 3 条外部信息，**不逐条长篇复述来源**
+- **fallback 模板**：同样按普通 Ask 短约束输出
+- **Goal / 今日优先级**：直接回答"今天该做什么"，不列过多备选
+
+### 不动的部分
+
+- **不受短回答约束影响**：项目体检（Project Checkup 10 节骨架）、项目开工包（Kickoff Package 10 节骨架）、智能草稿（`/api/opportunities/draft`）、搜索来源展示、复制内容真实性
+- LLM provider / baseURL / API Key / Search provider（Bocha / Tavily）/ opportunity-store 数据结构均不触碰
+- loading 动画本体 / keyframes（Uiverse 仓鼠跑轮 + 3D 备份 spinner）未改
+- 固定视口工作台 + body overflow: hidden + 三个局部滚动区不回归
+- Goal idle/edit 分层、按锄动效、机会池按钮"机会池 → ＋"动效不回归
+- Codex / Claude Code 任务按钮不恢复
+- 默认不联网 + sk-* 全链路脱敏不变
+
+### 回归断言
+
+- `npm test`：654 → 683（29 个新增 V0.6.7 测试：empty / loading 尺寸一致 + 三态边框统一 + highlight-ink/bg CSS 变量 + strong / mark 使用 highlight 色 + code/pre mix-blend-mode normal + prompt 含 260-420 字约束 + fallback 含短语义 + 开工包仍用独立 prompt + 推荐问题位于回答上方 + × 清空按钮保留 + sk-* 脱敏保留 + .gitignore 仍排除 backups / opportunity-pool.json + Codex/WorkBuddy/Claude 按钮不恢复 + .footer display: none + reduced-motion 兜底）。
+- `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`，不暴露 `0.0.0.0` / `::`。
+- 端到端：普通 Ask "今天适合做什么？" 走 LLM 短回答约束；kickoff 不受影响。
+
 ## V0.6.5 精修 Goal 展示并简化任务按钮
 
 V0.6.5 真正把 Goal 编辑表单从 idle 状态脱掉布局、移除两个多余任务按钮；不动后端、不动 loading、不改 API。
