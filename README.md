@@ -1848,6 +1848,43 @@ V0.6.3-hotfix 修复的是安全回归，不新增功能。
 - 默认不联网原则不变；LLM 动态回答、按需联网搜索、Goal 匹配度、今日优先级、固定视口工作台不变。
 - loading 动画未修改；`.env`、`opportunity-pool.json`、`data/opportunities/backups` 不提交。
 
+## V0.6.5 精修 Goal 展示并简化任务按钮
+
+V0.6.5 真正把 Goal 编辑表单从 idle 状态脱掉布局、移除两个多余任务按钮；不动后端、不动 loading、不改 API。
+
+**Goal idle / edit 彻底分离**
+
+- 根因：V0.6.4 用 `hidden` 属性隐藏 `#goalForm`，但 `.goal-form { display: flex }` 优先级高于 UA 的 `[hidden] { display: none }`，编辑框其实仍占据 flex 行高。
+- V0.6.5 改用 `.goal-form.is-open` 类切换 + `visibility: hidden + max-height: 0 + opacity: 0 + transform: translateY(-4px)`：
+  - idle 时表单完全脱布局 / 脱 Tab 顺序 / 脱 a11y 树（input/save/cancel/clear 全部 `tabindex="-1"`，form `aria-hidden="true"`）
+  - 编辑态加 `.is-open` 才进入布局 + 可聚焦 + 进入 a11y 树
+  - 过渡 220–280ms ease（`max-height` + `opacity` + `transform` + `margin-top` + `visibility`），克制丝滑
+- 当前目标正文从 13.5px / 400 提到 **17px / 600**，作为主展示内容；空状态文案从"未设置"改成更克制的"尚未设置当前目标"
+- `.goal-anchor` 卡片化升级（`padding: 14px 18px 16px` + `box-shadow: var(--shadow-sm)` + 更饱和的 panel-strong 背景），更像"当前战略方向卡片"，不像输入表单
+- `prefers-reduced-motion` 下退化为 0ms transition + 无 transform，仍正常开关
+- 弱化"清除目标"仍然只在编辑态内部显示（`margin-left: auto`，与编辑控件视觉脱钩）
+
+**简化任务按钮**
+
+- 删除 V0.4.5 引入的 `#copyCodexTaskButton` 和 `#copyClaudeTaskButton` 两个 DOM 节点。
+- 用户认为它们在 UI 上造成操作噪音；保留：普通 `copyButton` / `addOpportunityButton` / 开工包生成能力 / `.task-copy-button` CSS（保留为未使用样式不增加风险）。
+- kickoff-package 历史恢复后也不再展示这两个按钮（DOM 已删）。
+- `app.js` 移除挂监听代码；`handleTaskPromptCopy` / `handleCodexTaskCopy` 等函数保留为内部 API（低风险，dead code），未来若需要可快速回接。
+
+**保持不变**
+
+- 固定视口工作台 + body 不滚动 + 三个局部滚动区不回归。
+- loading 动画（Uiverse 仓鼠跑轮 + 3D 备份 spinner）未触碰。
+- 默认不联网 + sk-* 全链路脱敏 + Bocha / Tavily provider + LLM 配置不变。
+- 提问按钮"提问 → 发送"动效不回归。
+- 机会池按钮"机会池 → ＋"动效不回归。
+- 后端逻辑 / API / 数据结构 / opportunity-pool.json 不动；`.env`、opportunity-pool.json、data/opportunities/backups 不提交。
+
+**回归断言**
+
+- `npm test`：634 → 641（7 个新增 V0.6.5 测试覆盖：idle 时 `.is-open` 不存在 / `aria-hidden="true"` / 当前目标字号 ≥17px / CSS `.goal-form` 默认隐藏态 / `.is-open` 显隐态 / reduced-motion 兜底 / 任务按钮 DOM 不存在）。
+- `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`，不暴露 `0.0.0.0` / `::`。
+
 ## V0.6.4 优化按钮动效与 Goal 编辑体验
 
 V0.6.4 在克制的前提下补两块交互手势，并改造 Goal 区域的常驻结构；不动后端逻辑、不动 loading、不改 API。

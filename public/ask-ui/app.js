@@ -1111,6 +1111,8 @@ function createApp(deps) {
   const copyButton = nodes.copyButton;
   const copyCodexTaskButton = nodes.copyCodexTaskButton;
   const copyClaudeTaskButton = nodes.copyClaudeTaskButton;
+  void copyCodexTaskButton;
+  void copyClaudeTaskButton;
   const answerLoading = nodes.answerLoading;
   const webSearchToggle = nodes.webSearchToggle;
   const searchSourcesNode = nodes.searchSources;
@@ -1128,10 +1130,11 @@ function createApp(deps) {
   const opportunityPanelNode = nodes.opportunityPanel;
   const currentGoalText = nodes.currentGoalText;
   const goalEditButton = nodes.goalEditButton;
+  const goalSaveButton = nodes.goalSaveButton;
+  const goalCancelButton = nodes.goalCancelButton;
   const goalClearButton = nodes.goalClearButton;
   const goalForm = nodes.goalForm;
   const goalInput = nodes.goalInput;
-  const goalCancelButton = nodes.goalCancelButton;
   // V0.3.11-hotfix-3：输入框右侧 × 清空按钮
   const clearInputButton = nodes.clearInputButton;
   const confirmImpl = deps.confirmImpl || ((message) => (typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : true));
@@ -1230,8 +1233,10 @@ function createApp(deps) {
     const goal = normalizeCurrentGoal(state.currentGoal);
     state.currentGoal = goal;
     if (currentGoalText) {
-      currentGoalText.textContent = goal || "未设置";
-      currentGoalText.title = goal || "未设置";
+      // V0.6.5：空状态用更克制的"尚未设置当前目标"代替"未设置"
+      const displayText = goal || "尚未设置当前目标";
+      currentGoalText.textContent = displayText;
+      currentGoalText.title = displayText;
       currentGoalText.setAttribute("data-empty", goal ? "false" : "true");
     }
     // V0.6.4：修改按钮变成图标按钮；title 与 aria-label 跟是否已设置联动
@@ -1240,18 +1245,28 @@ function createApp(deps) {
       goalEditButton.setAttribute("aria-label", editLabel);
       goalEditButton.setAttribute("title", editLabel);
     }
-    // V0.6.4：清除按钮只在编辑态显示（弱化），由 openGoalEditor / hideGoalEditor 控制
+    // V0.6.5：清除按钮只在编辑态显示（弱化），由 openGoalEditor / closeGoalEditor 控制
     if (goalClearButton) goalClearButton.hidden = true;
-    if (goalForm) goalForm.hidden = true;
+    // V0.6.5：用 .is-open class 切换；默认 CSS 已把表单真正脱布局 + 脱 tab 顺序 + 脱 a11y 树
+    if (goalForm) {
+      goalForm.classList.remove("is-open");
+      goalForm.setAttribute("aria-hidden", "true");
+    }
+    // 把 tab 顺序还给 idle 控件
+    toggleGoalChildrenTabbable(false);
     state.goalEditing = false;
   }
 
   function openGoalEditor() {
     if (!goalForm || !goalInput) return;
     goalInput.value = state.currentGoal || "";
-    goalForm.hidden = false;
+    // V0.6.5：class 切换 + tab/a11y 同步；CSS 负责丝滑动效
+    goalForm.classList.add("is-open");
+    goalForm.setAttribute("aria-hidden", "false");
     // V0.6.4：仅在编辑态显示弱化"清除目标"
     if (goalClearButton) goalClearButton.hidden = !state.currentGoal;
+    // 编辑态子控件重新进入 tab 顺序
+    toggleGoalChildrenTabbable(true);
     state.goalEditing = true;
     if (typeof goalInput.focus === "function") goalInput.focus();
     if (typeof goalInput.setSelectionRange === "function") {
@@ -1260,9 +1275,25 @@ function createApp(deps) {
   }
 
   function closeGoalEditor() {
-    if (goalForm) goalForm.hidden = true;
+    if (goalForm) {
+      goalForm.classList.remove("is-open");
+      goalForm.setAttribute("aria-hidden", "true");
+    }
     if (goalClearButton) goalClearButton.hidden = true;
+    // 关掉编辑态子控件的 tab 顺序
+    toggleGoalChildrenTabbable(false);
     state.goalEditing = false;
+  }
+
+  // V0.6.5：编辑态子控件 tab 顺序控制；idle 状态确保不抢焦点
+  function toggleGoalChildrenTabbable(editing) {
+    if (!goalForm) return;
+    const tabbable = [goalInput, goalSaveButton, goalCancelButton, goalClearButton];
+    for (const el of tabbable) {
+      if (!el) continue;
+      if (editing) el.removeAttribute("tabindex");
+      else el.setAttribute("tabindex", "-1");
+    }
   }
 
   function saveGoalFromInput() {
@@ -2148,12 +2179,7 @@ function createApp(deps) {
     if (copyButton) {
       copyButton.addEventListener("click", handleCopy);
     }
-    if (copyCodexTaskButton) {
-      copyCodexTaskButton.addEventListener("click", () => handleTaskPromptCopy("codex"));
-    }
-    if (copyClaudeTaskButton) {
-      copyClaudeTaskButton.addEventListener("click", () => handleTaskPromptCopy("claude"));
-    }
+    // V0.6.5：移除"复制为 Codex / Claude Code 任务"按钮（DOM 已删除），无按钮可挂
     if (addOpportunityButton) {
       addOpportunityButton.addEventListener("click", () => {
         if (state.inFlight) return;

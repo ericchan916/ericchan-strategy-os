@@ -53,12 +53,25 @@ function makeFakeNodes() {
   const fakeEl = (overrides = {}) => {
     const listeners = {};
     const attrs = {};
+    const classes = new Set();
+    const classList = {
+      add: (...names) => names.forEach((n) => classes.add(n)),
+      remove: (...names) => names.forEach((n) => classes.delete(n)),
+      contains: (name) => classes.has(name),
+      toggle: (name, force) => {
+        if (force === true) classes.add(name);
+        else if (force === false) classes.delete(name);
+        else if (classes.has(name)) classes.delete(name);
+        else classes.add(name);
+        return classes.has(name);
+      }
+    };
     const el = {
       value: "",
       innerHTML: "",
       textContent: "",
       title: "",
-      classList: { add() {}, remove() {}, contains() { return false; } },
+      classList,
       hidden: false,
       disabled: false,
       appendChild() {},
@@ -119,6 +132,7 @@ function makeFakeNodes() {
     goalClearButton: fakeEl({ hidden: true }),
     goalForm: fakeEl({ hidden: true }),
     goalInput: fakeEl(),
+    goalSaveButton: fakeEl({ hidden: true }),
     goalCancelButton: fakeEl()
   };
 }
@@ -392,13 +406,16 @@ test("HTML 含复制回答按钮 (id 或 aria-label)", () => {
   assert.ok(hasCopy, "缺少复制回答按钮");
 });
 
-test("V0.4.5: HTML 含开工包专属任务复制按钮与区别说明", () => {
-  assert.ok(/id="copyCodexTaskButton"/.test(indexHtml), "缺少 Codex 任务复制按钮");
-  assert.ok(/id="copyClaudeTaskButton"/.test(indexHtml), "缺少 Claude Code 任务复制按钮");
-  assert.ok(indexHtml.includes("复制为 Codex 任务"));
-  assert.ok(indexHtml.includes("复制为 Claude Code 任务"));
-  assert.ok(indexHtml.includes("偏工程代码、后端逻辑、脚本、测试、Git、安全边界"));
-  assert.ok(indexHtml.includes("偏前端页面、UI、交互、视觉、真实网页验证"));
+test("V0.6.5: HTML 不再含 Codex / Claude Code 任务复制按钮", () => {
+  // V0.6.5 简化任务按钮：前端不再展示这两个按钮
+  assert.equal(/id="copyCodexTaskButton"/.test(indexHtml), false, "不应再渲染 copyCodexTaskButton");
+  assert.equal(/id="copyClaudeTaskButton"/.test(indexHtml), false, "不应再渲染 copyClaudeTaskButton");
+  // 用户不应在页面看到"复制为 Codex 任务"或"复制为 Claude Code 任务"的可见文案
+  assert.equal(/复制为 Codex 任务/.test(indexHtml), false, "不应再出现「复制为 Codex 任务」可见文案");
+  assert.equal(/复制为 Claude Code 任务/.test(indexHtml), false, "不应再出现「复制为 Claude Code 任务」可见文案");
+  // 但开工包 / 普通复制 / 机会池 仍保留
+  assert.ok(/id="copyButton"/.test(indexHtml), "应保留普通 copyButton");
+  assert.ok(/id="addOpportunityButton"/.test(indexHtml), "应保留机会池按钮");
 });
 
 test("V0.4.5: 战略回答区域不再显示范围 / 搜索冗余 meta 信息块", () => {
@@ -2466,11 +2483,13 @@ test("V0.5: 设置 / 修改 / 清除 currentGoal 更新 storage 和 UI", () => {
     fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
   });
   app.mount();
-  assert.equal(nodes.currentGoalText.textContent, "未设置");
+  // V0.6.5：空状态文案改成"尚未设置当前目标"以更克制
+  assert.equal(nodes.currentGoalText.textContent, "尚未设置当前目标");
   assert.equal(nodes.currentGoalText.getAttribute("data-empty"), "true");
 
   app.openGoalEditor();
-  assert.equal(nodes.goalForm.hidden, false);
+  // V0.6.5：用 class 切换取代 [hidden]，断言改用 classList
+  assert.equal(nodes.goalForm.classList.contains("is-open"), true, "编辑态应带 is-open 类");
   nodes.goalInput.value = "用战略OS筛选适合独立开发者的小型 AI 产品 sk-uiGoal123456";
   app.saveGoalFromInput();
   assert.equal(app.state.currentGoal.includes("sk-uiGoal123456"), false);
@@ -2479,8 +2498,11 @@ test("V0.5: 设置 / 修改 / 清除 currentGoal 更新 storage 和 UI", () => {
 
   app.clearCurrentGoal();
   assert.equal(app.state.currentGoal, "");
-  assert.equal(nodes.currentGoalText.textContent, "未设置");
+  // V0.6.5：空状态文案为"尚未设置当前目标"
+  assert.equal(nodes.currentGoalText.textContent, "尚未设置当前目标");
   assert.equal(storage.getItem(CURRENT_GOAL_KEY), null);
+  // 清除后表单应回到 idle（无 is-open 类）
+  assert.equal(nodes.goalForm.classList.contains("is-open"), false);
 });
 
 test("V0.6: Goal 修改 / 清除后机会池重新请求派生优先级", async () => {
@@ -2829,7 +2851,8 @@ test("V0.4.4: 点击 Claude Code 任务按钮写入脱敏任务提示词", async
   assert.equal(nodes.copyClaudeTaskButton.textContent, "已复制");
 });
 
-test("V0.4.5: 任务复制按钮真实 click listener 会写入 clipboard", async () => {
+test("V0.6.5: 任务复制按钮不再绑定 click 监听，写入 clipboard 为 0", async () => {
+  // V0.6.5：Codex / Claude Code 任务按钮从 DOM 删除；保留 handler 但 click 后不会触发
   const written = [];
   const nodes = makeFakeNodes();
   const app = createApp({
@@ -2845,13 +2868,19 @@ test("V0.4.5: 任务复制按钮真实 click listener 会写入 clipboard", asyn
     question: "生成开工包",
     answerType: "kickoff-package"
   });
-  nodes.copyCodexTaskButton.click();
-  nodes.copyClaudeTaskButton.click();
+  // fakeEl click() 在 setAttribute/setState 注册的 listener 上 fire；mount 不再注册
+  // task-copy button listener，所以 clipboard 应保持空
+  if (nodes.copyCodexTaskButton && typeof nodes.copyCodexTaskButton.click === "function") {
+    nodes.copyCodexTaskButton.click();
+  }
+  if (nodes.copyClaudeTaskButton && typeof nodes.copyClaudeTaskButton.click === "function") {
+    nodes.copyClaudeTaskButton.click();
+  }
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(written.length, 2);
-  assert.ok(written[0].includes("Git 要求"));
-  assert.ok(written[1].includes("真实网页验证要求"));
-  assert.equal(written.join("\n").includes("sk-clickSecret123456"), false);
+  assert.equal(written.length, 0, "Codex/Claude Code 按钮不再触发 clipboard 写入");
+  // kickoff-package 内核仍可用：通过 app.handleCodexTaskCopy 调用能拿到 prompt（API 仍保留）
+  // 但默认 UI 不再展示这些按钮
+  assert.equal(/id="copyCodexTaskButton"/.test(indexHtml), false, "HTML 已删除 copyCodexTaskButton");
 });
 
 test("V0.4.4: 任务复制 clipboard 失败时不抛异常", async () => {
@@ -3459,7 +3488,7 @@ test("V0.6.4: 机会池按钮尺寸锁定（min-width 防 '机会池 → ＋' �
   assert.ok(minWidth && Number(minWidth) >= 64, `.add-opportunity-button min-width 应 ≥ 64px 防抖动，实际 ${minWidth}`);
 });
 
-test("V0.6.4: openGoalEditor 进入编辑态后 weak 清除按钮可见，关闭后隐藏", () => {
+test("V0.6.5: openGoalEditor 进入编辑态后 .is-open 切换 + 弱化清除按钮显隐同步", () => {
   const nodes = makeFakeNodes();
   const app = createApp({
     nodes,
@@ -3467,29 +3496,32 @@ test("V0.6.4: openGoalEditor 进入编辑态后 weak 清除按钮可见，关闭
     fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
   });
   app.mount();
-  // idle：编辑表单 / 清除按钮都不应显示
-  assert.equal(nodes.goalForm.hidden, true);
+  // idle：编辑表单不带 .is-open，清除按钮应隐藏
+  assert.equal(nodes.goalForm.classList.contains("is-open"), false);
   assert.equal(nodes.goalClearButton.hidden, true);
   assert.equal(app.state.goalEditing, false);
+  assert.equal(nodes.goalForm.getAttribute("aria-hidden"), "true", "idle 应把表单脱离 a11y 树");
 
-  // 设置一个目标 → 再进编辑：弱化清除按钮应可见
+  // 设置一个目标 → 再进编辑：弱化清除按钮应可见 + .is-open 加上
   nodes.goalInput.value = "战略测试目标";
   app.saveGoalFromInput();
   assert.equal(app.state.currentGoal, "战略测试目标");
 
   app.openGoalEditor();
-  assert.equal(nodes.goalForm.hidden, false);
+  assert.equal(nodes.goalForm.classList.contains("is-open"), true, "openGoalEditor 应添加 is-open 类");
   assert.equal(nodes.goalClearButton.hidden, false, "编辑态有目标时清除按钮应可见");
   assert.equal(app.state.goalEditing, true);
+  assert.equal(nodes.goalForm.getAttribute("aria-hidden"), "false", "open 应让表单回到 a11y 树");
 
   // 关闭编辑态
   app.closeGoalEditor();
-  assert.equal(nodes.goalForm.hidden, true);
+  assert.equal(nodes.goalForm.classList.contains("is-open"), false, "closeGoalEditor 应移除 is-open 类");
   assert.equal(nodes.goalClearButton.hidden, true, "关闭编辑态后清除按钮应再次隐藏");
   assert.equal(app.state.goalEditing, false);
+  assert.equal(nodes.goalForm.getAttribute("aria-hidden"), "true", "关闭应让表单离开 a11y 树");
 });
 
-test("V0.6.4: openGoalEditor 在 idle 未设目标时清除按钮仍隐藏", () => {
+test("V0.6.5: openGoalEditor 在 idle 未设目标时清除按钮仍隐藏", () => {
   const nodes = makeFakeNodes();
   const app = createApp({
     nodes,
@@ -3498,9 +3530,84 @@ test("V0.6.4: openGoalEditor 在 idle 未设目标时清除按钮仍隐藏", () 
   });
   app.mount();
   app.openGoalEditor();
-  // idle 没目标：编辑态可见，但弱化清除按钮不应出现
-  assert.equal(nodes.goalForm.hidden, false);
+  // idle 没目标：编辑表单进入 .is-open 状态，但弱化清除按钮不应出现
+  assert.equal(nodes.goalForm.classList.contains("is-open"), true);
   assert.equal(nodes.goalClearButton.hidden, true, "idle 无目标时清除按钮不显示");
+});
+
+test("V0.6.5: CSS .goal-form 默认隐藏样式（max-height:0 + visibility:hidden + opacity:0）", () => {
+  // 提取 .goal-form 主规则（不是 prefers-reduced-motion 覆盖）
+  const rule = stylesCss.match(/\.goal-form\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "应存在 .goal-form 主规则");
+  const target = rule[0];
+  assert.ok(/max-height\s*:\s*0/.test(target), ".goal-form 默认 max-height 应为 0");
+  assert.ok(/visibility\s*:\s*hidden/.test(target), ".goal-form 默认 visibility 应为 hidden");
+  assert.ok(/opacity\s*:\s*0/.test(target), ".goal-form 默认 opacity 应为 0");
+  assert.ok(/overflow\s*:\s*hidden/.test(target), ".goal-form 默认 overflow 应为 hidden");
+  // idle 不进 .is-open，因此根本不会占据布局
+});
+
+test("V0.6.5: CSS .goal-form.is-open 显隐样式", () => {
+  const rule = stylesCss.match(/\.goal-form\.is-open\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "应存在 .goal-form.is-open 规则");
+  const target = rule[0];
+  assert.ok(/max-height\s*:\s*120px/.test(target), ".is-open max-height 应为 120px");
+  assert.ok(/visibility\s*:\s*visible/.test(target), ".is-open visibility 应为 visible");
+  assert.ok(/opacity\s*:\s*1/.test(target), ".is-open opacity 应为 1");
+});
+
+test("V0.6.5: CSS supports prefers-reduced-motion 兜底 Goal 表单", () => {
+  // 把所有 prefers-reduced-motion 媒体块拼起来检查
+  const blocks = stylesCss.match(/@media\s*\(prefers-reduced-motion\s*:\s*reduce\)[\s\S]*?(?=\n\s*@media|\s*$)/g) || [];
+  assert.ok(blocks.length > 0, "应至少一个 prefers-reduced-motion 媒体查询");
+  const combined = blocks.join("\n");
+  // reduced-motion 下 .goal-form 应无 transition；可能写在任一块中
+  assert.ok(/\.goal-form[\s\S]*?transition\s*:\s*none/.test(combined), "reduced-motion 下 .goal-form 应无 transition");
+});
+
+test("V0.6.5: HTML goalForm 不应再带 hidden 属性（V0.6.4 用 class 切换取代 [hidden]）", () => {
+  // 抓 #goalForm 块
+  const formBlock = indexHtml.match(/<form[^>]+id="goalForm"[^>]*>/);
+  assert.ok(formBlock, "应能找到 #goalForm 节点");
+  const opening = formBlock[0];
+  // 不应出现独立 hidden 属性（用空格 / 引号限定，避开 aria-hidden 中的 hidden 子串）
+  assert.equal(/(?:^|\s)hidden(?:=|\s|>)/.test(opening), false, "goalForm opening tag 不应再带 hidden 属性");
+  assert.ok(/aria-hidden="true"/.test(opening), "goalForm 默认应 aria-hidden=true");
+});
+
+test("V0.6.5: 当前目标正文 CSS 加大字号（≥17px）以成为主展示内容", () => {
+  const rule = stylesCss.match(/\.goal-text\s*\{[\s\S]*?\n\s*\}/);
+  assert.ok(rule, "应存在 .goal-text 规则");
+  const fs = (rule[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/) || [])[1];
+  assert.ok(fs && Number(fs) >= 17, ".goal-text font-size 应 ≥ 17px 作为主展示，实际 " + fs);
+});
+
+test("V0.6.5: 开机包 / 普通复制按钮仍保留", () => {
+  assert.ok(/id="copyButton"/.test(indexHtml), "应保留普通 copyButton");
+  assert.ok(/id="addOpportunityButton"/.test(indexHtml), "应保留机会池按钮");
+});
+
+test("V0.6.5: app 启动 (mount) 时不挂 task-copy button click 监听", () => {
+  // V0.6.5：Codex / Claude Code 按钮已从 DOM 删除，mount 不再 addEventListener
+  // 通过 fake node click 不触发 clipboard 写入来验证
+  const written = [];
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    clipboardImpl: async (text) => { written.push(text); },
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  // 设置 kickoff-package 状态，确保如旧逻辑会尝试让按钮可见
+  app.setCurrentAnswer("# 开工包\n内容。", "local", {
+    question: "生成开工包",
+    answerType: "kickoff-package"
+  });
+  // 即使 fake 节点上挂着 click，mount 也不挂 listener（无写入发生）
+  // 此外调用 handleCodexTaskCopy 还能工作（API 保留）
+  // 但默认 UI 不展示这些按钮
+  assert.equal(written.length, 0, "默认不应自动写 clipboard");
 });
 
 test("V0.6.4: edit 按钮 aria-label 跟随存储目标切换", () => {

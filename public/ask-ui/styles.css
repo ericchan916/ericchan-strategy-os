@@ -131,21 +131,49 @@ h1 {
 }
 
 .goal-anchor {
-  margin-top: 12px;
+  margin-top: 14px;
   width: min(820px, 100%);
-  padding: 10px 14px 11px;
+  padding: 14px 18px 16px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.7);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  box-shadow: var(--shadow-sm);
 }
 
-.goal-view,
+.goal-view {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* V0.6.5：编辑表单默认不占布局、不进 tab 顺序；.is-open 切换展现 */
 .goal-form {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  max-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  overflow: hidden;
+  pointer-events: none;
+  margin-top: 0;
+  transition: max-height 280ms ease, opacity 220ms ease, transform 220ms ease,
+    margin-top 240ms ease, visibility 0s linear 280ms;
+}
+
+.goal-form.is-open {
+  max-height: 120px;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+  margin-top: 12px;
+  transition: max-height 280ms ease, opacity 220ms ease, transform 220ms ease,
+    margin-top 240ms ease, visibility 0s linear 0s;
 }
 
 .goal-label {
@@ -162,15 +190,21 @@ h1 {
   flex: 1 1 auto;
   max-width: 100%;
   overflow: hidden;
-  color: var(--ink-soft);
-  font-size: 13.5px;
-  line-height: 1.5;
+  color: var(--ink);
+  /* V0.6.5：当前目标正文更大、更突出，作为主展示内容 */
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.45;
+  /* V0.5 保留单行省略以防止固定视口撑破，但允许最多 2 行裁切感 */
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .goal-text[data-empty="true"] {
-  color: var(--muted-soft);
+  color: var(--muted);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0.01em;
 }
 
 .goal-button {
@@ -1560,6 +1594,12 @@ h2 {
   }
   .primary-button:hover {
     transform: none;
+  }
+  /* V0.6.5：Goal 编辑表单开/合动效降级为 0ms（避免固定视口被打乱） */
+  .goal-form,
+  .goal-form.is-open {
+    transition: none;
+    transform: none !important;
   }
   /* 完整仓鼠跑轮在 reduced-motion 下静止：保留静态首帧，仍能看出仓鼠与滚轮，无旋转。 */
   .wheel-and-hamster *,
