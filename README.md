@@ -1803,6 +1803,40 @@ V0.6.1-hotfix 修复的是运行链路稳定性，不新增功能。
 - 默认不联网原则不变，搜索 checkbox 不会默认勾选。
 - 固定视口工作台、Goal 匹配度、今日优先级、Bocha / Tavily provider、loading 动画和 `opportunity-pool.json` 不提交原则不变。
 
+## V0.6.2 精修战略OS视觉层级
+
+V0.6.2 只在视觉层做低风险精修，不新增功能、不动后端、不动 loading、不动 API。
+
+**视觉流程**
+
+- 第一步：使用 Impeccable 完成 22 维度的视觉审查（包括第一眼工作台感、三栏比例、回答区是否为主角、机会池决策面板感、Goal 区方向锚点感、按钮层级、字号层级、滚动区辨识度等）。
+- 第二步：基于审查结论，对照 Apple / Linear / Vercel / Bloomberg Terminal / 高级科幻电影 OS UI 等气质参考做低风险 polish。
+- 第三步：只在 `public/ask-ui/styles.css` 内调整字重 / 内边距 / token 微对比，不换色相、不加图标库、不加 UI 框架。
+- 第四步：跑 `npm test` 与真实 `127.0.0.1:5177` 访问，逐区核对回归。
+
+**重点优化的视觉层级**
+
+- Hero 区收紧：H1 改为 `clamp(28px, 3.8vw, 38px)`、副标题 17→15.5、状态 pill 12.5→11.5 并更克制，让中栏回答区视觉下沉为主角。
+- Goal 区变成"方向锚点卡"：增加低对比透明 panel-strong 卡、长 goal 在桌面端保持单行省略以保住固定视口、移动端走原 900px 媒体查询策略。
+- 主舞台 / 战略回答：`output-panel` 28/32 + `answer` `min-height: 280` `padding: 28/32` `font-size: 16px`，让回答区与推荐问题在视觉上有清晰主从。
+- 字号层级纠正：h2 15→16、panel-hint 加 `letter-spacing: 0.04em`、与副标题不再反直觉；修复"h2 比副标题还小"的视觉倒挂。
+- 今日机会池更像决策面板：`.opportunity-item--today` 增加 `inset 3px` 内嵌色条 + bg 加强，今日优先级更明确；`.opportunity-next` 去掉 `border-left` 颜色条，改成完整边 + soft accent 背景，nextAction 不再像告警框。
+- 任务复制按钮视觉权重提升：`.task-copy-button` 从 dashed 透明改为实边 + 0.8125rem + 字重 500，与小 34×34 `.copy-button` 拉开主次。
+- Composer 命令栏化：去掉大柔阴影改 1px 硬边 + 收紧 padding + 清空按钮弱化，桌面端更像"桌面软件命令栏"而非聊天输入框。
+- 机会池 goal-chip 字重 600、padding 微调，badge 可读但不抢眼。
+
+**保持不变**
+
+- 固定视口工作台 + body 不滚动 + 三个局部滚动区不回归。
+- loading 动画（Uiverse 仓鼠跑轮 + 3D 备份 spinner）不动结构、不动 `@keyframes`、不动圆环中轴。
+- 默认不联网 + sk-* 脱敏 + Bocha / Tavily provider + LLM 配置不变。
+- 后端逻辑 / API / 数据结构 / `opportunity-pool.json` 不动；`opportunity-pool.json` 与 `.env` 不提交。
+
+**回归断言**
+
+- `npm test` 612 / 612 passing。
+- `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`，不暴露 `0.0.0.0` / `::`。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。
