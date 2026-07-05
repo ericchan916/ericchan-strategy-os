@@ -2448,8 +2448,13 @@ test("V0.5: mount 从 localStorage 读取当前目标并更新 UI", () => {
   app.mount();
   assert.equal(app.state.currentGoal, "优先寻找 7 天内验证的 AI 工具型 MVP");
   assert.equal(nodes.currentGoalText.textContent, "优先寻找 7 天内验证的 AI 工具型 MVP");
-  assert.equal(nodes.goalEditButton.textContent, "修改");
-  assert.equal(nodes.goalClearButton.hidden, false);
+  // V0.6.4：修改按钮改为图标按钮 + 弱化"清除目标" 移到编辑态
+  assert.equal(nodes.goalEditButton.getAttribute("aria-label"), "修改当前目标");
+  assert.equal(nodes.goalEditButton.getAttribute("title"), "修改当前目标");
+  // idle 状态清除按钮不显示（V0.6.4 规范）
+  assert.equal(nodes.goalClearButton.hidden, true);
+  // 编辑态未激活
+  assert.equal(app.state.goalEditing, false);
 });
 
 test("V0.5: 设置 / 修改 / 清除 currentGoal 更新 storage 和 UI", () => {
@@ -3036,10 +3041,41 @@ test("V0.3.11-hotfix-3 A3: warning chip 样式 - border-radius 999px", () => {
 
 // ============== V0.3.11-hotfix-3 Phase B: 机会池按钮精简 ==============
 
-test("V0.3.11-hotfix-3 B1: index.html 按钮只含 icon span，不含 add-opportunity-text span", () => {
-  // V0.3.11-hotfix-3：删除 .add-opportunity-text span，按钮只显示 + 图标
-  assert.equal(/class="add-opportunity-text"/.test(indexHtml), false, "不应再有 add-opportunity-text span");
-  assert.ok(/class="add-opportunity-icon"/.test(indexHtml), "应保留 add-opportunity-icon span");
+test("V0.6.4: index.html 提问按钮含双 motion-label 层（提问 + 发送）", () => {
+  // 提问按钮应同时含 default + hover 两个 motion-label 子层
+  const askMatch = indexHtml.match(/<button[^>]+id="askButton"[\s\S]*?<\/button>/);
+  assert.ok(askMatch, "应能找到 askButton 块");
+  const inner = askMatch[0];
+  assert.ok(/motion-label--default/.test(inner), "提问按钮应含 motion-label--default 层");
+  assert.ok(/motion-label--hover/.test(inner), "提问按钮应含 motion-label--hover 层");
+  // 默认层文字 "提问"
+  const defaultText = inner.match(/<span[^>]+class="[^"]*motion-label--default[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(defaultText, "应能找到 motion-label--default span");
+  assert.equal(defaultText[1].trim(), "提问", "默认层文字应为「提问」");
+  // hover 层文字 "发送"
+  const hoverText = inner.match(/<span[^>]+class="[^"]*motion-label--hover[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(hoverText, "应能找到 motion-label--hover span");
+  assert.equal(hoverText[1].trim(), "发送", "hover 层文字应为「发送」");
+  // aria-label 应作为唯一 accessible name
+  assert.ok(/aria-label="发送提问"/.test(inner), "应设置 aria-label=\"发送提问\"");
+  assert.equal(/aria-label="[^"]*"/.test(inner) && (inner.match(/aria-label="/g) || []).length, 1, "提问按钮只允许一个 aria-label");
+});
+
+test("V0.6.4: index.html 机会池按钮含双 motion-label 层（机会池 + ＋）", () => {
+  // 机会池按钮应改用 motion-label 系统
+  const match = indexHtml.match(/<button[^>]+id="addOpportunityButton"[\s\S]*?<\/button>/);
+  assert.ok(match, "应能找到 addOpportunityButton 块");
+  const inner = match[0];
+  assert.ok(/class="add-opportunity-button motion-label-button"/.test(inner), "应同时挂上 add-opportunity-button 与 motion-label-button");
+  assert.ok(/motion-label--default/.test(inner), "应含 motion-label--default 层");
+  assert.ok(/motion-label--hover/.test(inner), "应含 motion-label--hover 层");
+  const defaultText = inner.match(/<span[^>]+class="[^"]*motion-label--default[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+  const hoverText = inner.match(/<span[^>]+class="[^"]*motion-label--hover[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(defaultText && defaultText[1].trim() === "机会池", "默认层应为「机会池」");
+  assert.ok(hoverText && /＋|\+/.test(hoverText[1]), "hover 层应为「＋」");
+  // 不应再使用 add-opportunity-icon / add-opportunity-label 子结构
+  assert.equal(/class="add-opportunity-icon"/.test(inner), false, "add-opportunity-icon span 已下线");
+  assert.equal(/class="add-opportunity-label"/.test(inner), false, "add-opportunity-label span 已下线");
 });
 
 test("V0.3.11-hotfix-3 B2: app.js 不再含 .replace(\"加入机会池\", labelText) 标签拼接逻辑", () => {
@@ -3047,14 +3083,14 @@ test("V0.3.11-hotfix-3 B2: app.js 不再含 .replace(\"加入机会池\", labelT
   assert.equal(/从本次回答创建机会/.test(appJsText), false, "应删除'从本次回答创建机会'文案");
 });
 
-test("V0.3.11-hotfix-3 B3: CSS .add-opportunity-icon font-size ≥ 16px（更大加号）", () => {
-  const match = stylesCss.match(/\.add-opportunity-icon\s*\{[^}]*\}/);
-  assert.ok(match, "应存在 .add-opportunity-icon 规则");
-  const block = match[0];
-  const fs = block.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/);
-  assert.ok(fs, ".add-opportunity-icon 应设置 font-size");
+test("V0.6.4: CSS .add-opportunity-button .motion-label--hover 字号 ≥ 14px（明显的 + 反馈）", () => {
+  // V0.6.4 替代 B3：motion-label 系统下用 .motion-label--hover 显字号
+  const match = stylesCss.match(/\.add-opportunity-button\s+\.motion-label--hover\s*\{[^}]*\}/);
+  assert.ok(match, "应存在 .add-opportunity-button .motion-label--hover 规则");
+  const fs = match[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/);
+  assert.ok(fs, "应设置 font-size");
   const sz = Number(fs[1]);
-  assert.ok(sz >= 16, `font-size 应 ≥ 16px（更大加号），实际 ${sz}px`);
+  assert.ok(sz >= 14, `hover + 字号应 ≥ 14px（明显反馈），实际 ${sz}px`);
 });
 
 // ============== V0.3.11-hotfix-3 Phase C: 回答下方 meta 单行 ==============
@@ -3372,42 +3408,133 @@ test("V0.3.11-hotfix-3 E2: /api/opportunities/draft 失败时仍能渲染（走�
 
 // ============== V0.3.11-hotfix-4: 按钮文案 + sk-* 脱敏 ==============
 
-test("V0.3.11-hotfix-4: 按钮可见文本为「+ 机会池」且不显示长文案", () => {
-  // HTML 应包含 .add-opportunity-label span，内容为「机会池」
+test("V0.6.4: addOpportunityButton 可见文本仅「机会池」与「＋」，不显示长文案", () => {
   assert.ok(/id="addOpportunityButton"/.test(indexHtml), "应保留 addOpportunityButton 节点");
-  assert.ok(/class="add-opportunity-icon"/.test(indexHtml), "应含 add-opportunity-icon");
-  assert.ok(/class="add-opportunity-label"/.test(indexHtml), "应含 add-opportunity-label");
-  // 抓 .add-opportunity-label 块
-  const labelMatch = indexHtml.match(/<span[^>]+class="add-opportunity-label"[^>]*>([\s\S]*?)<\/span>/);
-  assert.ok(labelMatch, "应能找到 .add-opportunity-label span");
-  assert.equal(labelMatch[1].trim(), "机会池", ".add-opportunity-label 文本应为「机会池」");
-  // 不应再出现"加入机会池"长文案作为可见内容
-  // 可见内容 = icon span + label span，不应含"加入机会池"四个字
-  // aria-label="加入机会池" 是允许的，但可见 span 内容不能是它
+  assert.ok(/class="add-opportunity-button motion-label-button"/.test(indexHtml), "应挂上 motion-label-button");
   const buttonMatch = indexHtml.match(/<button[^>]+id="addOpportunityButton"[\s\S]*?<\/button>/);
   assert.ok(buttonMatch, "应能找到 addOpportunityButton 块");
-  // 去除 aria-label / title 后检查可见文本
   const visibleText = buttonMatch[0]
     .replace(/aria-label="[^"]*"/g, "")
     .replace(/title="[^"]*"/g, "");
+  // 不应再出现"加入机会池"长文案作为可见内容
   assert.equal(/加入机会池/.test(visibleText), false, "可见文本不应含「加入机会池」");
   assert.equal(/从本次回答创建机会/.test(visibleText), false, "可见文本不应含「从本次回答创建机会」");
-  // 可见文本应含"机会池"
+  // 可见文本应同时含「机会池」与「＋」
   assert.ok(/机会池/.test(visibleText), "可见文本应含「机会池」");
+  assert.ok(/＋|\+/.test(visibleText), "可见文本应含「＋」");
 });
 
-test("V0.3.11-hotfix-4: CSS .add-opportunity-label 与 .add-opportunity-icon 字号区分（加号更大）", () => {
-  // 验证 add-opportunity-label 有自己的 font-size 规则
-  const labelRule = stylesCss.match(/\.add-opportunity-label\s*\{[^}]*\}/);
-  assert.ok(labelRule, "应存在 .add-opportunity-label CSS 规则");
-  // 验证 icon 字号 ≥ label 字号
-  const iconRule = stylesCss.match(/\.add-opportunity-icon\s*\{[^}]*\}/);
-  assert.ok(iconRule, "应存在 .add-opportunity-icon CSS 规则");
-  const iconFs = Number((iconRule[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/) || [])[1] || 0);
-  const labelFs = Number((labelRule[0].match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/) || [])[1] || 0);
-  assert.ok(iconFs >= 16, `.add-opportunity-icon font-size 应 ≥ 16px，实际 ${iconFs}px`);
-  assert.ok(labelFs >= 11, `.add-opportunity-label font-size 应 ≥ 11px，实际 ${labelFs}px`);
-  assert.ok(iconFs > labelFs, `加号字号 (${iconFs}px) 应大于文字 (${labelFs}px)`);
+test("V0.6.4: CSS 含 .motion-label-button + 两层 motion-label 切换规则", () => {
+  assert.ok(/\.motion-label-button\s*\{/.test(stylesCss), "应存在 .motion-label-button 规则");
+  assert.ok(/\.motion-label--default\s*\{/.test(stylesCss), "应存在 .motion-label--default 规则");
+  assert.ok(/\.motion-label--hover\s*\{/.test(stylesCss), "应存在 .motion-label--hover 规则");
+  // hover 切换：用 :hover:not(:disabled) .motion-label--hover 锁定 default 层与 hover 层
+  assert.ok(/\.motion-label-button:hover:not\(:disabled\) \.motion-label--default/.test(stylesCss),
+    "hover 时 default 层应被压下");
+  assert.ok(/\.motion-label-button:focus-visible \.motion-label--default/.test(stylesCss),
+    "focus-visible 时 default 层应被压下");
+  assert.ok(/\.motion-label-button:focus-visible \.motion-label--hover/.test(stylesCss),
+    "focus-visible 时 hover 层应上升");
+  // disabled 保护：disabled 默认层保持，不响应 hover
+  assert.ok(/\.motion-label-button:disabled \.motion-label--hover/.test(stylesCss),
+    "disabled 应锁定 hover 层隐藏");
+});
+
+test("V0.6.4: motion-label 系统支持 prefers-reduced-motion", () => {
+  assert.ok(/@media\s*\(prefers-reduced-motion\s*:\s*reduce\)[\s\S]*?motion-label--hover[\s\S]*?display\s*:\s*none/.test(stylesCss),
+    "reduced-motion 下应隐藏 hover 层（不退化为切换动画）");
+});
+
+test("V0.6.4: 提问按钮尺寸锁定（min-width 防 '提问 → 发送' 切换抖动）", () => {
+  const rule = stylesCss.match(/\.primary-button\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .primary-button 规则");
+  const minWidth = (rule[0].match(/min-width\s*:\s*(\d+)px/) || [])[1];
+  assert.ok(minWidth && Number(minWidth) >= 80, `.primary-button min-width 应 ≥ 80px 防抖动，实际 ${minWidth}`);
+});
+
+test("V0.6.4: 机会池按钮尺寸锁定（min-width 防 '机会池 → ＋' 切换抖动）", () => {
+  const rule = stylesCss.match(/\.add-opportunity-button\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .add-opportunity-button 规则");
+  const minWidth = (rule[0].match(/min-width\s*:\s*(\d+)px/) || [])[1];
+  assert.ok(minWidth && Number(minWidth) >= 64, `.add-opportunity-button min-width 应 ≥ 64px 防抖动，实际 ${minWidth}`);
+});
+
+test("V0.6.4: openGoalEditor 进入编辑态后 weak 清除按钮可见，关闭后隐藏", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: makeMemoryStorage(),
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  // idle：编辑表单 / 清除按钮都不应显示
+  assert.equal(nodes.goalForm.hidden, true);
+  assert.equal(nodes.goalClearButton.hidden, true);
+  assert.equal(app.state.goalEditing, false);
+
+  // 设置一个目标 → 再进编辑：弱化清除按钮应可见
+  nodes.goalInput.value = "战略测试目标";
+  app.saveGoalFromInput();
+  assert.equal(app.state.currentGoal, "战略测试目标");
+
+  app.openGoalEditor();
+  assert.equal(nodes.goalForm.hidden, false);
+  assert.equal(nodes.goalClearButton.hidden, false, "编辑态有目标时清除按钮应可见");
+  assert.equal(app.state.goalEditing, true);
+
+  // 关闭编辑态
+  app.closeGoalEditor();
+  assert.equal(nodes.goalForm.hidden, true);
+  assert.equal(nodes.goalClearButton.hidden, true, "关闭编辑态后清除按钮应再次隐藏");
+  assert.equal(app.state.goalEditing, false);
+});
+
+test("V0.6.4: openGoalEditor 在 idle 未设目标时清除按钮仍隐藏", () => {
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: makeMemoryStorage(),
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  app.openGoalEditor();
+  // idle 没目标：编辑态可见，但弱化清除按钮不应出现
+  assert.equal(nodes.goalForm.hidden, false);
+  assert.equal(nodes.goalClearButton.hidden, true, "idle 无目标时清除按钮不显示");
+});
+
+test("V0.6.4: edit 按钮 aria-label 跟随存储目标切换", () => {
+  const storage = makeMemoryStorage();
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage,
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  assert.equal(nodes.goalEditButton.getAttribute("aria-label"), "设置目标");
+  // 设目标后切换为修改当前目标
+  nodes.goalInput.value = "AI 工具 MVP 路径";
+  app.saveGoalFromInput();
+  assert.equal(nodes.goalEditButton.getAttribute("aria-label"), "修改当前目标");
+});
+
+test("V0.6.4: askButton disabled 时不应触发 hover label 切换", () => {
+  // 当前 primary-button 在 :disabled 下锁定 default 层；通过 DOM 验证
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: makeMemoryStorage(),
+    fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } }) })
+  });
+  app.mount();
+  // setInFlight(true) 会让 askButton.disabled = true
+  app.setInFlight(true);
+  assert.equal(nodes.askButton.disabled, true, "inFlight 时按钮应 disabled");
+  // CSS 锁定：disabled 下 .motion-label--hover 应该 hidden
+  // 通过样式断言更确定
+  assert.ok(/\.motion-label-button:disabled \.motion-label--hover/.test(stylesCss),
+    "CSS 应让 disabled 按钮的 hover 层透明");
 });
 
 // ============== V0.3.11-hotfix-4: sk-* 脱敏 ==============

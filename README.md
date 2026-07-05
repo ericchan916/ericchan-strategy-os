@@ -1848,6 +1848,41 @@ V0.6.3-hotfix 修复的是安全回归，不新增功能。
 - 默认不联网原则不变；LLM 动态回答、按需联网搜索、Goal 匹配度、今日优先级、固定视口工作台不变。
 - loading 动画未修改；`.env`、`opportunity-pool.json`、`data/opportunities/backups` 不提交。
 
+## V0.6.4 优化按钮动效与 Goal 编辑体验
+
+V0.6.4 在克制的前提下补两块交互手势，并改造 Goal 区域的常驻结构；不动后端逻辑、不动 loading、不改 API。
+
+**两处克制的文字切换动效**
+
+- 提问按钮（底部 `.primary-button`）：默认显示「提问」，hover / focus-visible 时切换为「发送」。用 `.motion-label-button` 通用系统实现，按钮根加 `position: relative; overflow: hidden`，内部双 `<span class="motion-label">` 层叠切换：
+  - `.motion-label--default` 顶层常规流，hover/focus 时 opacity:0 + translateY(-45%)
+  - `.motion-label--hover` 绝对定位 `inset:0`，初始 `translateY(45%) + opacity:0`，hover/focus 时 `translateY(0) + opacity:1`
+  - 过渡 220ms ease，无旋转 / 无弹跳 / 无 150px box-shadow；明确放弃 Uiverse 参考的夸张版
+  - `min-width: 96px` 锁宽，避免「提问 / 发送」切换时宽度抖动
+- 机会池按钮（`.add-opportunity-button`）：默认显示「机会池」，hover / focus-visible 时切换为「＋」。同样使用 `.motion-label-button` 系统，hover 层字号升到 15px 让 `＋` 更显眼；`min-width: 72px` 锁宽避免布局抖动。
+- `:disabled` 锁定 default 层，不响应 hover；`prefers-reduced-motion` 下退化为静态单层（直接隐藏 hover 层）。
+- 可访问性：两个按钮都设了清晰的 `aria-label`（"发送提问" / "把当前回答加入机会池"），hover 层用 `aria-hidden="true"` 包住，屏幕阅读器读到的 accessible name 永远稳定。
+
+**Goal 区域：从表单化到方向锚点**
+
+- 常态（idle）：只显示「当前目标」label + 文本 + 修改图标按钮（`✎`，28×28，色 `--muted-soft`，hover/focus 浮到 `--accent-dark` + `--accent-soft`）。彻底删除常驻的"清除"按钮。
+- 编辑态：点击 `✎` 后才出现输入框 + 保存 + 取消 + 弱化"清除目标"。"清除目标"用 `--danger` 家族但降低饱和度、放在编辑态末尾、`margin-left: auto`，与编辑控件视觉脱钩。
+- `app.state.goalEditing` 标识当前是否处于编辑态；`openGoalEditor()` 才会让 `goalClearButton.hidden = !state.currentGoal`，其余路径（`renderCurrentGoal()` / `closeGoalEditor()` / 保存 / 取消 / Escape）都把清除按钮收到 hidden。
+- `goalEditButton` 的 `aria-label` / `title` 跟随是否已设置目标切换：`"设置目标"` ↔ `"修改当前目标"`，文本内容始终是 `✎`。
+- 长 Goal 仍走 V0.5 测试约定的 `white-space: nowrap + text-overflow: ellipsis` 单行省略布局。
+
+**保持不变**
+
+- 固定视口工作台 + body 不滚动 + 三个局部滚动区不回归。
+- loading 动画（Uiverse 仓鼠跑轮 + 3D 备份 spinner）未触碰。
+- 默认不联网 + sk-* 全链路脱敏 + Bocha / Tavily provider + LLM 配置不变。
+- 后端逻辑 / API / 数据结构 / opportunity-pool.json 不动；`.env`、opportunity-pool.json、data/opportunities/backups 不提交。
+
+**回归断言**
+
+- `npm test`：626 → 634（新增 8 个 V0.6.4 测试覆盖 motion-label 系统 / askButton label / addOpportunityButton label / Goal idle vs edit / prefers-reduced-motion / min-width 锁宽 / disabled 保护）。
+- `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`，不暴露 `0.0.0.0` / `::`。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

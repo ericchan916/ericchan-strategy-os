@@ -184,6 +184,7 @@ h1 {
   font-size: 11.5px;
   line-height: 1.2;
   padding: 4px 9px;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
 }
 
 .goal-button:hover,
@@ -196,6 +197,47 @@ h1 {
 
 .goal-button--muted {
   color: var(--muted-soft);
+}
+
+/* V0.6.4：修改按钮变成图标按钮，不抢主视觉 */
+.goal-button--icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--muted-soft);
+}
+
+.goal-button--icon:hover,
+.goal-button--icon:focus-visible {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-color: rgba(20, 86, 74, 0.25);
+}
+
+.goal-button-icon {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 500;
+  transform: translateY(-1px);
+}
+
+/* V0.6.4：编辑态内的弱化清除目标 */
+.goal-button--clear {
+  font-size: 11.5px;
+  color: var(--muted-soft);
+  border-color: transparent;
+  margin-left: auto;
+}
+
+.goal-button--clear:hover,
+.goal-button--clear:focus-visible {
+  color: #a04a3a;
+  border-color: rgba(160, 74, 58, 0.35);
+  background: rgba(160, 74, 58, 0.06);
 }
 
 .goal-form input {
@@ -413,6 +455,85 @@ h2 {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ---------------- V0.6.4 Motion-label button ----------------
+   思路：保留所有现有按钮规则不变；只在按钮根元素加 .motion-label-button
+   用按钮内两个 <span class="motion-label"> 层叠切换：
+   - default 层在常规流；hover/focus-visible 时 opacity:0 + translateY(-40%)
+   - hover 层绝对定位 inset:0，初始 opacity:0 + translateY(40%)；hover 时归位
+   - width 通过 :min-content / 容器内层自适应保持稳定
+   - :disabled 不响应 hover，状态固定在 default 层
+   - prefers-reduced-motion 下退化为静态切换（只显示 default）
+   ----------------------------------------------------------- */
+
+.motion-label-button {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.motion-label-button .motion-label {
+  display: inline-block;
+  line-height: inherit;
+  transition: opacity 220ms ease, transform 220ms ease;
+  will-change: opacity, transform;
+}
+
+.motion-label-button .motion-label--default {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.motion-label-button .motion-label--hover {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(45%);
+  pointer-events: none;
+}
+
+.motion-label-button:hover:not(:disabled) .motion-label--default,
+.motion-label-button:focus-visible .motion-label--default {
+  opacity: 0;
+  transform: translateY(-45%);
+}
+
+.motion-label-button:hover:not(:disabled) .motion-label--hover,
+.motion-label-button:focus-visible .motion-label--hover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.motion-label-button:disabled .motion-label--default,
+.motion-label-button[disabled] .motion-label--default {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.motion-label-button:disabled .motion-label--hover,
+.motion-label-button[disabled] .motion-label--hover {
+  opacity: 0;
+  transform: translateY(45%);
+  /* 不让 disabled hover 出现意外的"发送"字样 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-label-button .motion-label,
+  .motion-label-button:hover:not(:disabled) .motion-label,
+  .motion-label-button:focus-visible .motion-label {
+    transition: opacity 1ms linear;
+    transform: none !important;
+  }
+  /* 降级：只显示 default 层；hover 层不再绝对叠放 */
+  .motion-label-button .motion-label--hover {
+    display: none;
+  }
 }
 
 /* ---------------- Recommended Questions ---------------- */
@@ -863,9 +984,11 @@ h2 {
   font: inherit;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12.5px;
-  padding: 4px 9px;
-  min-width: 32px;
-  min-height: 32px;
+  font-weight: 600;
+  padding: 4px 12px;
+  /* V0.6.4：min-width 锁宽，避免 机会池(3字) → ＋(1符) 切换时挤压布局 */
+  min-width: 72px;
+  height: 32px;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
@@ -884,20 +1007,11 @@ h2 {
   opacity: 0.55;
 }
 
-.add-opportunity-icon {
-  font-size: 18px;
-  font-weight: 600;
+/* V0.6.4：motion-label 子层样式微调，让 hover 文字 "＋" 居中放大一点点 */
+.add-opportunity-button .motion-label--hover {
+  font-size: 15px;
+  font-weight: 700;
   line-height: 1;
-  color: var(--accent-dark);
-}
-
-/* V0.3.11-hotfix-4：机会池按钮文字 label */
-.add-opportunity-label {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--accent-dark);
-  white-space: nowrap;
 }
 
 .add-opportunity-container[hidden] {
@@ -1152,12 +1266,14 @@ h2 {
   font-size: 14.5px;
   font-weight: 600;
   padding: 10px 22px;
+  /* V0.6.4：min-width 锁宽，避免"提问 / 发送"切换宽度变化 */
+  min-width: 96px;
   letter-spacing: 0.04em;
   transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
   box-shadow: 0 2px 8px rgba(20, 86, 74, 0.18);
 }
 
-.primary-button:hover {
+.primary-button:hover:not(:disabled) {
   background: var(--accent-dark);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(20, 86, 74, 0.22);
@@ -1174,6 +1290,13 @@ h2 {
   border-color: var(--muted-soft);
   box-shadow: none;
   transform: none;
+}
+
+/* V0.6.4：motion-label 按钮里的字层收紧 */
+.primary-button .motion-label--default,
+.primary-button .motion-label--hover {
+  letter-spacing: inherit;
+  font-weight: inherit;
 }
 
 .status-text {

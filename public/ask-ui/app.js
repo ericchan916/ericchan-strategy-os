@@ -1160,6 +1160,7 @@ function createApp(deps) {
     currentSearch: null,
     currentQuestion: "",
     currentGoal: "",
+    goalEditing: false, // V0.6.4：标识当前是否处于 Goal 编辑态
     opportunities: []
   };
 
@@ -1233,19 +1234,35 @@ function createApp(deps) {
       currentGoalText.title = goal || "未设置";
       currentGoalText.setAttribute("data-empty", goal ? "false" : "true");
     }
-    if (goalEditButton) goalEditButton.textContent = goal ? "修改" : "设置目标";
-    if (goalClearButton) goalClearButton.hidden = !goal;
+    // V0.6.4：修改按钮变成图标按钮；title 与 aria-label 跟是否已设置联动
+    if (goalEditButton) {
+      const editLabel = goal ? "修改当前目标" : "设置目标";
+      goalEditButton.setAttribute("aria-label", editLabel);
+      goalEditButton.setAttribute("title", editLabel);
+    }
+    // V0.6.4：清除按钮只在编辑态显示（弱化），由 openGoalEditor / hideGoalEditor 控制
+    if (goalClearButton) goalClearButton.hidden = true;
     if (goalForm) goalForm.hidden = true;
+    state.goalEditing = false;
   }
 
   function openGoalEditor() {
     if (!goalForm || !goalInput) return;
     goalInput.value = state.currentGoal || "";
     goalForm.hidden = false;
+    // V0.6.4：仅在编辑态显示弱化"清除目标"
+    if (goalClearButton) goalClearButton.hidden = !state.currentGoal;
+    state.goalEditing = true;
     if (typeof goalInput.focus === "function") goalInput.focus();
     if (typeof goalInput.setSelectionRange === "function") {
       try { goalInput.setSelectionRange(0, goalInput.value.length); } catch {}
     }
+  }
+
+  function closeGoalEditor() {
+    if (goalForm) goalForm.hidden = true;
+    if (goalClearButton) goalClearButton.hidden = true;
+    state.goalEditing = false;
   }
 
   function saveGoalFromInput() {
@@ -2210,6 +2227,7 @@ function createApp(deps) {
       return state.currentGoal;
     },
     openGoalEditor,
+    closeGoalEditor,
     saveGoalFromInput,
     clearCurrentGoal,
     clearSelectedQuestion,
