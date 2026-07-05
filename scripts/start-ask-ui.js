@@ -10,7 +10,8 @@ const {
   updateOpportunity,
   addOpportunity,
   deleteOpportunity,
-  isValidOpportunityId
+  isValidOpportunityId,
+  derivePrioritizedOpportunities
 } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
@@ -139,7 +140,9 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     if (req.method === "GET" && url.pathname === "/api/opportunities") {
       try {
         const result = loadOpportunityPool({ rootDir });
-        sendJson(res, 200, { opportunities: result.opportunities, stats: result.stats });
+        const currentGoal = String(url.searchParams.get("currentGoal") || "").slice(0, 300);
+        const opportunities = derivePrioritizedOpportunities(result.opportunities, currentGoal);
+        sendJson(res, 200, { opportunities, stats: result.stats });
       } catch (error) {
         sendJson(res, 500, { error: safeErrorMessage(error, "机会池读取失败。") });
       }

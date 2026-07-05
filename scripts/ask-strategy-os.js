@@ -6,7 +6,7 @@ const { getDateString } = require("./generate-report");
 const { readConfig, isConfigured, callChatCompletion, LlmError } = require("./llm-client");
 const { redactSecretLikeText } = require("./secret-redact");
 const { searchWeb, toPublicSearchMeta, shouldUseWebSearch } = require("./search-client");
-const { buildOpportunityContextForPrompt } = require("./opportunity-store");
+const { buildOpportunityContextForPrompt, deriveGoalMatchForOpportunity } = require("./opportunity-store");
 require("./load-env"); // 静默补全 STRATEGY_OS_LLM_* / LLM_*；shell 优先。
 
 const LLM_FALLBACK_WARNING = "LLM 动态回答暂时不可用，已回退到本地规则回答。";
@@ -583,6 +583,21 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
   };
 }
 
+function deriveKickoffGoalMeta({ name, oneLine, note, next, tags, currentGoal }) {
+  const safeGoal = sanitizeCurrentGoal(currentGoal);
+  if (!safeGoal) return null;
+  const result = deriveGoalMatchForOpportunity({
+    opportunityName: name,
+    oneLineSummary: oneLine,
+    notes: note,
+    nextAction: next,
+    tags,
+    status: "validate",
+    type: "new-project-opportunity"
+  }, safeGoal);
+  return result && result.goalMatch !== "未判断" ? result : null;
+}
+
 function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestion, sourceUrls, currentGoal = "" }) {
   // V0.3.11 安全：脱敏所有可能含 API Key 的字段
   // V0.3.11-hotfix-4：先统一过 redactSecretLikeText（递归脱敏 sk-* 形态）
@@ -601,6 +616,7 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   const safeTags = Array.isArray(safeInput.tags) ? safeInput.tags.map((t) => sanitize(t)) : [];
   const safeSourceUrls = Array.isArray(safeInput.sourceUrls) ? safeInput.sourceUrls : [];
   const safeCurrentGoal = sanitize(safeInput.currentGoal);
+  const goalMeta = deriveKickoffGoalMeta({ name: safeName, oneLine: safeOneLine, note: safeNote, next: safeNext, tags: safeTags, currentGoal: safeCurrentGoal });
   const lines = [];
   lines.push("请基于下面这个机会卡数据，生成一份结构化开工包。");
   lines.push("");
@@ -611,6 +627,7 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   if (next) lines.push(`- 下一步：${safeNext}`);
   if (safeTags.length) lines.push(`- 标签：${safeTags.join("、")}`);
   if (safeCurrentGoal) lines.push(`- 当前目标：${safeCurrentGoal}`);
+  if (goalMeta) lines.push(`- Goal匹配：${goalMeta.goalMatch}；今日：${goalMeta.todayPriority}；理由：${goalMeta.priorityReason}`);
   if (sourceQuestion) lines.push(`- 原始问题：${safeQuestion}`);
   if (safeSourceUrls.length) {
     lines.push(`- 参考来源（最多 5 条）：`);
@@ -638,6 +655,7 @@ function buildKickoffUserPrompt({ name, oneLine, note, next, tags, sourceQuestio
   lines.push("- 「风险与卡点」必须主动生成至少 3 条具体风险，不能等用户自己罗列。");
   lines.push("- 「目标用户」、「最小 MVP」、「第一版功能边界」即使信息不足，也要基于机会名/标签/备注做「暂定推断」并写明是推断。");
   lines.push("- 如果给出了当前目标，必须说明这个项目是否服务当前目标；如果不服务，要建议观察或暂缓，而不是强行开工。");
+  lines.push("- 如果给出了 Goal匹配 / 今日优先信息，必须把它作为执行节奏判断，不要忽略。");
   lines.push("- 内容必须基于上面机会卡数据生成，不要凭空发明数据。");
   lines.push("- 严格中文输出，不调用任何外部智能体，不真的去执行项目。");
   return lines.join("\n");
@@ -679,6 +697,7 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   const safeQuestion = sanitize(sourceQuestion);
   const safeTags = (tags || []).map(sanitize);
   const safeCurrentGoal = sanitize(safeInput.currentGoal);
+  const goalMeta = deriveKickoffGoalMeta({ name: safeName, oneLine: safeOneLine, note: safeNote, next: safeNext, tags: safeTags, currentGoal: safeCurrentGoal });
   // V0.3.11-hotfix：根据 name + tags + note 推断目标用户、MVP、边界、风险
   const inferred = inferKickoffFields({ name: safeName, oneLine: safeOneLine, note: safeNote, next: safeNext, tags: safeTags });
 
@@ -698,7 +717,10 @@ function buildLocalKickoff({ name, oneLine, note, next, tags, sourceQuestion, so
   lines.push("3. 与当前目标的关系");
   if (safeCurrentGoal) {
     lines.push(`当前目标：${safeCurrentGoal}`);
-    lines.push("判断：只有当这个机会能帮助当前目标更快被验证时，才建议进入执行；否则先观察，不要强行开工。");
+    if (goalMeta) lines.push(`Goal匹配：${goalMeta.goalMatch}；今日：${goalMeta.todayPriority}；理由：${goalMeta.priorityReason}`);
+    lines.push(goalMeta && goalMeta.goalMatch === "低匹配"
+      ? "判断：这可能偏离当前目标，建议先观察或暂缓，不要强行开工。"
+      : "判断：只有当这个机会能帮助当前目标更快被验证时，才建议进入执行；否则先观察，不要强行开工。");
   } else {
     lines.push("当前未设置 Goal。先按机会本身做保守判断，不强行绑定方向。");
   }
@@ -838,6 +860,7 @@ function buildSparseKickoff({ name, sourceQuestion, currentGoal = "" }) {
   // V0.3.11-hotfix：信息稀疏时也用 inferKickoffFields 推断每节具体内容
   const inferred = inferKickoffFields({ name, oneLine: "", note: "", next: "", tags: [] });
   const safeCurrentGoal = sanitizeCurrentGoal(currentGoal);
+  const goalMeta = deriveKickoffGoalMeta({ name, oneLine: "", note: "", next: "", tags: [], currentGoal: safeCurrentGoal });
   const lines = [];
   lines.push(`# 开工包：${name}（保守版）`);
   lines.push("");
@@ -850,6 +873,7 @@ function buildSparseKickoff({ name, sourceQuestion, currentGoal = "" }) {
   lines.push("3. 与当前目标的关系");
   if (safeCurrentGoal) {
     lines.push(`当前目标：${safeCurrentGoal}`);
+    if (goalMeta) lines.push(`Goal匹配：${goalMeta.goalMatch}；今日：${goalMeta.todayPriority}；理由：${goalMeta.priorityReason}`);
     lines.push("判断：信息稀疏时先确认它是否真的服务当前目标，再决定是否补充机会卡。");
   } else {
     lines.push("当前未设置 Goal。先补充机会信息，再判断是否值得推进。");
@@ -947,7 +971,7 @@ function buildLlmUserPrompt({ context, type, question, search = null, currentGoa
   }
   if (Array.isArray(context.opportunityPool && context.opportunityPool.opportunities)) {
     // V0.3.10：使用结构化中文摘要注入机会池上下文，优先：已确认 / 待验证 / 观察中 / 最近更新 / 高潜力。
-    const ctx = buildOpportunityContextForPrompt(context.opportunityPool.opportunities, { maxItems: 10 });
+    const ctx = buildOpportunityContextForPrompt(context.opportunityPool.opportunities, { maxItems: 10, currentGoal: safeGoal });
     if (ctx) {
       lines.push("");
       lines.push(ctx);

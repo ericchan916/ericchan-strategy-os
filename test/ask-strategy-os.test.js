@@ -742,6 +742,33 @@ test("V0.5.1: buildLlmUserPrompt 明确要求判断 Goal 冲突与偏离", () =>
   assert.ok(prompt.includes("不要强行把所有问题都套进目标"));
 });
 
+test("V0.6: buildLlmUserPrompt can reference 今日优先项 from opportunity pool", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      opportunityPool: {
+        opportunities: [
+          {
+            id: "goal-opp",
+            opportunityName: "AI 机会简报助手",
+            oneLineSummary: "面向独立开发者的小型 AI 产品",
+            nextAction: "7 天内跑通一个最小 MVP 页面",
+            tags: ["独立开发者", "可快速验证"],
+            status: "validate"
+          }
+        ]
+      },
+      report: null
+    },
+    type: "today-action",
+    question: "今天适合做什么？",
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。"
+  });
+  assert.ok(prompt.includes("Goal匹配：高匹配"));
+  assert.ok(prompt.includes("今日：今日优先"));
+  assert.ok(prompt.includes("AI 机会简报助手"));
+});
+
 test("V0.5: 未设置 currentGoal 时 prompt 不包含空目标段", () => {
   const prompt = buildLlmUserPrompt({
     context: { contextText: "", opportunityPool: null, report: null },
@@ -862,6 +889,19 @@ test("V0.5: buildKickoffUserPrompt 包含脱敏 currentGoal", () => {
   assert.equal(prompt.includes("sk-kickoffPrompt123456"), false);
 });
 
+test("V0.6: kickoff prompt includes Goal match and today priority relation", () => {
+  const prompt = buildKickoffUserPrompt({
+    name: "AI 机会简报助手",
+    oneLine: "面向独立开发者的小型 AI 产品",
+    next: "7 天内跑通一个最小 MVP 页面",
+    tags: ["独立开发者", "可快速验证"],
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。"
+  });
+  assert.ok(prompt.includes("Goal匹配：高匹配"));
+  assert.ok(prompt.includes("今日：今日优先"));
+  assert.ok(prompt.includes("必须把它作为执行节奏判断"));
+});
+
 test("buildLocalKickoff: 包含 10 个小节", () => {
   const text = buildLocalKickoff({
     name: "X",
@@ -888,6 +928,7 @@ test("V0.5: buildLocalKickoff / buildSparseKickoff 包含当前目标关系且�
   });
   assert.ok(local.includes("与当前目标的关系"));
   assert.ok(local.includes("用战略OS筛选独立开发者 AI 产品"));
+  assert.ok(local.includes("Goal匹配"));
   assert.equal(local.includes("sk-localKickoffGoal123456"), false);
 
   const sparse = buildSparseKickoff({
@@ -896,7 +937,18 @@ test("V0.5: buildLocalKickoff / buildSparseKickoff 包含当前目标关系且�
   });
   assert.ok(sparse.includes("与当前目标的关系"));
   assert.ok(sparse.includes("优先寻找 7 天内验证的 AI 工具"));
+  assert.ok(sparse.includes("Goal匹配"));
   assert.equal(sparse.includes("sk-sparseGoal123456"), false);
+});
+
+test("V0.6: local kickoff warns when an opportunity is low match for current Goal", () => {
+  const text = buildLocalKickoff({
+    name: "个人网站视觉改版",
+    oneLine: "优化个人展示层",
+    currentGoal: "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。"
+  });
+  assert.ok(text.includes("Goal匹配：低匹配"));
+  assert.ok(text.includes("可能偏离当前目标"));
 });
 
 test("buildSparseKickoff: 信息不足时给保守版开工包 + 中文提示", () => {

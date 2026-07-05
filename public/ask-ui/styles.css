@@ -520,6 +520,11 @@ h2 {
   background: var(--panel-strong);
 }
 
+.opportunity-item--today {
+  border-color: rgba(20, 86, 74, 0.38);
+  background: rgba(20, 86, 74, 0.08);
+}
+
 .opportunity-item-head {
   display: flex;
   align-items: start;
@@ -543,6 +548,48 @@ h2 {
   color: var(--accent-dark);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 11px;
+}
+
+.opportunity-goal {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.opportunity-goal[data-goal-tone="today"] {
+  border-color: rgba(20, 86, 74, 0.24);
+  background: rgba(20, 86, 74, 0.08);
+}
+
+.opportunity-goal[data-goal-tone="low"],
+.opportunity-goal[data-goal-tone="unknown"] {
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.opportunity-goal-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.opportunity-goal-chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--accent-dark);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.opportunity-goal-reason {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .opportunity-meta,

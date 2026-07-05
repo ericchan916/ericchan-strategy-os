@@ -14,6 +14,8 @@ const {
   deleteOpportunity,
   buildOpportunityContextForPrompt,
   deriveOpportunityDraftFromAnswer,
+  deriveGoalMatchForOpportunity,
+  derivePrioritizedOpportunities,
   TYPE_LABELS,
   SCORE_LABELS,
   PRESET_TAGS,
@@ -68,6 +70,149 @@ test("normalizeOpportunity preserves unknown fields while adding UI labels", () 
   assert.equal(item.statusLabel, "观察中");
   assert.equal(item.humanDecisionLabel, "观察中");
   assert.equal(item.unknown, "keep");
+});
+
+test("V0.6: no Goal returns 未判断 without fake priority", () => {
+  const match = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 机会简报助手",
+    nextAction: "7 天内跑通一个页面",
+    tags: ["独立开发者", "可快速验证"]
+  }, "");
+  assert.equal(match.goalMatch, "未判断");
+  assert.equal(match.todayPriority, "可观察");
+  assert.equal(match.isTodayPriority, false);
+  assert.ok(match.priorityReason.includes("设置当前目标"));
+});
+
+test("V0.6: high / medium / low Goal match levels are derived conservatively", () => {
+  const goal = "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。";
+  const high = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 机会简报助手",
+    oneLineSummary: "面向独立开发者的小型 AI 产品",
+    nextAction: "7 天内跑通一个最小 MVP 页面",
+    tags: ["独立开发者", "可快速验证", "大模型应用"],
+    status: "validate"
+  }, goal);
+  assert.equal(high.goalMatch, "高匹配");
+  assert.equal(high.todayPriority, "今日优先");
+  assert.equal(high.isTodayPriority, true);
+
+  const medium = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 内容选题助手",
+    oneLineSummary: "用 AI 做内容选题",
+    tags: ["内容产品"],
+    status: "watch"
+  }, goal);
+  assert.equal(medium.goalMatch, "中匹配");
+  assert.equal(medium.todayPriority, "可观察");
+
+  const low = deriveGoalMatchForOpportunity({
+    opportunityName: "个人网站视觉改版",
+    oneLineSummary: "优化个人网站展示层",
+    tags: ["前端视觉"],
+    status: "validate"
+  }, goal);
+  assert.equal(low.goalMatch, "低匹配");
+  assert.equal(low.todayPriority, "暂缓");
+});
+
+test("V0.6: archived / rejected and missing nextAction are not 今日优先", () => {
+  const goal = "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。";
+  const archived = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 机会简报助手",
+    nextAction: "7 天内跑通一个页面",
+    tags: ["独立开发者", "可快速验证"],
+    status: "archived"
+  }, goal);
+  assert.equal(archived.todayPriority, "暂缓");
+  assert.equal(archived.isTodayPriority, false);
+
+  const noNext = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 机会简报助手",
+    tags: ["独立开发者", "可快速验证"],
+    status: "validate"
+  }, goal);
+  assert.notEqual(noNext.todayPriority, "今日优先");
+  assert.equal(noNext.isTodayPriority, false);
+});
+
+test("V0.6: derived Goal display fields never expose sk-* text", () => {
+  const match = deriveGoalMatchForOpportunity({
+    opportunityName: "AI 机会简报助手 sk-opportunitySecret123456",
+    oneLineSummary: "面向独立开发者的小型 AI 产品",
+    notes: "测试 sk-noteSecret123456",
+    nextAction: "7 天内跑通一个最小 MVP 页面",
+    tags: ["独立开发者", "可快速验证"],
+    status: "validate"
+  }, "用战略OS筛选适合独立开发者的小型 AI 产品 sk-goalSecret123456");
+  const text = JSON.stringify(match);
+  assert.equal(/sk-[A-Za-z0-9_-]+/.test(text), false);
+});
+
+test("V0.6: 今日优先最多突出 1-2 个且顺序稳定", () => {
+  const goal = "用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。";
+  const list = derivePrioritizedOpportunities([
+    { id: "a", opportunityName: "AI 机会 A", nextAction: "7 天内验证", tags: ["独立开发者", "可快速验证"], status: "validate" },
+    { id: "b", opportunityName: "AI 机会 B", nextAction: "7 天内验证", tags: ["独立开发者", "可快速验证"], status: "validate" },
+    { id: "c", opportunityName: "AI 机会 C", nextAction: "7 天内验证", tags: ["独立开发者", "可快速验证"], status: "validate" }
+  ], goal);
+  assert.deepEqual(list.map((item) => item.id), ["a", "b", "c"], "不应为了派生优先级重排列表");
+  assert.equal(list.filter((item) => item.isTodayPriority).length, 2);
+  assert.equal(list[2].todayPriority, "可观察");
+});
+
+test("V0.6: derived Goal fields are not persisted to opportunity-pool.json", () => {
+  const f = fixture();
+  saveOpportunityPool({
+    version: 1,
+    opportunities: [
+      {
+        id: "derived",
+        opportunityName: "AI 机会简报助手",
+        status: "validate",
+        goalMatch: "高匹配",
+        todayPriority: "今日优先",
+        priorityReason: "测试派生字段",
+        isTodayPriority: true
+      }
+    ]
+  }, { rootDir: f.rootDir });
+  const raw = fs.readFileSync(f.jsonPath, "utf8");
+  assert.equal(raw.includes("goalMatch"), false);
+  assert.equal(raw.includes("todayPriority"), false);
+  assert.equal(raw.includes("priorityReason"), false);
+  assert.equal(raw.includes("isTodayPriority"), false);
+});
+
+test("V0.6: derived Goal fields are stripped from delete backups", () => {
+  const f = fixture();
+  fs.writeFileSync(
+    f.jsonPath,
+    JSON.stringify({
+      version: 1,
+      updatedAt: "2026-07-03T00:00:00.000Z",
+      opportunities: [
+        {
+          id: "backup-derived",
+          opportunityName: "AI 机会简报助手",
+          status: "validate",
+          goalMatch: "高匹配",
+          todayPriority: "今日优先",
+          priorityReason: "测试派生字段",
+          isTodayPriority: true
+        }
+      ]
+    }, null, 2)
+  );
+  deleteOpportunity({ rootDir: f.rootDir, id: "backup-derived" });
+  const backupDir = path.join(f.rootDir, "data", "opportunities", "backups");
+  const backupFile = fs.readdirSync(backupDir).find((name) => name.endsWith(".json"));
+  assert.ok(backupFile, "应生成删除备份");
+  const backup = fs.readFileSync(path.join(backupDir, backupFile), "utf8");
+  assert.equal(backup.includes("goalMatch"), false);
+  assert.equal(backup.includes("todayPriority"), false);
+  assert.equal(backup.includes("priorityReason"), false);
+  assert.equal(backup.includes("isTodayPriority"), false);
 });
 
 test("updateOpportunity only applies whitelisted fields and preserves unknown fields", () => {

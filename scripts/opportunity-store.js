@@ -194,7 +194,7 @@ function normalizeOpportunity(item) {
 }
 
 function stripUiFields(item) {
-  const { displayTitle, statusLabel, humanDecisionLabel, typeLabel, ...rest } = item && typeof item === "object" ? item : {};
+  const { displayTitle, statusLabel, humanDecisionLabel, typeLabel, goalMatch, todayPriority, priorityReason, isTodayPriority, ...rest } = item && typeof item === "object" ? item : {};
   return rest;
 }
 
@@ -376,6 +376,158 @@ function applyGoalToOpportunityDraft(draft, goalInfo) {
   next.note = String(next.note || "").slice(0, 300);
   next.nextAction = String(next.nextAction || "").slice(0, 500);
   return next;
+}
+
+const GOAL_MATCH_LEVELS = {
+  high: "高匹配",
+  medium: "中匹配",
+  low: "低匹配",
+  unknown: "未判断"
+};
+
+const TODAY_PRIORITY_LABELS = {
+  today: "今日优先",
+  watch: "可观察",
+  later: "暂缓"
+};
+
+function opportunitySearchText(item) {
+  const raw = item && typeof item === "object" ? item : {};
+  const parts = [
+    raw.opportunityName,
+    raw.displayTitle,
+    raw.oneLineSummary,
+    raw.notes,
+    raw.note,
+    raw.nextAction,
+    raw.sourceTrend,
+    raw.type,
+    ...(Array.isArray(raw.tags) ? raw.tags : [])
+  ];
+  return String(redactSecretLikeText(parts.filter(Boolean).join(" "))).replace(/\s+/g, " ").trim();
+}
+
+function goalSignals(currentGoal) {
+  const goal = String(redactSecretLikeText(currentGoal || "")).replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!goal) return null;
+  return {
+    text: goal,
+    independent: /独立开发|一人|OPC|独立|indie/i.test(goal),
+    smallAiProduct: /(小型|轻量|AI|大模型|Agent|智能体|工具|产品|MVP)/i.test(goal),
+    sevenDayValidation: /(7\s*天|七天|一周|快速验证|可验证|MVP)/i.test(goal),
+    websitePersona: /(个人网站|iPortfolio|小Chan|数字分身|persona|Persona|传记)/i.test(goal),
+    noNewProject: /(不优先做新项目|不做新项目|暂不做新项目)/i.test(goal)
+  };
+}
+
+function deriveGoalMatchForOpportunity(opportunity, currentGoal = "") {
+  const goal = goalSignals(currentGoal);
+  if (!goal) {
+    return {
+      goalMatch: GOAL_MATCH_LEVELS.unknown,
+      todayPriority: TODAY_PRIORITY_LABELS.watch,
+      priorityReason: "设置当前目标后，机会池会判断今日优先级。",
+      isTodayPriority: false,
+      rankScore: 0
+    };
+  }
+
+  const item = normalizeOpportunity(opportunity);
+  const text = opportunitySearchText(item);
+  const hasInfo = !!(item.opportunityName || item.oneLineSummary || item.notes || item.nextAction || item.tags.length);
+  if (!hasInfo) {
+    return {
+      goalMatch: GOAL_MATCH_LEVELS.unknown,
+      todayPriority: TODAY_PRIORITY_LABELS.watch,
+      priorityReason: "机会信息太少，先补充一句话说明和下一步。",
+      isTodayPriority: false,
+      rankScore: 0
+    };
+  }
+
+  const status = String(item.status || "");
+  const humanDecision = String(item.humanDecision || "");
+  if (status === "archived" || status === "rejected" || humanDecision === "rejected") {
+    return {
+      goalMatch: GOAL_MATCH_LEVELS.low,
+      todayPriority: TODAY_PRIORITY_LABELS.later,
+      priorityReason: "已归档或已拒绝，不应作为今日优先项。",
+      isTodayPriority: false,
+      rankScore: -10
+    };
+  }
+
+  let score = 0;
+  const reasons = [];
+  const hasNext = !!String(item.nextAction || "").trim();
+  if (hasNext) {
+    score += 2;
+    reasons.push("下一步清楚");
+  }
+  if (status === "validate" || status === "watch" || status === "inbox") score += 1;
+  if (humanDecision === "accepted" || humanDecision === "watching") score += 1;
+
+  if (goal.independent && /独立开发|一人|OPC|indie/i.test(text)) {
+    score += 3;
+    reasons.push("符合独立开发者方向");
+  }
+  if (goal.smallAiProduct && /(AI|大模型|Agent|智能体|工具|产品|MVP|机会简报|自动化)/i.test(text)) {
+    score += 3;
+    reasons.push("符合小型 AI 产品方向");
+  }
+  if (goal.sevenDayValidation && /(7\s*天|七天|一周|MVP|快速验证|可快速验证|最小|验证)/i.test(text)) {
+    score += 3;
+    reasons.push("符合 7 天验证方向");
+  }
+  if (goal.websitePersona && /(个人网站|iPortfolio|小Chan|数字分身|Persona|persona|传记)/i.test(text)) {
+    score += 4;
+    reasons.push("贴合数字分身/个人网站沉淀");
+  }
+  if (goal.noNewProject && (item.type === "new-project-opportunity" || /新项目|MVP|产品|机会/i.test(text))) {
+    score -= 4;
+    reasons.push("与当前不优先新项目的目标有偏离");
+  }
+
+  let goalMatch = GOAL_MATCH_LEVELS.low;
+  if (score >= 7 && hasNext) goalMatch = GOAL_MATCH_LEVELS.high;
+  else if (score >= 3) goalMatch = GOAL_MATCH_LEVELS.medium;
+
+  const todayCandidate = goalMatch === GOAL_MATCH_LEVELS.high && hasNext;
+  const todayPriority = todayCandidate ? TODAY_PRIORITY_LABELS.today : (goalMatch === GOAL_MATCH_LEVELS.low ? TODAY_PRIORITY_LABELS.later : TODAY_PRIORITY_LABELS.watch);
+  const priorityReason = reasons.length
+    ? reasons.slice(0, 2).join("，") + "。"
+    : (goalMatch === GOAL_MATCH_LEVELS.low ? "与当前目标关联较弱，今天不建议优先推进。" : "需要补充更多信息后再判断。");
+  return {
+    goalMatch,
+    todayPriority,
+    priorityReason,
+    isTodayPriority: todayCandidate,
+    rankScore: score
+  };
+}
+
+function derivePrioritizedOpportunities(opportunities, currentGoal = "") {
+  const list = Array.isArray(opportunities) ? opportunities.map((item) => normalizeOpportunity(item)) : [];
+  const enriched = list.map((item, index) => ({
+    ...item,
+    ...deriveGoalMatchForOpportunity(item, currentGoal),
+    __priorityIndex: index
+  }));
+  const todayIds = new Set(
+    enriched
+      .filter((item) => item.isTodayPriority)
+      .sort((a, b) => (b.rankScore - a.rankScore) || (a.__priorityIndex - b.__priorityIndex))
+      .slice(0, 2)
+      .map((item) => item.id)
+  );
+  return enriched.map(({ __priorityIndex, rankScore, ...item }) => {
+    if (!todayIds.has(item.id)) {
+      return item.isTodayPriority
+        ? { ...item, todayPriority: TODAY_PRIORITY_LABELS.watch, isTodayPriority: false, priorityReason: "方向匹配，但今日只突出前 1-2 个机会。" }
+        : item;
+    }
+    return item;
+  });
 }
 
 function deriveOpportunityDraftFromAnswer({
@@ -707,7 +859,9 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
   const safeOpportunities = redactSecretLikeText(
     Array.isArray(opportunities) ? opportunities : []
   );
-  const list = Array.isArray(safeOpportunities) ? safeOpportunities : [];
+  const list = options.currentGoal
+    ? derivePrioritizedOpportunities(safeOpportunities, options.currentGoal)
+    : (Array.isArray(safeOpportunities) ? safeOpportunities : []);
   const includeArchived = options.includeArchived === true;
   const maxItems = Number.isFinite(options.maxItems) && options.maxItems > 0
     ? Math.floor(options.maxItems)
@@ -748,6 +902,9 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
     // V0.3.11：注入一句话说明 + 下一步
     const oneLine = String(raw.oneLineSummary || "").trim() || "暂无一句话说明";
     const next = String(raw.nextAction || "").trim() || "暂无下一步";
+    const goalLine = raw.goalMatch
+      ? `   Goal匹配：${String(raw.goalMatch)}；今日：${String(raw.todayPriority || "可观察")}；理由：${String(raw.priorityReason || "暂无")}`
+      : "";
     const updated = raw.updatedAt ? String(raw.updatedAt).slice(0, 10) : "";
     const linesForItem = [
       `${idx + 1}. ${name}`,
@@ -758,6 +915,7 @@ function buildOpportunityContextForPrompt(opportunities, options = {}) {
       `   备注：${note}`,
       `   下一步：${next}`
     ];
+    if (goalLine) linesForItem.push(goalLine);
     if (updated) linesForItem.push(`   更新时间：${updated}`);
     lines.push(linesForItem.join("\n"));
   });
@@ -955,6 +1113,8 @@ module.exports = {
   deleteOpportunity,
   addOpportunity,
   buildOpportunityContextForPrompt,
+  deriveGoalMatchForOpportunity,
+  derivePrioritizedOpportunities,
   deriveOpportunityDraftFromAnswer,
   normalizeSourceUrls,
   summarizeAnswer

@@ -732,7 +732,11 @@ function normalizeOpportunityForUi(item) {
     updatedAt: raw.updatedAt ? String(raw.updatedAt) : "",
     sourceTrend: raw.sourceTrend ? String(raw.sourceTrend) : "",
     source: raw.source ? String(raw.source) : "",
-    scores: raw.scores && typeof raw.scores === "object" ? raw.scores : {}
+    scores: raw.scores && typeof raw.scores === "object" ? raw.scores : {},
+    goalMatch: raw.goalMatch ? String(raw.goalMatch) : "",
+    todayPriority: raw.todayPriority ? String(raw.todayPriority) : "",
+    priorityReason: raw.priorityReason ? String(raw.priorityReason) : "",
+    isTodayPriority: raw.isTodayPriority === true
   };
 }
 
@@ -774,6 +778,21 @@ function renderTagChips(tags, { selectedAttr = "" } = {}) {
     .join("");
 }
 
+function renderGoalPriority(item) {
+  if (!item || !item.goalMatch) return "";
+  const match = escapeHtml(item.goalMatch);
+  const priority = item.todayPriority ? ` · ${escapeHtml(item.todayPriority)}` : "";
+  const reason = item.priorityReason ? escapeHtml(item.priorityReason) : "暂无理由";
+  const tone = item.isTodayPriority ? "today" : (item.goalMatch === "低匹配" ? "low" : item.goalMatch === "未判断" ? "unknown" : "normal");
+  return `<div class="opportunity-goal" data-goal-tone="${tone}">
+    <div class="opportunity-goal-badges">
+      <span class="opportunity-goal-chip">${match}</span>
+      ${priority ? `<span class="opportunity-goal-chip">${priority.replace(/^ · /, "")}</span>` : ""}
+    </div>
+    <p class="opportunity-goal-reason">${reason}</p>
+  </div>`;
+}
+
 function renderPresetTagChips(selectedTags) {
   const selected = new Set(Array.isArray(selectedTags) ? selectedTags : []);
   return PRESET_TAGS
@@ -806,6 +825,7 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
         : "";
       const tagChips = renderTagChips(item.tags);
       const scoreChips = renderScoreChips(item.scores);
+      const goalPriority = renderGoalPriority(item);
       const sourceLabelMap = {
         "ask-mode": "来自 Ask Mode",
         search: "来自搜索",
@@ -823,13 +843,15 @@ function renderOpportunityPanel({ opportunities = [], stats = {} } = {}) {
         ? `<span>更新 ${escapeHtml(item.updatedAt.slice(0, 10))}</span>`
         : "";
       const sourceLine = sourceLabel ? `<span>${escapeHtml(sourceLabel)}</span>` : "";
-      return `<article class="opportunity-item" data-opportunity-id="${escapeHtml(item.id)}">
+      const itemClass = item.isTodayPriority ? "opportunity-item opportunity-item--today" : "opportunity-item";
+      return `<article class="${itemClass}" data-opportunity-id="${escapeHtml(item.id)}">
         <div class="opportunity-item-head">
           <h3>${escapeHtml(showTitle)}</h3>
           <span class="opportunity-badge">${escapeHtml(item.statusLabel)}</span>
         </div>
         ${titleWarning}
         <p class="opportunity-meta">${escapeHtml(item.typeLabel)}${item.humanDecisionLabel ? ` · ${escapeHtml(item.humanDecisionLabel)}` : ""}${sourceLine ? ` · ${sourceLine}` : ""}${updatedLine ? ` · ${updatedLine}` : ""}</p>
+        ${goalPriority}
         ${item.sourceTrend ? `<p class="opportunity-source">${escapeHtml(item.sourceTrend)}</p>` : ""}
         ${scoreChips}
         ${tagChips ? `<div class="opportunity-tags">${tagChips}</div>` : ""}
@@ -1231,6 +1253,7 @@ function createApp(deps) {
     state.currentGoal = saveCurrentGoal(storage, next);
     renderCurrentGoal();
     setStatus(state.currentGoal ? "当前目标已保存。" : "当前目标已清除。");
+    loadOpportunities();
     return state.currentGoal;
   }
 
@@ -1238,6 +1261,7 @@ function createApp(deps) {
     state.currentGoal = saveCurrentGoal(storage, "");
     renderCurrentGoal();
     setStatus("当前目标已清除。");
+    loadOpportunities();
     return "";
   }
 
@@ -1254,7 +1278,10 @@ function createApp(deps) {
   async function loadOpportunities() {
     if (!fetchImpl || !opportunityList) return { ok: false, reason: "unavailable" };
     try {
-      const response = await fetchImpl("/api/opportunities");
+      const path = state.currentGoal
+        ? `/api/opportunities?currentGoal=${encodeURIComponent(state.currentGoal)}`
+        : "/api/opportunities";
+      const response = await fetchImpl(path);
       const payload = await (response && typeof response.json === "function" ? response.json() : Promise.resolve({})).catch(() => ({}));
       if (!response || !response.ok) throw new Error((payload && payload.error) || "机会池读取失败。");
       applyOpportunityPanel(payload);
@@ -2176,6 +2203,7 @@ function createApp(deps) {
     setCurrentGoal(value) {
       state.currentGoal = saveCurrentGoal(storage, value);
       renderCurrentGoal();
+      loadOpportunities();
       return state.currentGoal;
     },
     openGoalEditor,

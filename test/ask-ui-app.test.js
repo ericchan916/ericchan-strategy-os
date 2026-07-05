@@ -1141,6 +1141,51 @@ test("renderOpportunityPanel: 渲染中文状态、统计、编辑表单和空�
   assert.equal(html.listHtml.includes("validate"), true, "select value 可保留内部值，但可见状态应中文");
 });
 
+test("V0.6: renderOpportunityPanel renders Chinese Goal match badges", () => {
+  const html = renderOpportunityPanel({
+    stats: { total: 1 },
+    opportunities: [
+      {
+        id: "opp-goal",
+        opportunityName: "AI 机会简报助手",
+        status: "validate",
+        statusLabel: "待验证",
+        typeLabel: "新项目机会",
+        goalMatch: "高匹配",
+        todayPriority: "今日优先",
+        priorityReason: "符合 7 天 MVP 验证方向，且已有下一步。",
+        isTodayPriority: true,
+        nextAction: "7 天内跑通一个页面"
+      }
+    ]
+  });
+  assert.ok(html.listHtml.includes("高匹配"));
+  assert.ok(html.listHtml.includes("今日优先"));
+  assert.ok(html.listHtml.includes("符合 7 天 MVP 验证方向"));
+  assert.ok(html.listHtml.includes("opportunity-item--today"));
+  assert.equal(html.listHtml.includes("high"), false);
+  assert.equal(html.listHtml.includes("todayPriority"), false);
+});
+
+test("V0.6: no Goal opportunity UI shows 未判断 instead of fake low match", () => {
+  const html = renderOpportunityPanel({
+    opportunities: [
+      {
+        id: "opp-unknown",
+        opportunityName: "AI 机会简报助手",
+        status: "validate",
+        statusLabel: "待验证",
+        goalMatch: "未判断",
+        todayPriority: "可观察",
+        priorityReason: "设置当前目标后，机会池会判断今日优先级。"
+      }
+    ]
+  });
+  assert.ok(html.listHtml.includes("未判断"));
+  assert.ok(html.listHtml.includes("设置当前目标后"));
+  assert.equal(html.listHtml.includes("低匹配"), false);
+});
+
 // ============== V0.3.6 sources panel HTML / CSS 静态断言 ==============
 
 test("HTML 含参考来源容器 #searchSources（默认 hidden）", () => {
@@ -1794,6 +1839,38 @@ test("startAskUiServer: GET /api/opportunities 不回归", async () => {
   }
 });
 
+test("V0.6: GET /api/opportunities derives Goal match without persisting it", async () => {
+  const { startAskUiServer } = require("../scripts/start-ask-ui");
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-goal-api-"));
+  const server = await startAskUiServer({ rootDir, port: 52971, host: "127.0.0.1" });
+  try {
+    await httpRequest({
+      port: 52971,
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        title: "AI 机会简报助手",
+        oneLineSummary: "面向独立开发者的小型 AI 产品",
+        nextAction: "7 天内跑通一个最小 MVP 页面",
+        tags: ["独立开发者", "可快速验证"],
+        status: "validate"
+      }
+    });
+    const goal = encodeURIComponent("用战略OS筛选适合独立开发者的小型 AI 产品，并优先推进 7 天内可验证的 MVP。");
+    const { status, json } = await httpRequest({ port: 52971, method: "GET", path: `/api/opportunities?currentGoal=${goal}` });
+    assert.equal(status, 200);
+    assert.equal(json.opportunities[0].goalMatch, "高匹配");
+    assert.equal(json.opportunities[0].todayPriority, "今日优先");
+    assert.equal(json.opportunities[0].isTodayPriority, true);
+
+    const raw = fs.readFileSync(path.join(rootDir, "data", "opportunities", "opportunity-pool.json"), "utf8");
+    assert.equal(raw.includes("goalMatch"), false);
+    assert.equal(raw.includes("todayPriority"), false);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("startAskUiServer: PATCH /api/opportunities/:id 不回归", async () => {
   const { startAskUiServer } = require("../scripts/start-ask-ui");
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "strategy-os-op-api8-"));
@@ -2348,6 +2425,33 @@ test("V0.5: 设置 / 修改 / 清除 currentGoal 更新 storage 和 UI", () => {
   assert.equal(app.state.currentGoal, "");
   assert.equal(nodes.currentGoalText.textContent, "未设置");
   assert.equal(storage.getItem(CURRENT_GOAL_KEY), null);
+});
+
+test("V0.6: Goal 修改 / 清除后机会池重新请求派生优先级", async () => {
+  const calls = [];
+  const nodes = makeFakeNodes();
+  const app = createApp({
+    nodes,
+    storage: null,
+    fetchImpl: (path) => {
+      calls.push(String(path));
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ opportunities: [], stats: { total: 0 } })
+      });
+    }
+  });
+  app.mount();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  app.setCurrentGoal("用战略OS筛选适合独立开发者的小型 AI 产品");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(calls.some((path) => path.includes("/api/opportunities?currentGoal=")));
+
+  calls.length = 0;
+  app.clearCurrentGoal();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(calls.includes("/api/opportunities"));
+  assert.equal(calls.some((path) => path.includes("currentGoal=")), false);
 });
 
 test("V0.5: submitAsk 会把 currentGoal 传给 /api/ask", async () => {
