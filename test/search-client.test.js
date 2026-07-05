@@ -183,6 +183,46 @@ test("bocha success posts expected request and normalizes response", async () =>
   assert.equal(JSON.stringify(toPublicSearchMeta(result)).includes("test-bocha-key"), false);
 });
 
+test("V0.6.3-hotfix: search query and public sources redact short sk-like values", async () => {
+  const requestBodies = [];
+  const result = await searchWeb({
+    query: "请搜索 sk-leakTestABC AI Agent 机会",
+    env: {
+      STRATEGY_OS_SEARCH_ENABLED: "true",
+      STRATEGY_OS_SEARCH_PROVIDER: "bocha",
+      STRATEGY_OS_SEARCH_API_KEY: "test-bocha-key",
+      STRATEGY_OS_SEARCH_MAX_RESULTS: "3"
+    },
+    fetchImpl: async (_url, options) => {
+      requestBodies.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          webPages: {
+            value: [
+              {
+                name: "AI 工具机会 sk-sourceLeakABC",
+                url: "https://example.com/sk-urlLeakABC",
+                siteName: "Example sk-siteLeakABC",
+                summary: "AI Agent 产品机会 sk-snippetLeakABC",
+                datePublished: "2026-07-01T00:00:00Z"
+              }
+            ]
+          }
+        })
+      };
+    }
+  });
+
+  const serializedRequest = JSON.stringify(requestBodies);
+  assert.equal(serializedRequest.includes("sk-leakTestABC"), false);
+  assert.equal(JSON.stringify(result).includes("sk-"), false);
+  const publicMeta = toPublicSearchMeta(result);
+  assert.equal(JSON.stringify(publicMeta).includes("sk-"), false);
+  assert.ok(JSON.stringify(publicMeta).includes("[redacted]"));
+});
+
 test("bocha request uses planner freshness for recent news", async () => {
   const requestBodies = [];
   const result = await searchWeb({

@@ -571,6 +571,125 @@ test("API key is never included in the user prompt", () => {
   assert.equal(prompt.includes("LLM_API_KEY"), false);
 });
 
+test("V0.6.3-hotfix: buildLlmUserPrompt redacts sk-like question and search metadata", () => {
+  const fixture = createFixture();
+  const result = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date });
+  const prompt = buildLlmUserPrompt({
+    context: result.context,
+    type: "today-action",
+    question: "我的测试 key 是 sk-leakTestABC，今天适合做什么？",
+    search: {
+      query: "sk-leakTestABC AI opportunity",
+      plannedQueries: ["sk-leakTestABC AI Agent 产品趋势"],
+      intent: "ai-opportunity",
+      results: [{
+        title: "标题 sk-leakTestABC",
+        url: "https://example.com/sk-leakTestABC",
+        source: "来源 sk-leakTestABC",
+        snippet: "摘要 sk-leakTestABC"
+      }]
+    },
+    currentGoal: "Goal sk-goalLeakABC"
+  });
+
+  assert.equal(prompt.includes("sk-leakTestABC"), false);
+  assert.equal(prompt.includes("sk-goalLeakABC"), false);
+  assert.ok(prompt.includes("[redacted]"));
+});
+
+test("V0.6.3-hotfix: Ask fallback and LLM success responses redact sk-like input and output", async () => {
+  const fixture = createFixture();
+  const local = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "我的测试 key 是 sk-leakTestABC，今天适合做什么？",
+    currentGoal: "Goal sk-goalLeakABC",
+    env: { STRATEGY_OS_LLM_ENABLED: "false" }
+  });
+  assert.equal(JSON.stringify(local).includes("sk-leakTestABC"), false);
+  assert.equal(JSON.stringify(local).includes("sk-goalLeakABC"), false);
+
+  const prompts = [];
+  const llm = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "我的测试 key 是 sk-leakTestABC，今天适合做什么？",
+    currentGoal: "Goal sk-goalLeakABC",
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-mock-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+    },
+    deps: {
+      fetch: async (_url, options) => {
+        prompts.push(JSON.parse(options.body).messages[1].content);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: "模型回显 sk-leakTestABC" } }]
+          })
+        };
+      }
+    }
+  });
+
+  assert.equal(llm.source, "llm");
+  assert.equal(prompts.some((item) => item.includes("sk-leakTestABC") || item.includes("sk-goalLeakABC")), false);
+  assert.equal(JSON.stringify(llm).includes("sk-leakTestABC"), false);
+  assert.ok(JSON.stringify(llm).includes("[redacted]"));
+});
+
+test("V0.6.3-hotfix: draft and kickoff prompts redact sk-like strings", async () => {
+  const draftPrompt = buildDraftUserPrompt({
+    question: "问题 sk-leakTestABC",
+    answer: "回答 sk-answerLeakABC",
+    currentGoal: "Goal sk-goalLeakABC"
+  });
+  assert.equal(draftPrompt.includes("sk-leakTestABC"), false);
+  assert.equal(draftPrompt.includes("sk-answerLeakABC"), false);
+  assert.equal(draftPrompt.includes("sk-goalLeakABC"), false);
+
+  const kickoffPrompt = buildKickoffUserPrompt({
+    name: "机会 sk-nameLeakABC",
+    oneLine: "一句话 sk-oneLineLeakABC",
+    note: "备注 sk-noteLeakABC",
+    next: "下一步 sk-nextLeakABC",
+    tags: ["AI Agent"],
+    sourceQuestion: "原始问题 sk-sourceLeakABC",
+    currentGoal: "Goal sk-goalLeakABC"
+  });
+  assert.equal(kickoffPrompt.includes("sk-"), false);
+
+  const kickoff = await generateKickoffPackageForOpportunity({
+    opportunity: {
+      opportunityName: "机会 sk-nameLeakABC",
+      oneLineSummary: "一句话",
+      notes: "备注",
+      nextAction: "下一步"
+    },
+    currentGoal: "Goal sk-goalLeakABC",
+    env: {
+      STRATEGY_OS_LLM_ENABLED: "true",
+      STRATEGY_OS_LLM_API_KEY: "sk-mock-key",
+      STRATEGY_OS_LLM_MODEL: "mock-model",
+      STRATEGY_OS_LLM_BASE_URL: "https://example.invalid/v1"
+    },
+    deps: {
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: "开工包回显 sk-leakTestABC" } }]
+        })
+      })
+    }
+  });
+  assert.equal(JSON.stringify(kickoff).includes("sk-leakTestABC"), false);
+  assert.equal(JSON.stringify(kickoff).includes("sk-goalLeakABC"), false);
+});
+
 test("llm client readConfig defaults to disabled", () => {
   const config = llmClient.readConfig({});
   assert.equal(config.enabled, false);

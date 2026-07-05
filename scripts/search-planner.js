@@ -1,3 +1,5 @@
+const { redactSecretLikeText } = require("./secret-redact");
+
 const FINANCE_TERMS = [
   "A股",
   "股票",
@@ -88,7 +90,7 @@ function compactQueries(items) {
 }
 
 function planSearchQueries(question, _context = null) {
-  const originalQuestion = String(question || "").trim();
+  const originalQuestion = String(redactSecretLikeText(question || "")).trim();
   const intent = classifySearchIntent(originalQuestion);
   const allowFinance = isFinanceQuestion(originalQuestion);
   const blockedTopics = allowFinance || intent !== "ai-opportunity" ? [] : FINANCE_TERMS.slice();

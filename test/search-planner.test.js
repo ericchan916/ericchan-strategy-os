@@ -36,6 +36,14 @@ test("today and recent wording use narrower freshness", () => {
   assert.equal(planSearchQueries("最近 Anthropic 有什么新闻？").freshness, "oneMonth");
 });
 
+test("V0.6.3-hotfix: planner redacts short sk-like values from queries", () => {
+  const plan = planSearchQueries("请查一下 sk-leakTestABC 最近有什么新闻？");
+  const serialized = JSON.stringify(plan);
+
+  assert.equal(serialized.includes("sk-leakTestABC"), false);
+  assert.ok(serialized.includes("[redacted]"));
+});
+
 test("ai opportunity search blocks finance pollution by default", () => {
   const plan = planSearchQueries("最近有什么机会？");
 

@@ -190,6 +190,155 @@ test("V0.5: ask UI API accepts currentGoal without writing strategy files", asyn
   assert.equal(fs.readFileSync(fixture.poolPath, "utf8"), beforePool, "currentGoal 不应写入 opportunity-pool.json");
 });
 
+test("V0.6.3-hotfix: /api/ask redacts sk-like question and currentGoal in LLM response", async () => {
+  const fixture = createFixture();
+  const oldEnv = {
+    enabled: process.env.STRATEGY_OS_LLM_ENABLED,
+    key: process.env.STRATEGY_OS_LLM_API_KEY,
+    model: process.env.STRATEGY_OS_LLM_MODEL,
+    baseUrl: process.env.STRATEGY_OS_LLM_BASE_URL
+  };
+  const oldFetch = globalThis.fetch;
+  let capturedPrompt = "";
+  process.env.STRATEGY_OS_LLM_ENABLED = "true";
+  process.env.STRATEGY_OS_LLM_API_KEY = "sk-real-test-key";
+  process.env.STRATEGY_OS_LLM_MODEL = "mock-model";
+  process.env.STRATEGY_OS_LLM_BASE_URL = "https://example.invalid/v1";
+  globalThis.fetch = async (_url, options) => {
+    capturedPrompt = JSON.parse(options.body).messages[1].content;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "回答里回显 sk-leakTestABC，也应该被后端脱敏。" } }]
+      })
+    };
+  };
+
+  try {
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: {
+          question: "我的测试 key 是 sk-leakTestABC，今天适合做什么？",
+          currentGoal: "当前 Goal sk-goalLeakABC"
+        }
+      });
+      const payload = JSON.parse(response.body);
+      const serialized = JSON.stringify(payload);
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.source, "llm");
+      assert.equal(capturedPrompt.includes("sk-leakTestABC"), false);
+      assert.equal(capturedPrompt.includes("sk-goalLeakABC"), false);
+      assert.equal(serialized.includes("sk-leakTestABC"), false);
+      assert.equal(serialized.includes("sk-goalLeakABC"), false);
+      assert.ok(serialized.includes("[redacted]"));
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldEnv.enabled === undefined) delete process.env.STRATEGY_OS_LLM_ENABLED;
+    else process.env.STRATEGY_OS_LLM_ENABLED = oldEnv.enabled;
+    if (oldEnv.key === undefined) delete process.env.STRATEGY_OS_LLM_API_KEY;
+    else process.env.STRATEGY_OS_LLM_API_KEY = oldEnv.key;
+    if (oldEnv.model === undefined) delete process.env.STRATEGY_OS_LLM_MODEL;
+    else process.env.STRATEGY_OS_LLM_MODEL = oldEnv.model;
+    if (oldEnv.baseUrl === undefined) delete process.env.STRATEGY_OS_LLM_BASE_URL;
+    else process.env.STRATEGY_OS_LLM_BASE_URL = oldEnv.baseUrl;
+  }
+});
+
+test("V0.6.3-hotfix: /api/ask redacts sk-like strings from search query and sources", async () => {
+  const fixture = createFixture();
+  const oldEnv = {
+    llmEnabled: process.env.STRATEGY_OS_LLM_ENABLED,
+    llmKey: process.env.STRATEGY_OS_LLM_API_KEY,
+    llmModel: process.env.STRATEGY_OS_LLM_MODEL,
+    llmBaseUrl: process.env.STRATEGY_OS_LLM_BASE_URL,
+    searchEnabled: process.env.STRATEGY_OS_SEARCH_ENABLED,
+    provider: process.env.STRATEGY_OS_SEARCH_PROVIDER,
+    searchKey: process.env.STRATEGY_OS_SEARCH_API_KEY
+  };
+  const oldFetch = globalThis.fetch;
+  const searchBodies = [];
+  const llmPrompts = [];
+  process.env.STRATEGY_OS_LLM_ENABLED = "true";
+  process.env.STRATEGY_OS_LLM_API_KEY = "sk-real-test-key";
+  process.env.STRATEGY_OS_LLM_MODEL = "mock-model";
+  process.env.STRATEGY_OS_LLM_BASE_URL = "https://llm.example.invalid/v1";
+  process.env.STRATEGY_OS_SEARCH_ENABLED = "true";
+  process.env.STRATEGY_OS_SEARCH_PROVIDER = "bocha";
+  process.env.STRATEGY_OS_SEARCH_API_KEY = "sk-search-test-key";
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (String(url).includes("bochaai")) {
+      searchBodies.push(body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          webPages: {
+            value: [{
+              name: "结果标题 sk-leakTestABC",
+              url: "https://example.com/sk-leakTestABC",
+              siteName: "来源 sk-leakTestABC",
+              summary: "摘要 sk-leakTestABC AI 产品机会",
+              datePublished: "2026-07-01T00:00:00Z"
+            }]
+          }
+        })
+      };
+    }
+    llmPrompts.push(body.messages[1].content);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "联网回答 sk-leakTestABC" } }]
+      })
+    };
+  };
+
+  try {
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: {
+          question: "请联网搜索 sk-leakTestABC 最近有什么适合独立开发者做的小型 AI 项目？",
+          useSearch: true
+        }
+      });
+      const payload = JSON.parse(response.body);
+      const serialized = JSON.stringify(payload);
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.search.used, true);
+      assert.equal(searchBodies.some((body) => JSON.stringify(body).includes("sk-leakTestABC")), false);
+      assert.equal(llmPrompts.some((prompt) => prompt.includes("sk-leakTestABC")), false);
+      assert.equal(serialized.includes("sk-leakTestABC"), false);
+      assert.ok(serialized.includes("[redacted]"));
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldEnv.llmEnabled === undefined) delete process.env.STRATEGY_OS_LLM_ENABLED;
+    else process.env.STRATEGY_OS_LLM_ENABLED = oldEnv.llmEnabled;
+    if (oldEnv.llmKey === undefined) delete process.env.STRATEGY_OS_LLM_API_KEY;
+    else process.env.STRATEGY_OS_LLM_API_KEY = oldEnv.llmKey;
+    if (oldEnv.llmModel === undefined) delete process.env.STRATEGY_OS_LLM_MODEL;
+    else process.env.STRATEGY_OS_LLM_MODEL = oldEnv.llmModel;
+    if (oldEnv.llmBaseUrl === undefined) delete process.env.STRATEGY_OS_LLM_BASE_URL;
+    else process.env.STRATEGY_OS_LLM_BASE_URL = oldEnv.llmBaseUrl;
+    if (oldEnv.searchEnabled === undefined) delete process.env.STRATEGY_OS_SEARCH_ENABLED;
+    else process.env.STRATEGY_OS_SEARCH_ENABLED = oldEnv.searchEnabled;
+    if (oldEnv.provider === undefined) delete process.env.STRATEGY_OS_SEARCH_PROVIDER;
+    else process.env.STRATEGY_OS_SEARCH_PROVIDER = oldEnv.provider;
+    if (oldEnv.searchKey === undefined) delete process.env.STRATEGY_OS_SEARCH_API_KEY;
+    else process.env.STRATEGY_OS_SEARCH_API_KEY = oldEnv.searchKey;
+  }
+});
+
 test("ask UI API returns public search metadata when useSearch=true", async () => {
   const fixture = createFixture();
   const oldEnv = {
@@ -265,6 +414,80 @@ test("ask UI opportunities API returns stats and supports whitelisted PATCH", as
     assert.equal(patchPayload.opportunity.opportunityName, "我重命名了"); // V0.3.10-hotfix：现在允许
     const saved = JSON.parse(fs.readFileSync(fixture.poolPath, "utf8"));
     assert.equal(saved.opportunities[0].opportunityName, "我重命名了");
+  });
+});
+
+test("V0.6.3-hotfix: opportunity draft API redacts sk-like request and response fields", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "POST",
+      path: "/api/opportunities/draft",
+      body: {
+        question: "问题 sk-leakTestABC",
+        answer: "回答 sk-answerLeakABC",
+        currentGoal: "目标 sk-goalLeakABC"
+      }
+    });
+    const payload = JSON.parse(response.body);
+    const serialized = JSON.stringify(payload);
+
+    assert.equal(response.status, 200);
+    assert.equal(serialized.includes("sk-leakTestABC"), false);
+    assert.equal(serialized.includes("sk-answerLeakABC"), false);
+    assert.equal(serialized.includes("sk-goalLeakABC"), false);
+    assert.ok(serialized.includes("[redacted]"));
+  });
+});
+
+test("V0.6.3-hotfix: opportunity add and patch do not persist raw sk-like values", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const addResponse = await request(baseUrl, {
+      method: "POST",
+      path: "/api/opportunities",
+      body: {
+        opportunityName: "机会 sk-leakTestABC",
+        oneLineSummary: "摘要 sk-summaryLeakABC",
+        note: "备注 sk-noteLeakABC",
+        nextAction: "动作 sk-actionLeakABC"
+      }
+    });
+    assert.equal(addResponse.status, 200);
+
+    const addPayload = JSON.parse(addResponse.body);
+    const targetId = addPayload.opportunity.id;
+    const patchResponse = await request(baseUrl, {
+      method: "PATCH",
+      path: `/api/opportunities/${targetId}`,
+      body: { notes: "补充 sk-patchLeakABC" }
+    });
+    assert.equal(patchResponse.status, 200);
+
+    const saved = fs.readFileSync(fixture.poolPath, "utf8");
+    assert.equal(saved.includes("sk-leakTestABC"), false);
+    assert.equal(saved.includes("sk-summaryLeakABC"), false);
+    assert.equal(saved.includes("sk-noteLeakABC"), false);
+    assert.equal(saved.includes("sk-actionLeakABC"), false);
+    assert.equal(saved.includes("sk-patchLeakABC"), false);
+    assert.ok(saved.includes("[redacted]"));
+  });
+});
+
+test("V0.6.3-hotfix: kickoff API redacts sk-like currentGoal and generated answer", async () => {
+  const fixture = createFixture();
+  await withServer(fixture.rootDir, async (baseUrl) => {
+    const response = await request(baseUrl, {
+      method: "POST",
+      path: "/api/opportunities/opp-brief/kickoff",
+      body: { currentGoal: "目标 sk-goalLeakABC" }
+    });
+    const payload = JSON.parse(response.body);
+    const serialized = JSON.stringify(payload);
+
+    assert.equal(response.status, 200);
+    assert.equal(serialized.includes("sk-goalLeakABC"), false);
+    assert.ok(serialized.includes("[redacted]"));
   });
 });
 

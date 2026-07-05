@@ -845,6 +845,27 @@ test("loadHistory: 从 storage 读回历史并处理坏 JSON", () => {
   assert.equal(store2.list()[0].question, "Q");
 });
 
+test("V0.6.3-hotfix: history storage never keeps raw sk-like values", () => {
+  const storage = makeMemoryStorage();
+  saveHistory(storage, [
+    {
+      question: "问题 sk-leakTestABC",
+      answer: "回答 sk-answerLeakABC",
+      source: "llm",
+      searchSources: [{ title: "来源 sk-sourceLeakABC", url: "https://example.com/sk-urlLeakABC", source: "sk-siteLeakABC" }],
+      searchPlannedQueries: ["查询 sk-queryLeakABC"]
+    }
+  ]);
+  const raw = storage.getItem("strategyOsAskHistory");
+  assert.equal(raw.includes("sk-leakTestABC"), false);
+  assert.equal(raw.includes("sk-answerLeakABC"), false);
+  assert.equal(raw.includes("sk-sourceLeakABC"), false);
+  assert.ok(raw.includes("[redacted]"));
+
+  const store = createHistoryStore({ storage, maxSize: 20 });
+  assert.equal(JSON.stringify(store.list()).includes("sk-"), false);
+});
+
 test("removeHistoryItem: 按 id 移除一条", () => {
   const storage = makeMemoryStorage();
   const store = createHistoryStore({ storage, maxSize: 20 });
@@ -918,6 +939,20 @@ test("handleCopyClick: 触发 clipboard.writeText 并返回成功状态", async 
   assert.equal(written, "# 标题\n\n结论：今天轻量。");
 });
 
+test("V0.6.3-hotfix: clipboard payload redacts short sk-like values", async () => {
+  const payload = buildClipboardPayload({ answer: "回答 sk-leakTestABC" });
+  assert.equal(payload.text.includes("sk-leakTestABC"), false);
+  assert.ok(payload.text.includes("[redacted]"));
+
+  let written = "";
+  const result = await handleCopyClick({
+    answer: "复制 sk-copyLeakABC",
+    clipboardImpl: async (text) => { written = text; }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(written.includes("sk-copyLeakABC"), false);
+});
+
 test("handleCopyClick: clipboard 抛错时返回 ok:false 和中文错误", async () => {
   const failingClipboard = async () => {
     throw new Error("Document is not focused");
@@ -968,6 +1003,22 @@ test("buildClaudeCodeTaskPrompt: 包含开工包正文与真实网页验证要�
   assert.ok(prompt.includes("不要碰 loading 动画"));
   assert.ok(prompt.includes("[redacted]"));
   assert.equal(prompt.includes("sk-claudeSecret123456"), false);
+});
+
+test("V0.6.3-hotfix: task prompts redact short sk-like values from question answer and Goal", () => {
+  const common = {
+    question: "问题 sk-leakTestABC",
+    answer: "# 开工包\n正文 sk-answerLeakABC",
+    currentGoal: "目标 sk-goalLeakABC"
+  };
+  const codex = buildCodexTaskPrompt(common);
+  const claude = buildClaudeCodeTaskPrompt(common);
+  for (const prompt of [codex, claude]) {
+    assert.equal(prompt.includes("sk-leakTestABC"), false);
+    assert.equal(prompt.includes("sk-answerLeakABC"), false);
+    assert.equal(prompt.includes("sk-goalLeakABC"), false);
+    assert.ok(prompt.includes("[redacted]"));
+  }
 });
 
 test("任务提示词模板: 空 answer 有 fallback", () => {
@@ -2475,6 +2526,39 @@ test("V0.5: submitAsk 会把 currentGoal 传给 /api/ask", async () => {
   assert.equal(captured.question, "今天适合做什么？");
   assert.equal(captured.currentGoal, "用战略OS筛选适合独立开发者的小型 AI 产品");
   assert.equal(captured.useSearch, undefined, "默认不联网不应被 currentGoal 改变");
+});
+
+test("V0.6.3-hotfix: submitAsk redacts question, currentGoal, answer and history", async () => {
+  let captured = null;
+  const storage = makeMemoryStorage();
+  const nodes = makeFakeNodes();
+  nodes.questionInput.value = "我的测试 key 是 sk-leakTestABC，今天适合做什么？";
+  const app = createApp({
+    nodes,
+    storage,
+    fetchImpl: (path, init = {}) => {
+      if (path === "/api/ask") captured = JSON.parse(init.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          answer: "模型回答 sk-answerLeakABC",
+          source: "llm",
+          search: null,
+          warning: null
+        })
+      });
+    }
+  });
+  app.mount();
+  app.setCurrentGoal("目标 sk-goalLeakABC");
+  await app.submitAsk();
+
+  assert.equal(JSON.stringify(captured).includes("sk-leakTestABC"), false);
+  assert.equal(JSON.stringify(captured).includes("sk-goalLeakABC"), false);
+  assert.equal(nodes.questionEcho.innerHTML.includes("sk-leakTestABC"), false);
+  assert.equal(nodes.answerOutput.innerHTML.includes("sk-answerLeakABC"), false);
+  assert.equal(storage.getItem("strategyOsAskHistory").includes("sk-"), false);
+  assert.ok(storage.getItem("strategyOsAskHistory").includes("[redacted]"));
 });
 
 test("V0.5.1: 清除 currentGoal 后 submitAsk 不再带 currentGoal", async () => {

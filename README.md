@@ -1837,6 +1837,17 @@ V0.6.2 只在视觉层做低风险精修，不新增功能、不动后端、不�
 - `npm test` 612 / 612 passing。
 - `http://127.0.0.1:5177/` 与 `http://[::1]:5177/` 均返回 200；server 仅绑定 `127.0.0.1` 与 `::1`，不暴露 `0.0.0.0` / `::`。
 
+## V0.6.3-hotfix Ask 输入与响应脱敏
+
+V0.6.3-hotfix 修复的是安全回归，不新增功能。
+
+- Ask 输入中的 `sk-*` 形态内容在进入 LLM prompt、搜索 query、fallback 回答和 API response 前都会脱敏为 `[redacted]`。
+- 当前 Goal、智能机会草稿、开工包、搜索来源 / 搜索过程、最近提问历史、localStorage history、普通复制、Codex / Claude Code 任务复制都会走同一类脱敏边界。
+- 短测试串也会脱敏，例如 `sk-leakTestABC`，不再只处理长 key。
+- 后端入口和 Ask / Search 内部各做一层防御，前端展示、历史和剪贴板再做一层兜底；这不是单纯的前端显示替换。
+- 默认不联网原则不变；LLM 动态回答、按需联网搜索、Goal 匹配度、今日优先级、固定视口工作台不变。
+- loading 动画未修改；`.env`、`opportunity-pool.json`、`data/opportunities/backups` 不提交。
+
 ## V0.3.7 搜索意图改写与相关性过滤
 
 V0.3.7 在调用搜索 provider 前增加轻量 Search Planner。它不会让系统默认联网，只在用户勾选“本次联网搜索”或 CLI 使用 `--search` 后生效。

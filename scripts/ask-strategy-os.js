@@ -446,27 +446,29 @@ async function resolveSearch({ question, env, deps = {} }) {
 function askStrategyOs({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, currentGoal = "" } = {}) {
   // 同步入口：不调用 LLM，始终返回本地规则回答。
   // 服务端 /api/ask 应改用 askStrategyOsAsync 以启用 LLM 动态回答。
+  const safeQuestion = sanitizeText(question);
   const context = loadAskContext({ rootDir, date });
   context.currentGoal = sanitizeCurrentGoal(currentGoal);
-  return {
-    type: classifyQuestion(question),
-    answer: renderAnswer({ context, question }),
+  return redactSecretLikeText({
+    type: classifyQuestion(safeQuestion),
+    answer: renderAnswer({ context, question: safeQuestion }),
     source: "local",
     llmEnabled: isConfigured(readConfig(env)),
     warning: null,
     search: toPublicSearchMeta(null),
     context
-  };
+  });
 }
 
 async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateString(), question = "", env = process.env, useSearch = false, currentGoal = "", deps = {} } = {}) {
+  const safeQuestion = sanitizeText(question);
   const context = loadAskContext({ rootDir, date });
   context.currentGoal = sanitizeCurrentGoal(currentGoal);
-  const type = classifyQuestion(question);
+  const type = classifyQuestion(safeQuestion);
   const explicitSearch = useSearch === true;
-  const searchResult = explicitSearch ? await resolveSearch({ question, env, deps }) : null;
+  const searchResult = explicitSearch ? await resolveSearch({ question: safeQuestion, env, deps }) : null;
   const searchMeta = toPublicSearchMeta(searchResult);
-  const localAnswer = appendSearchSources(renderAnswer({ context, question }), searchResult);
+  const localAnswer = sanitizeText(appendSearchSources(renderAnswer({ context, question: safeQuestion }), searchResult));
 
   const llmConfig = readConfig(env);
   const llmEnabled = isConfigured(llmConfig);
@@ -487,20 +489,20 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     const answer = await callChatCompletion({
       config: llmConfig,
       systemPrompt: readSystemPrompt(),
-      userPrompt: buildLlmUserPrompt({ context, type, question, search: searchResult, currentGoal: context.currentGoal }),
+      userPrompt: buildLlmUserPrompt({ context, type, question: safeQuestion, search: searchResult, currentGoal: context.currentGoal }),
       fetchImpl: deps.fetch,
       abortImpl: deps.AbortController
     });
     if (answer) {
-      return {
+      return redactSecretLikeText({
         type,
-        answer,
+        answer: sanitizeText(answer),
         source: "llm",
         llmEnabled: true,
         warning: null,
         search: searchMeta,
         context
-      };
+      });
     }
   } catch (error) {
     logLlmError(error);
@@ -512,7 +514,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
           userPrompt: buildLlmUserPrompt({
             context,
             type,
-            question,
+            question: safeQuestion,
             search: compactSearchForLlmRetry(searchResult),
             currentGoal: context.currentGoal
           }),
@@ -520,15 +522,15 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
           abortImpl: deps.AbortController
         });
         if (answer) {
-          return {
+          return redactSecretLikeText({
             type,
-            answer,
+            answer: sanitizeText(answer),
             source: "llm",
             llmEnabled: true,
             warning: null,
             search: searchMeta,
             context
-          };
+          });
         }
       } catch (retryError) {
         logLlmError(retryError);
@@ -536,7 +538,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     }
   }
 
-  return {
+  return redactSecretLikeText({
     type,
     answer: localAnswer,
     source: "local-fallback",
@@ -544,7 +546,7 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
     warning: LLM_FALLBACK_WARNING,
     search: searchMeta,
     context
-  };
+  });
 }
 
 // V0.3.11：从机会卡生成"开工包"
@@ -600,7 +602,7 @@ async function generateKickoffPackageForOpportunity({ opportunity, env = process
       abortImpl: deps.AbortController
     });
     if (answer) {
-      return { answer, source: "llm", warning: null, opportunity };
+      return redactSecretLikeText({ answer: sanitizeText(answer), source: "llm", warning: null, opportunity });
     }
   } catch (error) {
     logLlmError(error);
@@ -888,14 +890,16 @@ function inferKickoffFields({ name = "", oneLine = "", note = "", next = "", tag
 
 function buildSparseKickoff({ name, sourceQuestion, currentGoal = "" }) {
   // V0.3.11-hotfix：信息稀疏时也用 inferKickoffFields 推断每节具体内容
-  const inferred = inferKickoffFields({ name, oneLine: "", note: "", next: "", tags: [] });
+  const safeName = sanitizeText(name).slice(0, 120) || "未命名机会";
+  const safeSourceQuestion = sanitizeText(sourceQuestion).slice(0, 120);
+  const inferred = inferKickoffFields({ name: safeName, oneLine: "", note: "", next: "", tags: [] });
   const safeCurrentGoal = sanitizeCurrentGoal(currentGoal);
-  const goalMeta = deriveKickoffGoalMeta({ name, oneLine: "", note: "", next: "", tags: [], currentGoal: safeCurrentGoal });
+  const goalMeta = deriveKickoffGoalMeta({ name: safeName, oneLine: "", note: "", next: "", tags: [], currentGoal: safeCurrentGoal });
   const lines = [];
-  lines.push(`# 开工包：${name}（保守版）`);
+  lines.push(`# 开工包：${safeName}（保守版）`);
   lines.push("");
   lines.push("1. 项目一句话");
-  lines.push(`基于「${name}」机会的最小可执行项目。`);
+  lines.push(`基于「${safeName}」机会的最小可执行项目。`);
   lines.push("");
   lines.push("2. 为什么值得做");
   lines.push(inferred.why);
@@ -934,13 +938,13 @@ function buildSparseKickoff({ name, sourceQuestion, currentGoal = "" }) {
   lines.push("- Step 3：收集 3-5 个真实用户反馈，决定继续 / 暂停 / 放弃。");
   lines.push("");
   lines.push("10. 风险与卡点");
-  if (sourceQuestion) lines.push(`- 原始问题方向：${sourceQuestion.slice(0, 120)}`);
+  if (safeSourceQuestion) lines.push(`- 原始问题方向：${safeSourceQuestion}`);
   for (const r of inferred.risks) {
     lines.push(`- ${r}`);
   }
   lines.push("");
   lines.push("11. 下一步提示词草稿");
-  lines.push(`帮我把"${name}"拆成 3 个可执行的下一步动作。`);
+  lines.push(`帮我把"${safeName}"拆成 3 个可执行的下一步动作。`);
   return lines.join("\n");
 }
 
@@ -960,6 +964,10 @@ function sanitizeCurrentGoal(value) {
     .trim();
 }
 
+function sanitizeText(value) {
+  return String(redactSecretLikeText(value == null ? "" : value));
+}
+
 function appendCurrentGoalAnchor(answer, context) {
   const goal = sanitizeCurrentGoal(context && context.currentGoal);
   if (!goal) return answer;
@@ -971,10 +979,12 @@ function appendCurrentGoalAnchor(answer, context) {
 }
 
 function buildLlmUserPrompt({ context, type, question, search = null, currentGoal = "" }) {
+  const safeQuestion = sanitizeText(question).trim();
+  const safeSearch = redactSecretLikeText(search);
   const safeGoal = sanitizeCurrentGoal(currentGoal || (context && context.currentGoal));
   const lines = [];
   lines.push(`当前问题类型：${type}`);
-  lines.push(`用户原始问题：${String(question || "").trim() || "（无）"}`);
+  lines.push(`用户原始问题：${safeQuestion || "（无）"}`);
   if (safeGoal) {
     lines.push("");
     lines.push("【当前目标】");
@@ -1015,27 +1025,27 @@ function buildLlmUserPrompt({ context, type, question, search = null, currentGoa
       lines.push(trimContext(action.action, 200));
     }
   }
-  if (search && Array.isArray(search.results) && search.results.length) {
-    const compact = search.compact === true;
+  if (safeSearch && Array.isArray(safeSearch.results) && safeSearch.results.length) {
+    const compact = safeSearch.compact === true;
     const maxSearchResults = compact ? 3 : 5;
     const snippetMax = compact ? 120 : 280;
     lines.push("");
     lines.push("【外部搜索结果摘要】");
-    lines.push(`原始问题：${trimContext(question, 160)}`);
-    lines.push(`搜索意图：${trimContext(search.intent || "general", 80)}`);
-    lines.push(`实际搜索词：${trimContext((search.plannedQueries || [search.query || question]).join(" / "), compact ? 180 : 360)}`);
-    if (search.freshness) lines.push(`搜索时间范围：${trimContext(search.freshness, 80)}`);
-    if (search.recency && !compact) {
-      lines.push(`时效性要求：${search.recency.required ? "需要近期结果" : "不强制近期"}；${trimContext(search.recency.reason || "", 180)}`);
-      lines.push(`时效性过滤：过旧 ${Number(search.recency.filteredOldCount || 0)} 条，缺少日期 ${Number(search.recency.missingDateCount || 0)} 条。`);
+    lines.push(`原始问题：${trimContext(safeQuestion, 160)}`);
+    lines.push(`搜索意图：${trimContext(safeSearch.intent || "general", 80)}`);
+    lines.push(`实际搜索词：${trimContext((safeSearch.plannedQueries || [safeSearch.query || safeQuestion]).join(" / "), compact ? 180 : 360)}`);
+    if (safeSearch.freshness) lines.push(`搜索时间范围：${trimContext(safeSearch.freshness, 80)}`);
+    if (safeSearch.recency && !compact) {
+      lines.push(`时效性要求：${safeSearch.recency.required ? "需要近期结果" : "不强制近期"}；${trimContext(safeSearch.recency.reason || "", 180)}`);
+      lines.push(`时效性过滤：过旧 ${Number(safeSearch.recency.filteredOldCount || 0)} 条，缺少日期 ${Number(safeSearch.recency.missingDateCount || 0)} 条。`);
     }
-    if (search.filters && !compact) {
-      lines.push(`相关性过滤：无关财经 ${Number(search.filters.blockedTopicCount || 0)} 条，重复 ${Number(search.filters.duplicateCount || 0)} 条。`);
+    if (safeSearch.filters && !compact) {
+      lines.push(`相关性过滤：无关财经 ${Number(safeSearch.filters.blockedTopicCount || 0)} 条，重复 ${Number(safeSearch.filters.duplicateCount || 0)} 条。`);
     }
-    if (search.quality && !compact) {
-      lines.push(`搜索质量摘要：平均 ${Number(search.quality.averageScore || 0)}，最高 ${Number(search.quality.topSourceScore || 0)}，低质来源 ${Number(search.quality.lowQualityCount || 0)} 条。${trimContext(search.quality.weakReason || "", 120)}`);
+    if (safeSearch.quality && !compact) {
+      lines.push(`搜索质量摘要：平均 ${Number(safeSearch.quality.averageScore || 0)}，最高 ${Number(safeSearch.quality.topSourceScore || 0)}，低质来源 ${Number(safeSearch.quality.lowQualityCount || 0)} 条。${trimContext(safeSearch.quality.weakReason || "", 120)}`);
     }
-    for (const item of search.results.slice(0, maxSearchResults)) {
+    for (const item of safeSearch.results.slice(0, maxSearchResults)) {
       lines.push(`- 标题：${trimContext(item.title, 120)}`);
       lines.push(`  URL：${trimContext(item.url, 220)}`);
       lines.push(`  来源：${trimContext(item.source, 80)}`);
@@ -1158,10 +1168,11 @@ function readDraftSystemPrompt() {
 }
 
 function buildDraftUserPrompt({ question, answer, search, currentGoal = "" } = {}) {
-  const q = String(question || "").slice(0, 1000);
-  const a = String(answer || "").slice(0, 2000);
+  const q = sanitizeText(question).slice(0, 1000);
+  const a = sanitizeText(answer).slice(0, 2000);
+  const safeSearch = redactSecretLikeText(search);
   const goal = sanitizeCurrentGoal(currentGoal);
-  const searchUsed = search && search.used ? "本次已联网搜索" : "未使用联网搜索";
+  const searchUsed = safeSearch && safeSearch.used ? "本次已联网搜索" : "未使用联网搜索";
   const goalText = goal
     ? `当前目标：${goal}\n草稿应判断机会是否服务当前目标；如果目标强调 7 天验证 / 独立开发者 / 小型 AI 产品，oneLineSummary、note、nextAction 要体现这个约束，但不要机械复制整句 Goal。\n`
     : "";
@@ -1185,7 +1196,7 @@ function parseLlmDraftJson(raw) {
 }
 
 function pickDraftFields(parsed) {
-  const p = parsed && typeof parsed === "object" ? parsed : {};
+  const p = redactSecretLikeText(parsed && typeof parsed === "object" ? parsed : {});
   const rawTags = Array.isArray(p.suggestedTags)
     ? p.suggestedTags.map((t) => String(t || "").slice(0, 40)).filter(Boolean)
     : [];
@@ -1235,6 +1246,10 @@ async function generateOpportunityDraft({
   env = process.env,
   deps = {}
 } = {}) {
+  question = sanitizeText(question);
+  answer = sanitizeText(answer);
+  search = redactSecretLikeText(search);
+  currentGoal = sanitizeCurrentGoal(currentGoal);
   const fetchImpl = deps.fetch || (typeof fetch !== "undefined" ? fetch : null);
   const abortImpl = deps.AbortController || (typeof AbortController !== "undefined" ? AbortController : null);
   let llmConfig = null;

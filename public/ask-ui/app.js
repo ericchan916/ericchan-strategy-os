@@ -136,24 +136,24 @@ function makeHistoryId(prefix = "h") {
 // 把 LLM 回包 / 用户提问数据整理成标准结构。
 function normalizeHistoryItem(input) {
   const raw = input && typeof input === "object" ? input : {};
-  const question = typeof raw.question === "string" ? raw.question : "";
-  const answer = typeof raw.answer === "string" ? raw.answer : "";
+  const question = redactPromptText(typeof raw.question === "string" ? raw.question : "");
+  const answer = redactPromptText(typeof raw.answer === "string" ? raw.answer : "");
   const source = typeof raw.source === "string" ? raw.source : "local";
-  const warning = raw.warning == null ? null : String(raw.warning);
+  const warning = raw.warning == null ? null : redactPromptText(String(raw.warning));
   const searchUsed = raw.searchUsed === true;
-  const searchWarning = raw.searchWarning == null ? null : String(raw.searchWarning);
+  const searchWarning = raw.searchWarning == null ? null : redactPromptText(String(raw.searchWarning));
   const searchResultCount = Number.isFinite(Number(raw.searchResultCount)) ? Number(raw.searchResultCount) : 0;
   const searchSources = Array.isArray(raw.searchSources)
     ? raw.searchSources
         .slice(0, 5)
         .map((item) => ({
-          title: typeof item.title === "string" ? item.title : "",
-          url: typeof item.url === "string" ? item.url : "",
-          source: typeof item.source === "string" ? item.source : ""
+          title: redactPromptText(typeof item.title === "string" ? item.title : ""),
+          url: redactPromptText(typeof item.url === "string" ? item.url : ""),
+          source: redactPromptText(typeof item.source === "string" ? item.source : "")
         }))
     : [];
   const searchPlannedQueries = Array.isArray(raw.searchPlannedQueries)
-    ? raw.searchPlannedQueries.slice(0, 3).map((item) => String(item || "")).filter(Boolean)
+    ? raw.searchPlannedQueries.slice(0, 3).map((item) => redactPromptText(String(item || ""))).filter(Boolean)
     : [];
   const searchRecencyRaw = raw.searchRecency && typeof raw.searchRecency === "object" ? raw.searchRecency : {};
   const searchFiltersRaw = raw.searchFilters && typeof raw.searchFilters === "object" ? raw.searchFilters : {};
@@ -173,7 +173,7 @@ function normalizeHistoryItem(input) {
     searchFreshness: typeof raw.searchFreshness === "string" ? raw.searchFreshness : "",
     searchRecency: {
       required: searchRecencyRaw.required === true,
-      reason: typeof searchRecencyRaw.reason === "string" ? searchRecencyRaw.reason : "",
+      reason: redactPromptText(typeof searchRecencyRaw.reason === "string" ? searchRecencyRaw.reason : ""),
       filteredOldCount: Number.isFinite(Number(searchRecencyRaw.filteredOldCount)) ? Number(searchRecencyRaw.filteredOldCount) : 0,
       missingDateCount: Number.isFinite(Number(searchRecencyRaw.missingDateCount)) ? Number(searchRecencyRaw.missingDateCount) : 0,
       oldestKeptDate: searchRecencyRaw.oldestKeptDate == null ? null : String(searchRecencyRaw.oldestKeptDate),
@@ -187,13 +187,13 @@ function normalizeHistoryItem(input) {
       averageScore: Number.isFinite(Number(searchQualityRaw.averageScore)) ? Number(searchQualityRaw.averageScore) : 0,
       topSourceScore: Number.isFinite(Number(searchQualityRaw.topSourceScore)) ? Number(searchQualityRaw.topSourceScore) : 0,
       lowQualityCount: Number.isFinite(Number(searchQualityRaw.lowQualityCount)) ? Number(searchQualityRaw.lowQualityCount) : 0,
-      weakReason: typeof searchQualityRaw.weakReason === "string" ? searchQualityRaw.weakReason : "",
+      weakReason: redactPromptText(typeof searchQualityRaw.weakReason === "string" ? searchQualityRaw.weakReason : ""),
       hasHighConfidenceSources: searchQualityRaw.hasHighConfidenceSources === true
     },
     // V0.3.11：历史项类型 (ask / kickoff-package)
     type: raw.type === "kickoff-package" ? "kickoff-package" : "ask",
-    opportunityId: typeof raw.opportunityId === "string" ? raw.opportunityId : "",
-    opportunityTitle: typeof raw.opportunityTitle === "string" ? raw.opportunityTitle : "",
+    opportunityId: redactPromptText(typeof raw.opportunityId === "string" ? raw.opportunityId : ""),
+    opportunityTitle: redactPromptText(typeof raw.opportunityTitle === "string" ? raw.opportunityTitle : ""),
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
   };
 }
@@ -257,7 +257,7 @@ function saveHistory(storage, list, _maxSize) {
     else storage.setItem(HISTORY_KEY, "[]");
     return;
   }
-  storage.setItem(HISTORY_KEY, JSON.stringify(list));
+  storage.setItem(HISTORY_KEY, JSON.stringify(toHistoryArray(list)));
 }
 
 function clearHistory(storage) {
@@ -291,7 +291,7 @@ function createHistoryStore({ storage, maxSize = DEFAULT_HISTORY_MAX } = {}) {
 // ============== Copy / Clipboard helpers (V0.3.4-hotfix) ==============
 
 function buildClipboardPayload({ answer, _question } = {}) {
-  const text = typeof answer === "string" ? answer : "";
+  const text = redactPromptText(typeof answer === "string" ? answer : "");
   // 注意：不要返回 HTML，只返回 Markdown 纯文本。
   // V0.3.6：明确忽略 searchSources / 任何外部结构，避免 raw JSON 进剪贴板。
   return { text, format: "text/markdown" };
@@ -314,7 +314,7 @@ async function handleCopyClick({ answer, clipboardImpl } = {}) {
 }
 
 function redactPromptText(value) {
-  return String(value || "").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]");
+  return String(value || "").replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
 }
 
 function normalizeCurrentGoal(value) {
@@ -1587,11 +1587,11 @@ function createApp(deps) {
   }
 
   function setCurrentAnswer(answer, source, meta = {}) {
-    state.currentAnswer = typeof answer === "string" ? answer : "";
+    state.currentAnswer = redactPromptText(typeof answer === "string" ? answer : "");
     state.currentSource = typeof source === "string" ? source : "";
     if (meta && typeof meta === "object") {
-      if (typeof meta.question === "string") state.currentQuestion = meta.question;
-      if (meta.search) state.currentSearch = meta.search;
+      if (typeof meta.question === "string") state.currentQuestion = redactPromptText(meta.question);
+      if (meta.search) state.currentSearch = redactPromptText(meta.search);
       // V0.3.11-hotfix-2：记录当前回答类型
       if (meta.answerType === "kickoff-package") state.currentAnswerType = "kickoff-package";
       else state.currentAnswerType = "ask";
@@ -1627,9 +1627,9 @@ function createApp(deps) {
     const source = state.currentSearch && state.currentSearch.used ? "search" : "ask-mode";
     const sourceUrls = state.currentSearch && Array.isArray(state.currentSearch.sources)
       ? state.currentSearch.sources.slice(0, 5).map((s) => ({
-          title: String(s.title || "").slice(0, 200),
-          url: String(s.url || "").slice(0, 500),
-          source: String(s.source || "").slice(0, 80)
+          title: redactPromptText(String(s.title || "")).slice(0, 200),
+          url: redactPromptText(String(s.url || "")).slice(0, 500),
+          source: redactPromptText(String(s.source || "")).slice(0, 80)
         }))
       : [];
     // V0.3.11-hotfix-3：先调 /api/opportunities/draft 拿智能草稿；失败 fallback 本地规则
@@ -1735,9 +1735,9 @@ function createApp(deps) {
     const source = state.currentSearch && state.currentSearch.used ? "search" : "ask-mode";
     const sourceUrls = state.currentSearch && Array.isArray(state.currentSearch.sources)
       ? state.currentSearch.sources.slice(0, 5).map((s) => ({
-          title: String(s.title || "").slice(0, 200),
-          url: String(s.url || "").slice(0, 500),
-          source: String(s.source || "").slice(0, 80)
+          title: redactPromptText(String(s.title || "")).slice(0, 200),
+          url: redactPromptText(String(s.url || "")).slice(0, 500),
+          source: redactPromptText(String(s.source || "")).slice(0, 80)
         }))
       : [];
     const body = {
@@ -1749,8 +1749,8 @@ function createApp(deps) {
       note: payload.note,
       nextAction: payload.nextAction,
       source,
-      sourceQuestion: state.currentQuestion || "",
-      sourceAnswerSummary: state.currentAnswer.slice(0, 600),
+      sourceQuestion: redactPromptText(state.currentQuestion || ""),
+      sourceAnswerSummary: redactPromptText(state.currentAnswer).slice(0, 600),
       sourceUrls
     };
     try {
@@ -1769,8 +1769,9 @@ function createApp(deps) {
       closeAddOpportunityForm();
       return { ok: true, warning };
     } catch (error) {
-      setOpportunityStatus((error && error.message) || "加入机会池失败。", "error");
-      return { ok: false, reason: (error && error.message) || "unknown" };
+      const safeMessage = redactPromptText((error && error.message) || "加入机会池失败。");
+      setOpportunityStatus(safeMessage, "error");
+      return { ok: false, reason: safeMessage || "unknown" };
     }
   }
 
@@ -1934,6 +1935,7 @@ function createApp(deps) {
   async function submitAsk() {
     if (state.inFlight) return { submitted: false, reason: "in-flight" };
     const value = input ? String(input.value || "").trim() : "";
+    const safeValue = redactPromptText(value);
     const v = validateSubmit(value);
     if (!v.ok) {
       setStatus(v.message, "error");
@@ -1955,16 +1957,16 @@ function createApp(deps) {
     }
     if (questionEcho) {
       questionEcho.hidden = false;
-      questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(value)}`;
+      questionEcho.innerHTML = `<strong>提问：</strong>${escapeHtml(safeValue)}`;
     }
-    state.currentQuestion = value;
+    state.currentQuestion = safeValue;
     state.currentSearch = null;
     applySearchSources(null);
     applySearchProcess(null);
     setCurrentAnswer("", "");
     try {
       if (!fetchImpl) throw new Error("fetch 不可用。");
-      const requestBody = { question: value };
+      const requestBody = { question: safeValue };
       if (useSearch) requestBody.useSearch = true;
       if (state.currentGoal) requestBody.currentGoal = state.currentGoal;
       const response = await fetchImpl("/api/ask", {
@@ -1978,14 +1980,14 @@ function createApp(deps) {
       }
       // 前端兜底翻译：服务端 sanitize + translate 之后，再做一遍中文化。
       const rawAnswer = payload.answer || "";
-      const translatedAnswer = translateInternalTermsClient(rawAnswer);
-      const warning = payload.warning;
+      const translatedAnswer = redactPromptText(translateInternalTermsClient(rawAnswer));
+      const warning = payload.warning ? redactPromptText(payload.warning) : payload.warning;
       const source = payload.source || "local";
-      const search = payload.search || null;
+      const search = redactPromptText(payload.search || null);
       state.currentSource = source;
       state.currentSearch = search;
       // 用 setCurrentAnswer 触发"加入机会池"按钮显隐
-      setCurrentAnswer(translatedAnswer, source, { question: value, search });
+      setCurrentAnswer(translatedAnswer, source, { question: safeValue, search });
       if (answerOutput) {
         answerOutput.innerHTML = renderMarkdown(translatedAnswer);
         answerOutput.hidden = false;
@@ -2003,7 +2005,7 @@ function createApp(deps) {
       if (answerOutput) scrollImpl(answerOutput);
       // 写历史
       historyStore.push({
-        question: value,
+        question: safeValue,
         answer: translatedAnswer,
         source,
         warning: warning || null,
@@ -2028,8 +2030,9 @@ function createApp(deps) {
       applySearchSources(null);
       applySearchProcess(null);
       setGlobalStatus(useSearch ? "searchFailed" : "idle");
-      setStatus((error && error.message) || "回答生成失败。", "error");
-      return { submitted: false, reason: (error && error.message) || "unknown" };
+      const safeMessage = redactPromptText((error && error.message) || "回答生成失败。");
+      setStatus(safeMessage, "error");
+      return { submitted: false, reason: safeMessage || "unknown" };
     } finally {
       setInFlight(false);
     }

@@ -36,7 +36,7 @@ function send(res, status, body, type = "text/plain; charset=utf-8") {
 }
 
 function sendJson(res, status, body) {
-  send(res, status, JSON.stringify(body), "application/json; charset=utf-8");
+  send(res, status, JSON.stringify(redactSecretLikeText(body)), "application/json; charset=utf-8");
 }
 
 function safeErrorMessage(error, fallback) {
@@ -109,7 +109,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     if (req.method === "POST" && url.pathname === "/api/ask") {
       try {
         const payload = JSON.parse((await readBody(req)) || "{}");
-        const question = String(payload.question || "").trim();
+        const question = String(redactSecretLikeText(payload.question || "")).trim();
         if (!question) {
           sendJson(res, 400, { error: "请输入问题。" });
           return;
@@ -118,7 +118,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           rootDir,
           question,
           useSearch: payload.useSearch === true,
-          currentGoal: payload.currentGoal
+          currentGoal: redactSecretLikeText(payload.currentGoal || "")
         });
         const responseBody = {
           type: result.type,
@@ -140,7 +140,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     if (req.method === "GET" && url.pathname === "/api/opportunities") {
       try {
         const result = loadOpportunityPool({ rootDir });
-        const currentGoal = String(url.searchParams.get("currentGoal") || "").slice(0, 300);
+        const currentGoal = String(redactSecretLikeText(url.searchParams.get("currentGoal") || "")).slice(0, 300);
         const opportunities = derivePrioritizedOpportunities(result.opportunities, currentGoal);
         sendJson(res, 200, { opportunities, stats: result.stats });
       } catch (error) {
@@ -158,7 +158,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     //  - 重复标题给出中文 warning
     if (req.method === "POST" && url.pathname === "/api/opportunities") {
       try {
-        const raw = JSON.parse((await readBody(req)) || "{}");
+        const raw = redactSecretLikeText(JSON.parse((await readBody(req)) || "{}"));
         if (!raw || typeof raw !== "object") {
           sendJson(res, 400, { error: "请求体格式不合法。" });
           return;
@@ -182,7 +182,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     // V0.3.11-hotfix-3：智能草稿 API - LLM 优先 → 规则回退
     if (req.method === "POST" && url.pathname === "/api/opportunities/draft") {
       try {
-        const raw = JSON.parse((await readBody(req, 200 * 1024)) || "{}");
+        const raw = redactSecretLikeText(JSON.parse((await readBody(req, 200 * 1024)) || "{}"));
         if (!raw || typeof raw !== "object") {
           sendJson(res, 400, { error: "请求体格式不合法。" });
           return;
@@ -210,7 +210,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
     if (req.method === "PATCH" && /^\/api\/opportunities\/[^/]+$/.test(url.pathname)) {
       try {
         const id = opportunityIdFromPath(url.pathname);
-        const payload = JSON.parse((await readBody(req)) || "{}");
+        const payload = redactSecretLikeText(JSON.parse((await readBody(req)) || "{}"));
         const result = updateOpportunity({ rootDir, id, patch: payload });
         sendJson(res, 200, { opportunity: result.opportunity, opportunities: result.opportunities, stats: result.stats });
       } catch (error) {
@@ -257,7 +257,7 @@ function createAskUiServer({ rootDir = process.cwd(), publicDir = path.join(__di
           sendJson(res, 404, { error: "没有找到这个机会，可能已被删除。" });
           return;
         }
-        const payload = JSON.parse((await readBody(req, 200 * 1024)) || "{}");
+        const payload = redactSecretLikeText(JSON.parse((await readBody(req, 200 * 1024)) || "{}"));
         const result = await generateKickoffPackageForOpportunity({
           opportunity: target,
           env: process.env,

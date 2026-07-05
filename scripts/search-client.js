@@ -8,6 +8,7 @@ const {
   filterSearchResultsByRelevance,
   planSearchQueries
 } = require("./search-planner");
+const { redactSecretLikeText } = require("./secret-redact");
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RESULTS = 5;
@@ -49,7 +50,7 @@ function hostFromUrl(url) {
 }
 
 function truncate(value, max = 500) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const text = String(redactSecretLikeText(value || "")).replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
@@ -57,7 +58,7 @@ function normalizeResults(items, maxResults) {
   return (Array.isArray(items) ? items : [])
     .slice(0, maxResults)
     .map((item) => {
-      const url = String(item.url || item.link || "").trim();
+      const url = String(redactSecretLikeText(item.url || item.link || "")).trim();
       return {
         title: truncate(item.title || item.name || url || "未命名来源", 140),
         url,
@@ -72,7 +73,7 @@ function normalizeResults(items, maxResults) {
 function normalizeBochaResults(items, maxResults) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
-      const url = String(item.url || "").trim();
+      const url = String(redactSecretLikeText(item.url || "")).trim();
       return {
         title: truncate(item.name || item.title || "未命名来源", 140),
         url,
@@ -88,8 +89,8 @@ function normalizeBochaResults(items, maxResults) {
 function resultSkeleton(config, query, plan = null) {
   return {
     provider: config.provider || "",
-    query: String(query || ""),
-    plannedQueries: plan && Array.isArray(plan.queries) ? plan.queries : [],
+    query: String(redactSecretLikeText(query || "")),
+    plannedQueries: redactSecretLikeText(plan && Array.isArray(plan.queries) ? plan.queries : []),
     intent: plan ? plan.intent : "general",
     freshness: plan ? plan.freshness : config.freshness || "",
     recency: buildRecencyMeta(plan),
@@ -113,9 +114,10 @@ function buildRecencyMeta(plan, overrides = {}) {
 }
 
 function unavailable(config, query, errorCode, warning = SEARCH_FALLBACK_WARNING) {
-  const plan = planSearchQueries(query);
+  const safeQuery = String(redactSecretLikeText(query || ""));
+  const plan = planSearchQueries(safeQuery);
   return {
-    ...resultSkeleton(config, query, plan),
+    ...resultSkeleton(config, safeQuery, plan),
     warning,
     errorCode
   };
@@ -137,7 +139,7 @@ function classifyNetworkError(error) {
 
 async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetch, abortImpl = globalThis.AbortController } = {}) {
   const config = readSearchConfig(env);
-  const q = String(query || "").trim();
+  const q = String(redactSecretLikeText(query || "")).trim();
   const plan = planSearchQueries(q, { defaultFreshness: config.freshness });
 
   if (!config.enabled) return unavailable(config, q, "disabled", "联网搜索未启用，已使用本地上下文回答。");
@@ -171,7 +173,7 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
     : relevant.weak
       ? "搜索结果相关性较弱，已保留少量结果供参考。"
       : null;
-  return {
+  return redactSecretLikeText({
     ...resultSkeleton(config, q, plan),
     results: scored.results,
     recency: buildRecencyMeta(plan, recent.meta),
@@ -182,7 +184,7 @@ async function searchWeb({ query, env = process.env, fetchImpl = globalThis.fetc
     quality: scored.summary,
     warning,
     errorCode: recent.weak ? "weak-recency" : relevant.weak ? "weak-relevance" : null
-  };
+  });
 }
 
 function parseResultDate(result) {
@@ -554,7 +556,7 @@ async function searchBocha({ config, plan, query, fetchImpl, abortImpl }) {
 }
 
 function toPublicSearchMeta(search) {
-  const result = search && typeof search === "object" ? search : {};
+  const result = redactSecretLikeText(search && typeof search === "object" ? search : {});
   const rawResults = Array.isArray(result.results) ? result.results : [];
   const sources = normalizeResults(rawResults, DEFAULT_MAX_RESULTS).map((item, index) => ({
     title: item.title,
@@ -567,7 +569,7 @@ function toPublicSearchMeta(search) {
         }
       : undefined
   }));
-  return {
+  return redactSecretLikeText({
     used: sources.length > 0,
     query: String(result.query || ""),
     plannedQueries: Array.isArray(result.plannedQueries) ? result.plannedQueries.slice(0, 4) : [],
@@ -579,7 +581,7 @@ function toPublicSearchMeta(search) {
     resultCount: sources.length,
     warning: result.warning || null,
     sources
-  };
+  });
 }
 
 function qualityLabel(score) {
