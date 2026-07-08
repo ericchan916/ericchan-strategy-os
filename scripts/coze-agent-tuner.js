@@ -132,6 +132,16 @@ function timestamp() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
 }
 
+function newBackupDir(paths) {
+  const root = path.join(paths.tunerRoot, "backups");
+  const base = timestamp();
+  for (let index = 0; ; index += 1) {
+    const suffix = index === 0 ? "" : `-${String(index).padStart(2, "0")}`;
+    const backupDir = path.join(root, `${base}${suffix}`);
+    if (!fs.existsSync(backupDir)) return backupDir;
+  }
+}
+
 function backupFile(home, file, backupDir) {
   if (!fs.existsSync(file)) return;
   const relative = path.relative(home, file);
@@ -187,7 +197,7 @@ function applyConfig(home) {
     throw new Error("No supported Coze agents found");
   }
   const config = loadTunerConfig(home);
-  const backupDir = path.join(paths.tunerRoot, "backups", timestamp());
+  const backupDir = newBackupDir(paths);
   const changed = [];
 
   if (agents.codex) {

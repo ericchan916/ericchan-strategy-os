@@ -251,6 +251,42 @@ test("restore removes Codex config that apply created from missing", () => {
   assert.equal(fs.existsSync(codexConfig), false);
 });
 
+test("same-second applies use separate backups so restore ignores stale missing manifest", () => {
+  const home = fixtureHome();
+  const codexConfig = path.join(home, ".codex", "config.toml");
+  const RealDate = Date;
+  let beforeSecondApply;
+  class FixedDate extends RealDate {
+    constructor(...args) {
+      if (args.length === 0) return new RealDate("2026-07-08T12:34:56.000Z");
+      return new RealDate(...args);
+    }
+
+    static now() {
+      return new RealDate("2026-07-08T12:34:56.000Z").getTime();
+    }
+  }
+
+  try {
+    global.Date = FixedDate;
+    tuner.run(["set", "codex", "--model", "first-model", "--effort", "medium", "--home", home]);
+    assert.equal(tuner.run(["apply", "--home", home]).code, 0);
+    beforeSecondApply = fs.readFileSync(codexConfig, "utf8");
+
+    tuner.run(["set", "codex", "--model", "second-model", "--effort", "high", "--home", home]);
+    assert.equal(tuner.run(["apply", "--home", home]).code, 0);
+  } finally {
+    global.Date = RealDate;
+  }
+
+  const backupDirs = fs.readdirSync(path.join(home, ".coze-agent-tuner", "backups")).sort();
+  assert.deepEqual(backupDirs, ["20260708-123456", "20260708-123456-01"]);
+
+  assert.equal(tuner.run(["restore", "--home", home]).code, 0);
+  assert.equal(fs.existsSync(codexConfig), true);
+  assert.equal(fs.readFileSync(codexConfig, "utf8"), beforeSecondApply);
+});
+
 test("command output never prints token-like fields from agent config", () => {
   const home = fixtureHome();
   tuner.run(["set", "claude", "--model", "opus", "--effort", "max", "--home", home]);
