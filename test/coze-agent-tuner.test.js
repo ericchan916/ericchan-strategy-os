@@ -102,6 +102,17 @@ test("set rejects unsupported effort without writing config", () => {
   const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "max", "--home", home]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Unsupported codex effort/);
+  assert.equal(result.stderr, "Unsupported codex effort\n");
+  assert.equal(fs.existsSync(path.join(home, ".coze-agent-tuner", "config.json")), false);
+});
+
+test("set does not echo token-like invalid effort", () => {
+  const home = fixtureHome();
+  const tokenLike = "sat_secret_should_not_print";
+  const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", tokenLike, "--home", home]);
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stderr, "Unsupported codex effort\n");
+  assert.doesNotMatch(result.stderr, /sat_secret_should_not_print/);
   assert.equal(fs.existsSync(path.join(home, ".coze-agent-tuner", "config.json")), false);
 });

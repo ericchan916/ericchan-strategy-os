@@ -97,7 +97,7 @@ function safeDesiredConfig(framework, desired) {
 function normalizeFramework(value) {
   if (value === "claude") return "claude-code";
   if (value === "codex" || value === "claude-code") return value;
-  throw new Error(`Unknown framework: ${value}`);
+  throw new Error("Unknown framework");
 }
 
 function setConfig(home, frameworkArg, model, effort) {
@@ -106,10 +106,10 @@ function setConfig(home, frameworkArg, model, effort) {
   if (!effort) throw new Error("Missing --effort");
 
   if (framework === "codex" && !CODEX_EFFORTS.has(effort)) {
-    throw new Error(`Unsupported codex effort: ${effort}`);
+    throw new Error("Unsupported codex effort");
   }
   if (framework === "claude-code" && !CLAUDE_EFFORTS.has(effort)) {
-    throw new Error(`Unsupported claude effort: ${effort}`);
+    throw new Error("Unsupported claude effort");
   }
 
   const config = loadTunerConfig(home);
