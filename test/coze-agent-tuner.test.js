@@ -75,3 +75,33 @@ test("status only prints safe desired config fields", () => {
   assert.match(output.stdout, /max/);
   assert.doesNotMatch(output.stdout, /sat_secret_should_not_print/);
 });
+
+test("set codex writes tuner-owned config only", () => {
+  const home = fixtureHome();
+  const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "medium", "--home", home]);
+
+  assert.equal(result.code, 0);
+  const config = tuner.loadTunerConfig(home);
+  assert.deepEqual(config.codex, { model: "gpt-5.5", reasoning_effort: "medium" });
+
+  const agent = JSON.parse(fs.readFileSync(path.join(home, ".coze", "agents", "codex-agent", "config.json"), "utf8"));
+  assert.equal(agent.model, "auto");
+});
+
+test("set claude writes tuner-owned config only", () => {
+  const home = fixtureHome();
+  const result = tuner.run(["set", "claude", "--model", "opus", "--effort", "max", "--home", home]);
+
+  assert.equal(result.code, 0);
+  const config = tuner.loadTunerConfig(home);
+  assert.deepEqual(config["claude-code"], { model: "opus", effort: "max" });
+});
+
+test("set rejects unsupported effort without writing config", () => {
+  const home = fixtureHome();
+  const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "max", "--home", home]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Unsupported codex effort/);
+  assert.equal(fs.existsSync(path.join(home, ".coze-agent-tuner", "config.json")), false);
+});

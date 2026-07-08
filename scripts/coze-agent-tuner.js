@@ -39,6 +39,10 @@ function loadTunerConfig(home) {
   return { ...defaultTunerConfig(), ...readJson(paths.tunerConfig) };
 }
 
+function saveTunerConfig(home, config) {
+  writeJson(pathsFor(home).tunerConfig, config);
+}
+
 function detectAgents(home) {
   const paths = pathsFor(home);
   if (!fs.existsSync(paths.cozeAgentsRoot)) {
@@ -90,6 +94,34 @@ function safeDesiredConfig(framework, desired) {
   };
 }
 
+function normalizeFramework(value) {
+  if (value === "claude") return "claude-code";
+  if (value === "codex" || value === "claude-code") return value;
+  throw new Error(`Unknown framework: ${value}`);
+}
+
+function setConfig(home, frameworkArg, model, effort) {
+  const framework = normalizeFramework(frameworkArg);
+  if (!model) throw new Error("Missing --model");
+  if (!effort) throw new Error("Missing --effort");
+
+  if (framework === "codex" && !CODEX_EFFORTS.has(effort)) {
+    throw new Error(`Unsupported codex effort: ${effort}`);
+  }
+  if (framework === "claude-code" && !CLAUDE_EFFORTS.has(effort)) {
+    throw new Error(`Unsupported claude effort: ${effort}`);
+  }
+
+  const config = loadTunerConfig(home);
+  if (framework === "codex") {
+    config.codex = { model, reasoning_effort: effort };
+  } else {
+    config["claude-code"] = { model, effort };
+  }
+  saveTunerConfig(home, config);
+  return `Saved ${framework} defaults.\n`;
+}
+
 function status(home) {
   const agents = detectAgents(home);
   const config = loadTunerConfig(home);
@@ -112,6 +144,13 @@ function run(argv) {
     if (command === "status") {
       return { code: 0, stdout: status(home), stderr: "" };
     }
+    if (command === "set") {
+      return {
+        code: 0,
+        stdout: setConfig(home, args._[1], args.model, args.effort),
+        stderr: ""
+      };
+    }
     return { code: 1, stdout: "", stderr: `Unknown command: ${command || ""}\n` };
   } catch (error) {
     return { code: 1, stdout: "", stderr: `${error.message}\n` };
@@ -131,6 +170,8 @@ module.exports = {
   defaultTunerConfig,
   detectAgents,
   loadTunerConfig,
+  saveTunerConfig,
   pathsFor,
-  run
+  run,
+  setConfig
 };
