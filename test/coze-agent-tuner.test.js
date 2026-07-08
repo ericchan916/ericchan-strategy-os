@@ -116,3 +116,35 @@ test("set does not echo token-like invalid effort", () => {
   assert.doesNotMatch(result.stderr, /sat_secret_should_not_print/);
   assert.equal(fs.existsSync(path.join(home, ".coze-agent-tuner", "config.json")), false);
 });
+
+test("apply updates Codex agent model and top-level Codex TOML keys with backup", () => {
+  const home = fixtureHome();
+  fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".codex", "config.toml"), "model = \"old\"\nmodel_reasoning_effort = \"low\"\n", "utf8");
+
+  tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "high", "--home", home]);
+  const result = tuner.run(["apply", "--home", home]);
+
+  assert.equal(result.code, 0);
+  const codexAgent = JSON.parse(fs.readFileSync(path.join(home, ".coze", "agents", "codex-agent", "config.json"), "utf8"));
+  assert.equal(codexAgent.model, "gpt-5.5");
+
+  const toml = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+  assert.match(toml, /model = "gpt-5\.5"/);
+  assert.match(toml, /model_reasoning_effort = "high"/);
+
+  const backupRoot = path.join(home, ".coze-agent-tuner", "backups");
+  const backupDirs = fs.readdirSync(backupRoot);
+  assert.equal(backupDirs.length, 1);
+});
+
+test("apply creates Codex config if missing", () => {
+  const home = fixtureHome();
+  tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "medium", "--home", home]);
+  const result = tuner.run(["apply", "--home", home]);
+
+  assert.equal(result.code, 0);
+  const toml = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+  assert.match(toml, /model = "gpt-5\.5"/);
+  assert.match(toml, /model_reasoning_effort = "medium"/);
+});

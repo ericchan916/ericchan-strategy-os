@@ -122,6 +122,82 @@ function setConfig(home, frameworkArg, model, effort) {
   return `Saved ${framework} defaults.\n`;
 }
 
+function timestamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+}
+
+function backupFile(home, file, backupDir) {
+  if (!fs.existsSync(file)) return;
+  const relative = path.relative(home, file);
+  const target = path.join(backupDir, relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(file, target);
+}
+
+function quoteTomlString(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function setTopLevelTomlKeys(content, updates) {
+  const lines = content ? content.split(/\r?\n/) : [];
+  const seen = new Set();
+  const next = lines.map((line) => {
+    const match = line.match(/^([A-Za-z0-9_]+)\s*=/);
+    if (!match) return line;
+    const key = match[1];
+    if (!(key in updates)) return line;
+    seen.add(key);
+    return `${key} = ${quoteTomlString(updates[key])}`;
+  });
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (!seen.has(key)) next.push(`${key} = ${quoteTomlString(value)}`);
+  }
+  return `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`;
+}
+
+function updateAgentModel(agent, model) {
+  const raw = readJson(agent.configFile);
+  raw.model = model;
+  writeJson(agent.configFile, raw);
+}
+
+function applyConfig(home) {
+  const paths = pathsFor(home);
+  const agents = detectAgents(home);
+  const config = loadTunerConfig(home);
+  const backupDir = path.join(paths.tunerRoot, "backups", timestamp());
+  const changed = [];
+
+  if (agents.codex) {
+    backupFile(home, agents.codex.configFile, backupDir);
+    backupFile(home, paths.codexConfig, backupDir);
+    updateAgentModel(agents.codex, config.codex.model);
+
+    const existing = fs.existsSync(paths.codexConfig) ? fs.readFileSync(paths.codexConfig, "utf8") : "";
+    const updated = setTopLevelTomlKeys(existing, {
+      model: config.codex.model,
+      model_reasoning_effort: config.codex.reasoning_effort
+    });
+    fs.mkdirSync(path.dirname(paths.codexConfig), { recursive: true });
+    fs.writeFileSync(paths.codexConfig, updated, "utf8");
+    changed.push("codex");
+  }
+
+  if (agents["claude-code"]) {
+    backupFile(home, agents["claude-code"].configFile, backupDir);
+    updateAgentModel(agents["claude-code"], config["claude-code"].model);
+    changed.push("claude-code model");
+  }
+
+  return [
+    `Applied: ${changed.join(", ") || "nothing"}`,
+    "Claude effort was saved in tuner config but not injected into bridge startup in v1.",
+    "Restart Coze or the Coze bridge for new agent starts to pick up changed defaults.",
+    ""
+  ].join("\n");
+}
+
 function status(home) {
   const agents = detectAgents(home);
   const config = loadTunerConfig(home);
@@ -151,6 +227,9 @@ function run(argv) {
         stderr: ""
       };
     }
+    if (command === "apply") {
+      return { code: 0, stdout: applyConfig(home), stderr: "" };
+    }
     return { code: 1, stdout: "", stderr: `Unknown command: ${command || ""}\n` };
   } catch (error) {
     return { code: 1, stdout: "", stderr: `${error.message}\n` };
@@ -167,11 +246,13 @@ if (require.main === module) {
 module.exports = {
   CODEX_EFFORTS,
   CLAUDE_EFFORTS,
+  applyConfig,
   defaultTunerConfig,
   detectAgents,
   loadTunerConfig,
   saveTunerConfig,
   pathsFor,
   run,
+  setTopLevelTomlKeys,
   setConfig
 };
