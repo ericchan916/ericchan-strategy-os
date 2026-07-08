@@ -47,6 +47,7 @@ function createFixture() {
   fs.mkdirSync(path.join(rootDir, "context"), { recursive: true });
   fs.mkdirSync(path.join(rootDir, "daily-command"), { recursive: true });
   fs.writeFileSync(path.join(rootDir, "context", "context.md"), "EricChan 使用中文 Ask Mode 做个人战略判断。");
+  fs.writeFileSync(path.join(rootDir, "context", "commander-protocol.md"), "Commander Protocol：先判断方向，降低复杂度，保护注意力。");
   writeJson(path.join(rootDir, "config", "recommended-questions.json"), [
     "今天适合做什么？",
     "当前项目哪个最值得推进？",
@@ -235,6 +236,58 @@ test("V0.6.3-hotfix: /api/ask redacts sk-like question and currentGoal in LLM re
       assert.equal(serialized.includes("sk-leakTestABC"), false);
       assert.equal(serialized.includes("sk-goalLeakABC"), false);
       assert.ok(serialized.includes("[redacted]"));
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldEnv.enabled === undefined) delete process.env.STRATEGY_OS_LLM_ENABLED;
+    else process.env.STRATEGY_OS_LLM_ENABLED = oldEnv.enabled;
+    if (oldEnv.key === undefined) delete process.env.STRATEGY_OS_LLM_API_KEY;
+    else process.env.STRATEGY_OS_LLM_API_KEY = oldEnv.key;
+    if (oldEnv.model === undefined) delete process.env.STRATEGY_OS_LLM_MODEL;
+    else process.env.STRATEGY_OS_LLM_MODEL = oldEnv.model;
+    if (oldEnv.baseUrl === undefined) delete process.env.STRATEGY_OS_LLM_BASE_URL;
+    else process.env.STRATEGY_OS_LLM_BASE_URL = oldEnv.baseUrl;
+  }
+});
+
+test("V0.7: /api/ask injects Commander Protocol into LLM prompt", async () => {
+  const fixture = createFixture();
+  const oldEnv = {
+    enabled: process.env.STRATEGY_OS_LLM_ENABLED,
+    key: process.env.STRATEGY_OS_LLM_API_KEY,
+    model: process.env.STRATEGY_OS_LLM_MODEL,
+    baseUrl: process.env.STRATEGY_OS_LLM_BASE_URL
+  };
+  const oldFetch = globalThis.fetch;
+  let capturedPrompt = "";
+  process.env.STRATEGY_OS_LLM_ENABLED = "true";
+  process.env.STRATEGY_OS_LLM_API_KEY = "sk-real-test-key";
+  process.env.STRATEGY_OS_LLM_MODEL = "mock-model";
+  process.env.STRATEGY_OS_LLM_BASE_URL = "https://example.invalid/v1";
+  globalThis.fetch = async (_url, options) => {
+    capturedPrompt = JSON.parse(options.body).messages[1].content;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "结论：先收缩。" } }] })
+    };
+  };
+
+  try {
+    await withServer(fixture.rootDir, async (baseUrl) => {
+      const response = await request(baseUrl, {
+        method: "POST",
+        path: "/api/ask",
+        body: { question: "今天适合做什么？" }
+      });
+      const payload = JSON.parse(response.body);
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.source, "llm");
+      assert.ok(capturedPrompt.includes("【Commander Protocol / 指挥官判断协议】"));
+      assert.ok(capturedPrompt.includes("先判断方向"));
+      assert.ok(capturedPrompt.includes("降低复杂度"));
+      assert.ok(capturedPrompt.includes("保护注意力"));
     });
   } finally {
     globalThis.fetch = oldFetch;

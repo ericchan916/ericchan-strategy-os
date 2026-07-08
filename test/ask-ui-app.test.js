@@ -1001,9 +1001,16 @@ test("buildCodexTaskPrompt: 包含开工包正文、测试与 Git 要求，并�
     answer: "# 项目开工包\n使用 sk-testSecret123456 做配置。"
   });
   assert.ok(prompt.includes("# 项目开工包"));
+  assert.ok(prompt.includes("项目路径："));
+  assert.ok(prompt.includes("当前状态："));
+  assert.ok(prompt.includes("不要做的事："));
+  assert.ok(prompt.includes("必须完成的事："));
+  assert.ok(prompt.includes("真实验证要求："));
   assert.ok(prompt.includes("测试要求"));
   assert.ok(prompt.includes("Git 要求"));
-  assert.ok(prompt.includes("Codex 工程执行"));
+  assert.ok(prompt.includes("最终汇报"));
+  assert.ok(prompt.includes("开始前运行 git status --short"));
+  assert.ok(prompt.includes("不要默认联网"));
   assert.ok(prompt.includes("[redacted]"));
   assert.equal(prompt.includes("sk-testSecret123456"), false);
 });
@@ -1014,8 +1021,16 @@ test("buildClaudeCodeTaskPrompt: 包含开工包正文与真实网页验证要�
     answer: "# 项目开工包\n不要泄露 sk-claudeSecret123456。"
   });
   assert.ok(prompt.includes("# 项目开工包"));
+  assert.ok(prompt.includes("项目路径："));
+  assert.ok(prompt.includes("当前状态："));
+  assert.ok(prompt.includes("不要做的事："));
+  assert.ok(prompt.includes("允许修改范围"));
+  assert.ok(prompt.includes("必须完成的事："));
   assert.ok(prompt.includes("真实网页验证要求"));
-  assert.ok(prompt.includes("不要碰 loading 动画"));
+  assert.ok(prompt.includes("验证桌面端"));
+  assert.ok(prompt.includes("验证小屏 / 移动端"));
+  assert.ok(prompt.includes("不要改 loading 动画"));
+  assert.ok(prompt.includes("不要大改架构"));
   assert.ok(prompt.includes("[redacted]"));
   assert.equal(prompt.includes("sk-claudeSecret123456"), false);
 });
@@ -3835,6 +3850,7 @@ test("V0.3.11-hotfix-4: redactSecretLikeText 纯函数 - 字符串中 sk-* 被�
   assert.ok(redactSecretLikeText, "应暴露 redactSecretLikeText 纯函数");
   assert.equal(redactSecretLikeText("hello sk-fakefakefake0123456789 world"), "hello [redacted] world");
   assert.equal(redactSecretLikeText("sk-proj-abc_123"), "[redacted]");
+  assert.equal(redactSecretLikeText("codex-task-prompt"), "codex-task-prompt");
   // 非 sk-* 字符串不变
   assert.equal(redactSecretLikeText("这是普通中文，没有 key"), "这是普通中文，没有 key");
   // 非字符串安全返回

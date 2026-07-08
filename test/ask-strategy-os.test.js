@@ -51,6 +51,7 @@ function createFixture() {
   fs.mkdirSync(path.join(rootDir, "config"), { recursive: true });
   fs.mkdirSync(path.join(rootDir, "daily-command"), { recursive: true });
   fs.writeFileSync(path.join(rootDir, "context", "context.md"), "EricChan 当前优先个人可用、中文输出、机会发现。");
+  fs.writeFileSync(path.join(rootDir, "context", "commander-protocol.md"), "Commander Protocol：先判断方向，降低复杂度，保护注意力。");
   writeJson(path.join(rootDir, "config", "recommended-questions.json"), [
     "今天适合做什么？",
     "当前项目哪个最值得推进？",
@@ -129,8 +130,11 @@ test("classifies supported question types", () => {
   assert.equal(classifyQuestion("今天适合做什么？"), "today-action");
   assert.equal(classifyQuestion("我看到一个好项目，帮我体检一下。"), "project-checkup");
   assert.equal(classifyQuestion("帮我生成项目开工包。"), "kickoff-package");
+  assert.equal(classifyQuestion("生成 Codex 任务提示词。"), "codex-task-prompt");
+  assert.equal(classifyQuestion("生成 Claude Code 任务提示词。"), "claude-code-task-prompt");
   assert.equal(classifyQuestion("这件事该交给哪个智能体？"), "agent-dispatch");
   assert.equal(classifyQuestion("我是不是把事情搞复杂了？"), "complexity-check");
+  assert.equal(classifyQuestion("我想给战略OS加一个完整Dashboard和数据库，今天直接做吧。"), "complexity-check");
 });
 
 test("today action answers in Chinese and uses current Daily Command", () => {
@@ -1002,6 +1006,44 @@ test("V0.6: buildLlmUserPrompt can reference 今日优先项 from opportunity po
   assert.ok(prompt.includes("AI 机会简报助手"));
 });
 
+test("V0.7: buildLlmUserPrompt injects Commander Protocol as answer rule layer", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      commanderProtocolText: "Commander Protocol：先判断方向，降低复杂度，保护注意力，不默认 Dashboard。",
+      opportunityPool: null,
+      report: null
+    },
+    type: "general-strategy-question",
+    question: "我想做一个新功能。"
+  });
+  assert.ok(prompt.includes("【Commander Protocol / 指挥官判断协议】"));
+  assert.ok(prompt.includes("先判断方向"));
+  assert.ok(prompt.includes("降低复杂度"));
+  assert.ok(prompt.includes("保护注意力"));
+  assert.ok(prompt.includes("回答规则层"));
+});
+
+test("V0.7: Commander Protocol keeps search as reference, not final judgment", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      commanderProtocolText: "Commander Protocol：先判断方向。",
+      opportunityPool: null,
+      report: null
+    },
+    type: "general-strategy-question",
+    question: "查一下这个方向。",
+    search: {
+      results: [{ title: "搜索结果", url: "https://example.com", source: "example.com", snippet: "外部信息" }],
+      plannedQueries: ["AI 产品机会"],
+      intent: "ai-opportunity"
+    }
+  });
+  assert.ok(prompt.includes("搜索结果只是参考，不等于结论"));
+  assert.ok(prompt.includes("基于本地上下文的判断"));
+});
+
 test("V0.5: 未设置 currentGoal 时 prompt 不包含空目标段", () => {
   const prompt = buildLlmUserPrompt({
     context: { contextText: "", opportunityPool: null, report: null },
@@ -1022,6 +1064,113 @@ test("V0.5: askStrategyOs 本地 fallback 会体现 currentGoal", () => {
   assert.ok(result.answer.includes("当前目标锚点"));
   assert.ok(result.answer.includes("优先寻找 7 天内验证的 AI 工具型 MVP"));
   assert.equal(result.answer.includes("sk-localGoal123456"), false);
+});
+
+test("V0.7: complex execution request gets execution judgment and contraction", () => {
+  const fixture = createFixture();
+  const result = askStrategyOs({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "我想给战略OS加一个完整Dashboard和数据库，今天直接做吧。"
+  });
+  assert.equal(result.type, "complexity-check");
+  assert.ok(result.answer.includes("## 执行判断"));
+  assert.ok(result.answer.includes("不建议执行"));
+  assert.ok(result.answer.includes("这件事可以先收缩"));
+  assert.ok(result.answer.includes("今天最小动作"));
+  assert.equal(/直接.*Dashboard/.test(result.answer), false);
+});
+
+test("V0.7: explicit Codex and Claude Code prompt requests return templates only when requested", () => {
+  const fixture = createFixture();
+  const general = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date, question: "今天适合做什么？" });
+  assert.equal(general.answer.includes("任务标题："), false);
+
+  const codex = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date, question: "生成 Codex 任务提示词。" });
+  assert.equal(codex.type, "codex-task-prompt");
+  assert.ok(codex.answer.includes("任务标题："));
+  assert.ok(codex.answer.includes("不要做的事"));
+  assert.ok(codex.answer.includes("Git 要求"));
+  assert.ok(codex.answer.includes("最终汇报格式"));
+
+  const claude = askStrategyOs({ rootDir: fixture.rootDir, date: fixture.date, question: "生成 Claude Code 任务提示词。" });
+  assert.equal(claude.type, "claude-code-task-prompt");
+  assert.ok(claude.answer.includes("真实网页验证要求"));
+  assert.ok(claude.answer.includes("不要改 loading 动画"));
+  assert.ok(claude.answer.includes("不要大改架构"));
+});
+
+test("V0.7: explicit task prompt requests bypass LLM for deterministic templates", async () => {
+  const fixture = createFixture();
+  let calls = 0;
+  const env = {
+    STRATEGY_OS_LLM_ENABLED: "true",
+    STRATEGY_OS_LLM_API_KEY: "sk-test",
+    STRATEGY_OS_LLM_BASE_URL: "https://llm.test/v1/chat/completions",
+    STRATEGY_OS_LLM_MODEL: "test-model"
+  };
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "生成 Codex 任务提示词。",
+    env,
+    deps: {
+      fetch: async () => {
+        calls += 1;
+        throw new Error("LLM should not be called for task prompt templates");
+      }
+    }
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.type, "codex-task-prompt");
+  assert.equal(result.source, "local");
+  assert.equal(result.llmEnabled, true);
+  assert.ok(result.answer.includes("任务标题："));
+  assert.ok(result.answer.includes("Git 要求"));
+});
+
+test("V0.7: complexity requests bypass LLM for deterministic contraction", async () => {
+  const fixture = createFixture();
+  let calls = 0;
+  const env = {
+    STRATEGY_OS_LLM_ENABLED: "true",
+    STRATEGY_OS_LLM_API_KEY: "sk-test",
+    STRATEGY_OS_LLM_BASE_URL: "https://llm.test/v1/chat/completions",
+    STRATEGY_OS_LLM_MODEL: "test-model"
+  };
+  const result = await askStrategyOsAsync({
+    rootDir: fixture.rootDir,
+    date: fixture.date,
+    question: "我想给战略OS加一个完整Dashboard和数据库，今天直接做吧。",
+    env,
+    deps: {
+      fetch: async () => {
+        calls += 1;
+        throw new Error("LLM should not be called for complexity contraction");
+      }
+    }
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.type, "complexity-check");
+  assert.equal(result.source, "local");
+  assert.ok(result.answer.includes("## 执行判断"));
+  assert.ok(result.answer.includes("这件事可以先收缩"));
+});
+
+test("V0.7: old project rule is present and does not default to legacy optimization", () => {
+  const prompt = buildLlmUserPrompt({
+    context: {
+      contextText: "",
+      commanderProtocolText: "旧项目规则：iPortfolio / 个人网站、小Chan、节律 App 是展示台、实验档案、审美样本、能力证明。不要因为趋势就默认建议更新、重构、部署或扩展旧项目。",
+      opportunityPool: null,
+      report: null
+    },
+    type: "general-strategy-question",
+    question: "AI 趋势来了，要不要重构小Chan？"
+  });
+  assert.ok(prompt.includes("不要因为趋势就默认建议更新、重构、部署或扩展旧项目"));
 });
 
 test("V0.5.1: draft prompt 会使用 currentGoal 但不机械泄露 sk-*", () => {

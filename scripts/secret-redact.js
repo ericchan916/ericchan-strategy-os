@@ -1,8 +1,8 @@
 // V0.3.11-hotfix-4：统一的 sk-* 形态字符串脱敏
-// 任何匹配 /sk-[A-Za-z0-9_-]+/ 的内容都替换为 [redacted]。
+// 匹配独立的 sk-* 形态内容，避免误伤 codex-task-prompt 这类普通内部标识。
 // 递归处理对象 / 数组 / 字符串；保留非字符串原始值。
 
-const SK_LIKE_RE = /sk-[A-Za-z0-9_-]+/g;
+const SK_LIKE_RE = /(?<![A-Za-z0-9_])sk-[A-Za-z0-9_-]+/g;
 const REDACTED = "[redacted]";
 
 function redactSecretLikeText(value) {

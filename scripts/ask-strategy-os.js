@@ -44,6 +44,7 @@ function readJson(filePath, fallback) {
 function askPaths(rootDir, date) {
   return {
     contextPath: path.join(rootDir, "context", "context.md"),
+    commanderProtocolPath: path.join(rootDir, "context", "commander-protocol.md"),
     reportPath: path.join(rootDir, "data", "reports", `${date}.json`),
     poolPath: path.join(rootDir, "data", "opportunities", "opportunity-pool.json"),
     dailyCommandMarkdownPath: path.join(rootDir, "daily-command", `${date}.md`),
@@ -61,6 +62,7 @@ function loadAskContext({ rootDir = process.cwd(), date = getDateString() } = {}
     date,
     paths,
     contextText: readText(paths.contextPath),
+    commanderProtocolText: readText(paths.commanderProtocolPath),
     report: readJson(paths.reportPath, null),
     opportunityPool: readJson(paths.poolPath, null),
     dailyCommand: readJson(paths.dailyCommandJsonPath, null),
@@ -74,13 +76,15 @@ function loadAskContext({ rootDir = process.cwd(), date = getDateString() } = {}
 
 function classifyQuestion(question) {
   const text = String(question || "").toLowerCase();
+  if (/codex.*(提示词|任务|prompt)|生成.*codex.*(提示词|任务|prompt)/i.test(text)) return "codex-task-prompt";
+  if (/claude code.*(提示词|任务|prompt)|生成.*claude code.*(提示词|任务|prompt)/i.test(text)) return "claude-code-task-prompt";
   if (/开工包|kickoff/.test(text)) return "kickoff-package";
   if (/体检|适不适合|值不值得|好项目|项目.*判断/.test(text)) return "project-checkup";
+  if (/复杂|搞复杂|过度|太重|太复杂|dashboard|数据库|登录|支付|部署|完整系统|完整 mvp|自动派发|多个智能体|重构.*旧项目/.test(text)) return "complexity-check";
   if (/今天|现在.*做|适合做什么|该做什么/.test(text)) return "today-action";
   if (/哪个.*推进|优先级|最值得推进|当前项目/.test(text)) return "project-priority";
   if (/该不该开新项目|是否.*开新项目|要不要开新项目/.test(text)) return "new-project-decision";
   if (/交给哪个智能体|派发|分工|agent|智能体/.test(text)) return "agent-dispatch";
-  if (/复杂|搞复杂|过度|太重|太复杂/.test(text)) return "complexity-check";
   return "general-strategy-question";
 }
 
@@ -230,6 +234,37 @@ function renderAgentDispatch(context) {
 function renderComplexityCheck(context) {
   return `# 复杂度检查
 
+## 执行判断
+
+任务类型：
+不建议执行
+
+建议执行者：
+暂不执行
+
+建议模型：
+GPT 5.5 Thinking
+
+建议强度：
+低
+
+为什么：
+- 这件事可以先收缩。
+- Dashboard、数据库、部署、自动派发都不是今天的默认动作。
+- 当前更需要保护注意力，先确认一个最小验证动作。
+
+是否符合当前 Goal：
+不确定
+
+是否今天值得做：
+只做最小动作
+
+今天最小动作：
+写一句话说明这个功能今天到底要验证什么。
+
+是否需要生成执行提示词：
+先不需要
+
 结论：如果一个想法今天不能压成一句话假设和一个小验证动作，就先降级。
 
 理由：
@@ -246,6 +281,129 @@ function renderComplexityCheck(context) {
 - 不补复杂 UI。
 - 不开多个并行项目。
 - 不把工具链升级当成进展。${dataNotice(context)}
+`;
+}
+
+function renderCodexTaskPromptRequest(context) {
+  return `# Codex 任务提示词
+
+任务标题：
+待用户确认的 Codex 工程任务
+
+项目路径：
+待用户确认
+
+当前状态：
+EricChan·战略OS已完成本地 Ask UI、Goal、机会池、按需搜索、开工包和任务复制能力；本提示词只用于手动粘贴给 Codex，不会自动派发。
+
+目标：
+基于用户补充的开工包或具体需求，完成一次边界清晰的小步工程修改。
+
+不要做的事：
+1. 不要扩大需求
+2. 不要重写项目
+3. 不要改无关旧项目
+4. 不要默认联网
+5. 不要读取或输出 .env
+6. 不要输出 API Key
+7. 不要提交 .env / node_modules / 用户生成数据
+8. 不要做 Dashboard / 部署 / 数据库 / 登录，除非任务明确要求
+
+必须完成的事：
+1. 开始前确认任务目标和项目路径
+2. 先读代码再改
+3. 补最小必要测试并运行项目已有测试
+
+执行要求：
+1. 开始前运行 git status --short
+2. 如果工作区不干净，先停止汇报
+3. 优先复用现有函数和测试
+4. 小步修改
+5. 不做无关重构
+
+测试要求：
+1. 运行项目已有测试
+2. 如果新增逻辑，补最小必要测试
+3. 不真实调用外部付费 API，除非用户明确要求
+4. 不用测试通过替代真实验证
+
+真实验证要求：
+如果是网页 / UI / 本地服务任务，启动本地服务，打开本地 URL，验证关键交互、默认不联网、loading 不回归。
+
+Git 要求：
+1. 不提交 .env
+2. 不提交用户生成数据
+3. 不提交无关文件
+4. 提交信息：待用户确认
+
+最终汇报格式：
+1. 修改文件
+2. 核心实现
+3. 测试结果
+4. 真实验证结果
+5. 是否有风险
+6. commit 信息
+7. 最终工作区状态${dataNotice(context)}
+`;
+}
+
+function renderClaudeCodeTaskPromptRequest(context) {
+  return `# Claude Code 任务提示词
+
+任务标题：
+待用户确认的 Claude Code 前端任务
+
+项目路径：
+待用户确认
+
+当前状态：
+当前页面是固定视口三栏工作台，已有 Ask、Goal、机会池、搜索来源、开工包和任务复制；本提示词只用于手动粘贴给 Claude Code，不会自动派发。
+
+目标：
+基于用户补充的页面或交互目标，完成一次低风险前端修改。
+
+不要做的事：
+1. 不要重写整个项目
+2. 不要引入新框架
+3. 不要大改架构
+4. 不要改用户已确认的视觉点
+5. 不要改 loading 动画，除非任务明确要求
+6. 不要默认联网
+7. 不要读取或输出 .env
+8. 不要输出 API Key
+9. 不要提交用户生成数据
+
+允许修改范围：
+只改与目标直接相关的页面、样式、交互脚本和测试；不做无关重构。
+
+必须完成的事：
+1. 明确本次 UI / 交互目标
+2. 保持固定视口工作台和默认不联网不回归
+3. 补最小必要交互测试
+
+真实网页验证要求：
+1. 启动本地服务
+2. 打开本地 URL
+3. 验证桌面端
+4. 验证小屏 / 移动端
+5. 验证关键交互
+6. 验证没有视觉回归
+7. 最终汇报 URL、端口、服务是否仍运行、如何停止
+
+测试要求：
+1. 运行已有测试
+2. 如涉及交互，补最小测试
+3. 不真实调用外部 API
+
+最终汇报格式：
+1. 修改文件
+2. 页面变化
+3. 交互变化
+4. 测试结果
+5. 真实网页验证结果
+6. 是否有视觉 / 交互风险
+7. commit 信息
+8. 工作区状态${dataNotice(context)}
 `;
 }
 
@@ -408,6 +566,8 @@ function renderAnswer({ context, question }) {
   else if (type === "new-project-decision") answer = renderNewProjectDecision(context);
   else if (type === "project-checkup") answer = renderProjectCheckup(context, question);
   else if (type === "kickoff-package") answer = renderKickoffPackage(context, question);
+  else if (type === "codex-task-prompt") answer = renderCodexTaskPromptRequest(context);
+  else if (type === "claude-code-task-prompt") answer = renderClaudeCodeTaskPromptRequest(context);
   else if (type === "agent-dispatch") answer = renderAgentDispatch(context);
   else if (type === "complexity-check") answer = renderComplexityCheck(context);
   else answer = renderGeneral(context, question);
@@ -473,6 +633,18 @@ async function askStrategyOsAsync({ rootDir = process.cwd(), date = getDateStrin
 
   const llmConfig = readConfig(env);
   const llmEnabled = isConfigured(llmConfig);
+
+  if (type === "complexity-check" || type === "codex-task-prompt" || type === "claude-code-task-prompt") {
+    return redactSecretLikeText({
+      type,
+      answer: localAnswer,
+      source: "local",
+      llmEnabled,
+      warning: null,
+      search: searchMeta,
+      context
+    });
+  }
 
   if (!llmEnabled) {
     return {
@@ -986,6 +1158,12 @@ function buildLlmUserPrompt({ context, type, question, search = null, currentGoa
   const lines = [];
   lines.push(`当前问题类型：${type}`);
   lines.push(`用户原始问题：${safeQuestion || "（无）"}`);
+  if (context.commanderProtocolText) {
+    lines.push("");
+    lines.push("【Commander Protocol / 指挥官判断协议】");
+    lines.push(trimContext(context.commanderProtocolText, 1800));
+    lines.push("请把以上协议作为回答规则层：先判断方向，降低复杂度，保护注意力，再决定是否需要执行提示词。安全脱敏规则优先级最高。");
+  }
   if (safeGoal) {
     lines.push("");
     lines.push("【当前目标】");
