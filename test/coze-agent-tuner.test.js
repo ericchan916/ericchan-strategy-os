@@ -148,3 +148,12 @@ test("apply creates Codex config if missing", () => {
   assert.match(toml, /model = "gpt-5\.5"/);
   assert.match(toml, /model_reasoning_effort = "medium"/);
 });
+
+test("setTopLevelTomlKeys inserts top-level keys before tables without changing nested model", () => {
+  const toml = tuner.setTopLevelTomlKeys("[profiles.default]\nmodel = \"nested-old\"\n", {
+    model: "gpt-5.5",
+    model_reasoning_effort: "high"
+  });
+
+  assert.match(toml, /^model = "gpt-5\.5"\nmodel_reasoning_effort = "high"\n\[profiles\.default\]\nmodel = "nested-old"\n$/);
+});

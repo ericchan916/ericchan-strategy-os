@@ -140,8 +140,11 @@ function quoteTomlString(value) {
 
 function setTopLevelTomlKeys(content, updates) {
   const lines = content ? content.split(/\r?\n/) : [];
+  const tableIndex = lines.findIndex((line) => /^\s*\[/.test(line));
+  const topLines = tableIndex === -1 ? lines : lines.slice(0, tableIndex);
+  const restLines = tableIndex === -1 ? [] : lines.slice(tableIndex);
   const seen = new Set();
-  const next = lines.map((line) => {
+  const next = topLines.map((line) => {
     const match = line.match(/^([A-Za-z0-9_]+)\s*=/);
     if (!match) return line;
     const key = match[1];
@@ -153,7 +156,8 @@ function setTopLevelTomlKeys(content, updates) {
   for (const [key, value] of Object.entries(updates)) {
     if (!seen.has(key)) next.push(`${key} = ${quoteTomlString(value)}`);
   }
-  return `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`;
+  const updated = next.concat(restLines).filter((line, index, all) => line !== "" || index < all.length - 1);
+  return `${updated.join("\n")}\n`;
 }
 
 function updateAgentModel(agent, model) {
