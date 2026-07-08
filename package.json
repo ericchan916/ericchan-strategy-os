@@ -26,6 +26,7 @@
     "opportunities:review": "node scripts/generate-opportunity-review.js",
     "opportunities:apply-review": "node scripts/apply-opportunity-review.js",
     "opportunities:validation-pack": "node scripts/generate-opportunity-validation-pack.js",
+    "coze:tuner": "node scripts/coze-agent-tuner.js",
     "clean": "node scripts/generate-report.js --clean",
     "test": "node --test"
   },
