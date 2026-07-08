@@ -207,6 +207,33 @@ function applyConfig(home) {
   ].join("\n");
 }
 
+function copyTree(source, target) {
+  if (!fs.existsSync(source)) return;
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const src = path.join(source, entry.name);
+    const dst = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      copyTree(src, dst);
+    } else {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+    }
+  }
+}
+
+function restoreLatest(home) {
+  const paths = pathsFor(home);
+  const backupsRoot = path.join(paths.tunerRoot, "backups");
+  if (!fs.existsSync(backupsRoot)) throw new Error("No backups found");
+  const backups = fs.readdirSync(backupsRoot).sort();
+  const latest = backups[backups.length - 1];
+  if (!latest) throw new Error("No backups found");
+
+  copyTree(path.join(backupsRoot, latest), home);
+  saveTunerConfig(home, defaultTunerConfig());
+  return `Restored backup ${latest} and reset tuner config to auto.\n`;
+}
+
 function status(home) {
   const agents = detectAgents(home);
   const config = loadTunerConfig(home);
@@ -239,6 +266,9 @@ function run(argv) {
     if (command === "apply") {
       return { code: 0, stdout: applyConfig(home), stderr: "" };
     }
+    if (command === "restore") {
+      return { code: 0, stdout: restoreLatest(home), stderr: "" };
+    }
     return { code: 1, stdout: "", stderr: `Unknown command: ${command || ""}\n` };
   } catch (error) {
     return { code: 1, stdout: "", stderr: `${error.message}\n` };
@@ -256,9 +286,11 @@ module.exports = {
   CODEX_EFFORTS,
   CLAUDE_EFFORTS,
   applyConfig,
+  copyTree,
   defaultTunerConfig,
   detectAgents,
   loadTunerConfig,
+  restoreLatest,
   saveTunerConfig,
   pathsFor,
   run,

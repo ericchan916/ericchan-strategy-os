@@ -185,3 +185,29 @@ test("setTopLevelTomlKeys updates indented top-level keys without duplicating th
   assert.equal(toml, "model = \"new\"\n");
   assert.equal(toml.match(/^model\s=/gm).length, 1);
 });
+
+test("restore restores latest backup and resets tuner config to auto", () => {
+  const home = fixtureHome();
+  fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".codex", "config.toml"), "model = \"old\"\nmodel_reasoning_effort = \"low\"\n", "utf8");
+
+  tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "high", "--home", home]);
+  tuner.run(["apply", "--home", home]);
+  const result = tuner.run(["restore", "--home", home]);
+
+  assert.equal(result.code, 0);
+  const toml = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+  assert.match(toml, /model = "old"/);
+  assert.match(toml, /model_reasoning_effort = "low"/);
+  assert.deepEqual(tuner.loadTunerConfig(home), tuner.defaultTunerConfig());
+});
+
+test("command output never prints token-like fields from agent config", () => {
+  const home = fixtureHome();
+  tuner.run(["set", "claude", "--model", "opus", "--effort", "max", "--home", home]);
+  const apply = tuner.run(["apply", "--home", home]);
+  const status = tuner.run(["status", "--home", home]);
+
+  assert.doesNotMatch(apply.stdout + apply.stderr, /sat_secret_should_not_print/);
+  assert.doesNotMatch(status.stdout + status.stderr, /sat_secret_should_not_print/);
+});
