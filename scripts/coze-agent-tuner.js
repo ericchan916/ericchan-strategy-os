@@ -6,6 +6,7 @@ const os = require("node:os");
 
 const CODEX_EFFORTS = new Set(["minimal", "low", "medium", "high"]);
 const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const MISSING_MANIFEST = ".coze-agent-tuner-missing.json";
 
 function pathsFor(home = os.homedir()) {
   return {
@@ -82,7 +83,7 @@ function parseArgs(argv) {
 }
 
 function redactDisplayValue(value) {
-  if (typeof value === "string" && /^(sk|sat)_[A-Za-z0-9_=-]+/.test(value)) return "[redacted]";
+  if (typeof value === "string" && /^(sk|sat)[_-][A-Za-z0-9_=-]+/.test(value)) return "[redacted]";
   return value;
 }
 
@@ -139,6 +140,14 @@ function backupFile(home, file, backupDir) {
   fs.copyFileSync(file, target);
 }
 
+function recordMissingFile(home, file, backupDir) {
+  if (fs.existsSync(file)) return;
+  const manifest = path.join(backupDir, MISSING_MANIFEST);
+  const missing = fs.existsSync(manifest) ? readJson(manifest) : [];
+  missing.push(path.relative(home, file));
+  writeJson(manifest, missing);
+}
+
 function quoteTomlString(value) {
   return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -174,6 +183,9 @@ function updateAgentModel(agent, model) {
 function applyConfig(home) {
   const paths = pathsFor(home);
   const agents = detectAgents(home);
+  if (!agents.codex && !agents["claude-code"]) {
+    throw new Error("No supported Coze agents found");
+  }
   const config = loadTunerConfig(home);
   const backupDir = path.join(paths.tunerRoot, "backups", timestamp());
   const changed = [];
@@ -181,6 +193,7 @@ function applyConfig(home) {
   if (agents.codex) {
     backupFile(home, agents.codex.configFile, backupDir);
     backupFile(home, paths.codexConfig, backupDir);
+    recordMissingFile(home, paths.codexConfig, backupDir);
     updateAgentModel(agents.codex, config.codex.model);
 
     const existing = fs.existsSync(paths.codexConfig) ? fs.readFileSync(paths.codexConfig, "utf8") : "";
@@ -229,7 +242,14 @@ function restoreLatest(home) {
   const latest = backups[backups.length - 1];
   if (!latest) throw new Error("No backups found");
 
-  copyTree(path.join(backupsRoot, latest), home);
+  const backupDir = path.join(backupsRoot, latest);
+  const manifest = path.join(backupDir, MISSING_MANIFEST);
+  const missing = fs.existsSync(manifest) ? readJson(manifest) : [];
+  copyTree(backupDir, home);
+  for (const relative of missing) {
+    fs.rmSync(path.join(home, relative), { force: true });
+  }
+  fs.rmSync(path.join(home, MISSING_MANIFEST), { force: true });
   saveTunerConfig(home, defaultTunerConfig());
   return `Restored backup ${latest} and reset tuner config to auto.\n`;
 }

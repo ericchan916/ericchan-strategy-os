@@ -97,6 +97,26 @@ test("status redacts token-like current and desired model values", () => {
   assert.doesNotMatch(output.stdout, /sat_should_not_print/);
 });
 
+test("status redacts sk-dash current and desired model values", () => {
+  const home = fixtureHome();
+  writeJson(path.join(home, ".coze", "agents", "codex-agent", "config.json"), {
+    agentId: "codex-agent",
+    framework: "codex",
+    workspace: "C:\\fake\\codex",
+    model: "sk-should-not-print"
+  });
+  writeJson(path.join(home, ".coze-agent-tuner", "config.json"), {
+    codex: { model: "sk-should-not-print", reasoning_effort: "high" },
+    "claude-code": { model: "auto", effort: "high" }
+  });
+  const output = tuner.run(["status", "--home", home]);
+
+  assert.equal(output.code, 0);
+  assert.match(output.stdout, /current model: \[redacted\]/);
+  assert.match(output.stdout, /"model":"\[redacted\]"/);
+  assert.doesNotMatch(output.stdout, /sk-should-not-print/);
+});
+
 test("set codex writes tuner-owned config only", () => {
   const home = fixtureHome();
   const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "medium", "--home", home]);
@@ -170,6 +190,21 @@ test("apply creates Codex config if missing", () => {
   assert.match(toml, /model_reasoning_effort = "medium"/);
 });
 
+test("apply fails when agents root has no supported agents", () => {
+  const home = makeTempHome();
+  fs.mkdirSync(path.join(home, ".coze", "agents", "other-agent"), { recursive: true });
+  writeJson(path.join(home, ".coze", "agents", "other-agent", "config.json"), {
+    agentId: "other-agent",
+    framework: "other",
+    model: "auto"
+  });
+
+  const result = tuner.run(["apply", "--home", home]);
+
+  assert.equal(result.code, 1);
+  assert.doesNotMatch(result.stdout, /Applied: nothing/);
+});
+
 test("setTopLevelTomlKeys inserts top-level keys before tables without changing nested model", () => {
   const toml = tuner.setTopLevelTomlKeys("[profiles.default]\nmodel = \"nested-old\"\n", {
     model: "gpt-5.5",
@@ -200,6 +235,20 @@ test("restore restores latest backup and resets tuner config to auto", () => {
   assert.match(toml, /model = "old"/);
   assert.match(toml, /model_reasoning_effort = "low"/);
   assert.deepEqual(tuner.loadTunerConfig(home), tuner.defaultTunerConfig());
+});
+
+test("restore removes Codex config that apply created from missing", () => {
+  const home = fixtureHome();
+  const codexConfig = path.join(home, ".codex", "config.toml");
+
+  tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "high", "--home", home]);
+  const apply = tuner.run(["apply", "--home", home]);
+
+  assert.equal(apply.code, 0);
+  assert.equal(fs.existsSync(codexConfig), true);
+  const restore = tuner.run(["restore", "--home", home]);
+  assert.equal(restore.code, 0);
+  assert.equal(fs.existsSync(codexConfig), false);
 });
 
 test("command output never prints token-like fields from agent config", () => {
