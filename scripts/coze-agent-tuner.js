@@ -81,15 +81,20 @@ function parseArgs(argv) {
   return out;
 }
 
+function redactDisplayValue(value) {
+  if (typeof value === "string" && /^(sk|sat)_[A-Za-z0-9_=-]+/.test(value)) return "[redacted]";
+  return value;
+}
+
 function safeDesiredConfig(framework, desired) {
   if (framework === "codex") {
     return {
-      model: desired.model,
+      model: redactDisplayValue(desired.model),
       reasoning_effort: desired.reasoning_effort
     };
   }
   return {
-    model: desired.model,
+    model: redactDisplayValue(desired.model),
     effort: desired.effort
   };
 }
@@ -145,7 +150,7 @@ function setTopLevelTomlKeys(content, updates) {
   const restLines = tableIndex === -1 ? [] : lines.slice(tableIndex);
   const seen = new Set();
   const next = topLines.map((line) => {
-    const match = line.match(/^([A-Za-z0-9_]+)\s*=/);
+    const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=/);
     if (!match) return line;
     const key = match[1];
     if (!(key in updates)) return line;
@@ -210,7 +215,7 @@ function status(home) {
     const agent = agents[framework];
     const desired = safeDesiredConfig(framework, config[framework]);
     lines.push(`- ${framework}: ${agent ? agent.agentId : "not detected"}`);
-    lines.push(`  current model: ${agent ? agent.model : "unknown"}`);
+    lines.push(`  current model: ${agent ? redactDisplayValue(agent.model) : "unknown"}`);
     lines.push(`  desired: ${JSON.stringify(desired)}`);
   }
   return `${lines.join("\n")}\n`;

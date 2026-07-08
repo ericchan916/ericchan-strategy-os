@@ -76,6 +76,27 @@ test("status only prints safe desired config fields", () => {
   assert.doesNotMatch(output.stdout, /sat_secret_should_not_print/);
 });
 
+test("status redacts token-like current and desired model values", () => {
+  const home = fixtureHome();
+  writeJson(path.join(home, ".coze", "agents", "codex-agent", "config.json"), {
+    agentId: "codex-agent",
+    framework: "codex",
+    workspace: "C:\\fake\\codex",
+    model: "sk_should_not_print"
+  });
+  writeJson(path.join(home, ".coze-agent-tuner", "config.json"), {
+    codex: { model: "sat_should_not_print", reasoning_effort: "high" },
+    "claude-code": { model: "auto", effort: "high" }
+  });
+  const output = tuner.run(["status", "--home", home]);
+
+  assert.equal(output.code, 0);
+  assert.match(output.stdout, /current model: \[redacted\]/);
+  assert.match(output.stdout, /"model":"\[redacted\]"/);
+  assert.doesNotMatch(output.stdout, /sk_should_not_print/);
+  assert.doesNotMatch(output.stdout, /sat_should_not_print/);
+});
+
 test("set codex writes tuner-owned config only", () => {
   const home = fixtureHome();
   const result = tuner.run(["set", "codex", "--model", "gpt-5.5", "--effort", "medium", "--home", home]);
@@ -156,4 +177,11 @@ test("setTopLevelTomlKeys inserts top-level keys before tables without changing 
   });
 
   assert.match(toml, /^model = "gpt-5\.5"\nmodel_reasoning_effort = "high"\n\[profiles\.default\]\nmodel = "nested-old"\n$/);
+});
+
+test("setTopLevelTomlKeys updates indented top-level keys without duplicating them", () => {
+  const toml = tuner.setTopLevelTomlKeys("  model = \"old\"\n", { model: "new" });
+
+  assert.equal(toml, "model = \"new\"\n");
+  assert.equal(toml.match(/^model\s=/gm).length, 1);
 });
