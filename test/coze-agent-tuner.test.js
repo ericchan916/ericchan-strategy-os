@@ -53,3 +53,25 @@ test("status prints detected agents and desired config without token-like values
   assert.match(output.stdout, /claude-agent/);
   assert.doesNotMatch(output.stdout, /sat_secret/);
 });
+
+test("status only prints safe desired config fields", () => {
+  const home = fixtureHome();
+  writeJson(path.join(home, ".coze-agent-tuner", "config.json"), {
+    codex: {
+      model: "gpt-5.5",
+      reasoning_effort: "high",
+      patToken: "sat_secret_should_not_print"
+    },
+    "claude-code": {
+      model: "opus",
+      effort: "max",
+      sat_secret: "sat_secret_should_not_print"
+    }
+  });
+  const output = tuner.run(["status", "--home", home]);
+
+  assert.equal(output.code, 0);
+  assert.match(output.stdout, /gpt-5\.5/);
+  assert.match(output.stdout, /max/);
+  assert.doesNotMatch(output.stdout, /sat_secret_should_not_print/);
+});

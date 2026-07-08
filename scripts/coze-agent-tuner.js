@@ -77,13 +77,26 @@ function parseArgs(argv) {
   return out;
 }
 
+function safeDesiredConfig(framework, desired) {
+  if (framework === "codex") {
+    return {
+      model: desired.model,
+      reasoning_effort: desired.reasoning_effort
+    };
+  }
+  return {
+    model: desired.model,
+    effort: desired.effort
+  };
+}
+
 function status(home) {
   const agents = detectAgents(home);
   const config = loadTunerConfig(home);
   const lines = ["Coze Agent Tuner status:"];
   for (const framework of ["codex", "claude-code"]) {
     const agent = agents[framework];
-    const desired = config[framework];
+    const desired = safeDesiredConfig(framework, config[framework]);
     lines.push(`- ${framework}: ${agent ? agent.agentId : "not detected"}`);
     lines.push(`  current model: ${agent ? agent.model : "unknown"}`);
     lines.push(`  desired: ${JSON.stringify(desired)}`);
