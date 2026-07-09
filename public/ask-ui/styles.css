@@ -1373,7 +1373,8 @@ h2 {
 
 .output-panel {
   min-height: 0;
-  padding: 28px 32px 36px;
+  /* V0.7.2：缩小上下 padding 让首屏饱满；左右 padding 收紧让正文卡片更宽 */
+  padding: 22px 24px 28px;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1412,41 +1413,52 @@ h2 {
 }
 
 .question-echo {
+  /* V0.7.2：升级为 stable answer meta block：
+     - 不再强制 nowrap + ellipsis（用户反馈头部偏弱）
+     - 用 accent 顶边 + 左侧 padding-block 形成 "问题引用块" 视觉
+     - 与正文卡片用同色边框统一 */
   display: block;
-  margin: 0 0 14px;
-  padding: 6px 12px;
-  border-left: 2px solid var(--accent);
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
   border-radius: 2px;
-  background: transparent;
-  color: var(--muted);
+  background: var(--accent-soft);
+  color: var(--ink-soft);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13.5px;
-  /* V0.4.1 + V0.4.2：过长单行 ellipsis，避免换行成两行 */
-  max-width: 100%;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 14px;
+  line-height: 1.55;
   box-sizing: border-box;
 }
 
 .question-echo strong {
-  color: var(--ink-soft);
+  color: var(--accent-dark);
   font-weight: 600;
   margin-right: 6px;
+  letter-spacing: 0.02em;
 }
 
 .answer {
   min-height: 360px;
+  /* V0.7.2：去掉 70ch 窄约束，让卡片吃满中栏；
+     视觉阅读舒适宽度由 .answer > p 的 max-width 单独约束 */
   width: 100%;
-  padding: 28px 32px 30px;
+  padding: 28px 32px 32px;
   border-radius: var(--radius-md);
   background: var(--panel-strong);
   border: 1px solid var(--line);
-  line-height: 1.85;
+  line-height: 1.78;
   color: var(--ink);
-  font-size: 16px;
-  max-width: 70ch;
+  font-size: 15.5px;
+}
+
+/* V0.7.2：段落 + 列表项单独约束阅读舒适宽度；
+   不让 max-width 70ch 在卡片层把整个回答卡往左挤 */
+.answer > p,
+.answer > ul,
+.answer > ol,
+.answer > pre,
+.answer > blockquote {
+  max-width: 72ch;
 }
 
 /* V0.6.7：空状态与 loading 状态尺寸一致，避免从空态跳变到 loading 时跳动 */
@@ -1476,20 +1488,21 @@ h2 {
 .answer h1,
 .answer h2,
 .answer h3 {
-  margin: 26px 0 12px;
+  /* V0.7.2：拉宽字号阶梯 + 增加段间距，让标题层级更分明 */
+  margin: 28px 0 14px;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: -0.005em;
 }
 
 .answer h1 {
-  font-size: 22px;
-  padding-bottom: 8px;
+  font-size: 24px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--line-soft);
 }
 
 .answer h3 {
-  font-size: 16px;
+  font-size: 17px;
   color: var(--ink);
 }
 
@@ -1498,12 +1511,15 @@ h2 {
 
 .answer ul,
 .answer ol {
-  margin: 12px 0 14px;
-  padding-left: 22px;
+  /* V0.7.2：列表上下间距更自然，与段落节奏对齐 */
+  margin: 14px 0 18px;
+  padding-left: 24px;
 }
 
 .answer li {
-  margin: 6px 0;
+  /* V0.7.2：li 上下间距 6 → 8px，更适合扫读 */
+  margin: 8px 0;
+  line-height: 1.7;
 }
 
 .answer li::marker {
@@ -1586,8 +1602,11 @@ h2 {
 
 .answer h2 {
   position: relative;
-  margin-top: 32px;
-  padding-top: 12px;
+  /* V0.7.2：h2 顶边距离 + padding-top 重新调到与 h1 阶梯匹配 */
+  margin-top: 34px;
+  padding-top: 14px;
+  /* V0.7.2：h2 字号 18px → 19px，作为章节标题主干 */
+  font-size: 19px;
   color: var(--highlight-ink);
 }
 
@@ -1596,7 +1615,8 @@ h2 {
   position: absolute;
   top: 0;
   left: 0;
-  width: 22px;
+  /* V0.7.2：h2 顶边略加长，与更高字号更协调 */
+  width: 26px;
   height: 2px;
   background: var(--highlight-ink);
   border-radius: 2px;
@@ -1607,7 +1627,8 @@ h2 {
 }
 
 .answer p {
-  margin: 14px 0;
+  /* V0.7.2：段间距从 14px → 16px，呼吸更自然 */
+  margin: 16px 0;
   color: var(--ink);
 }
 

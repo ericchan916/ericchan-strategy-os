@@ -4397,11 +4397,22 @@ test("V0.4.1 E1: .shell / .composer-inner / .footer 都用 min(var(--content-wid
   assert.ok(m.length >= 3, `应至少 3 处使用（.shell / .composer-inner / .footer），实际 ${m.length}`);
 });
 
-test("V0.4.1 E2: .question-echo 单行 ellipsis（基础或桌面端 media）", () => {
-  // 接受：基础规则 white-space:nowrap，或 @media (min-width: 900px) 块内
-  const baseRule = /\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
-  const mediaRule = /@media[^{]+\{\s*\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
-  assert.ok(baseRule || mediaRule, "应存在 .question-echo white-space:nowrap（基础或 media）");
+test("V0.7.2: .question-echo 升级为 stable answer meta block（不再 nowrap）", () => {
+  // V0.4.1 / V0.4.2 的单行 ellipsis 是为了避免 loading 时跳动；
+  // V0.7.2 用户反馈头部偏弱，现在 question-echo 是 accent 顶边 + accent-soft 背景的稳定元信息块，
+  // 长问题允许自然换行（不再 white-space: nowrap）。
+  const rule = stylesCss.match(/\.question-echo\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .question-echo 规则");
+  const block = rule[0];
+  // 不再强制单行 ellipsis
+  assert.equal(/white-space\s*:\s*nowrap/.test(block), false,
+    ".question-echo 不应再 nowrap（V0.7.2 升级为可换行 meta block）");
+  // 仍保留字重 / accent 顶边视觉
+  assert.ok(/border-left\s*:\s*\d+px\s+solid\s+var\(--accent\)/.test(block) ||
+            /border-left\s*:\s*\d+px\s+solid\s+var\(--accent\)/.test(block),
+    ".question-echo 仍含 accent 顶边");
+  assert.ok(/border-radius|background-color|background\s*:/.test(block),
+    ".question-echo 应有可视背景 / 圆角形成 meta block");
 });
 
 test("V0.4.1 E3: 移动端保留单列堆叠（.layout 收成 1 列）", () => {
@@ -4697,10 +4708,15 @@ test("V0.4.2 F9a: composer-inner / shell / footer 仍使用 min(--content-width,
 });
 
 // F10：.question-echo 单行 ellipsis（V0.4.1 已实现，V0.4.2 不回归）
-test("V0.4.2 F10a: .question-echo 仍单行 ellipsis", () => {
-  const baseRule = /\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
-  const mediaRule = /@media[^{]+\{\s*\.question-echo\s*\{[^}]*white-space\s*:\s*nowrap/s.test(stylesCss);
-  assert.ok(baseRule || mediaRule, ".question-echo 应保持单行省略（基础或 media）");
+test("V0.7.2: .question-echo 仍含 strong + accent 顶边（meta block 形式）", () => {
+  // V0.4.2 F10a 原断言是单行 ellipsis。
+  // V0.7.2 升级为 stable answer meta block（不再 white-space: nowrap）。
+  // 这里重新断言：仍含 strong + accent 视觉，但不强制 nowrap。
+  const rule = stylesCss.match(/\.question-echo\s*\{[^}]*\}/);
+  assert.ok(rule, "应存在 .question-echo 规则");
+  const block = rule[0];
+  assert.ok(/border-left\s*:/.test(block), ".question-echo 仍含 border-left");
+  assert.ok(/background/.test(block), ".question-echo 仍含 background 形成 meta block");
 });
 
 // F11：+ 机会池按钮在 question-echo 旁不被挤压（output-head 是 flex space-between）
