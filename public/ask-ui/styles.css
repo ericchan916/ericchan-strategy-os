@@ -106,7 +106,8 @@ h1 {
 
 .subtitle {
   margin: 6px 0 0;
-  color: var(--muted);
+  /* V0.7.1：subtitle 颜色退到 muted-soft 让 hero 整体退到背景 */
+  color: var(--muted-soft);
   font-size: 15.5px;
   line-height: 1.55;
 }
@@ -124,6 +125,14 @@ h1 {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 11.5px;
   letter-spacing: 0.04em;
+  /* V0.7.1：hero 状态行 idle 透明度 0.85；hover/focus 提到 1 */
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+}
+
+.status-line:hover,
+.status-line:focus-within {
+  opacity: 1;
 }
 
 .status-dot {
@@ -682,7 +691,8 @@ h2 {
 }
 
 .opportunity-item {
-  padding: 13px 14px;
+  /* V0.7.1：左栏密度收紧 */
+  padding: 10px 12px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: var(--panel-strong);
@@ -698,7 +708,8 @@ h2 {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 10px;
+  /* V0.7.1：head 内 gap 略收紧 */
+  gap: 8px;
 }
 
 .opportunity-item h3 {
@@ -1273,7 +1284,8 @@ h2 {
 .composer-side {
   display: flex;
   align-items: center;
-  gap: 14px;
+  /* V0.7.1：composer-side gap 略收紧 */
+  gap: 12px;
 }
 
 .search-toggle {
@@ -1338,13 +1350,23 @@ h2 {
 }
 
 .status-text {
+  /* V0.7.1：状态文字字号 12.5px → 12px；idle 透明度 0.78 */
   color: var(--muted);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 12.5px;
+  font-size: 12px;
+  opacity: 0.78;
+  transition: opacity 120ms ease;
 }
 
+.status-text:hover,
+.status-text:focus-within {
+  opacity: 1;
+}
+
+/* 错误状态保持高对比度 */
 .status-text[data-tone="error"] {
   color: var(--danger);
+  opacity: 1;
 }
 
 /* ---------------- Output Panel ---------------- */
