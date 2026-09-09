@@ -18,6 +18,62 @@ external AI trends + EricChan project context
 
 This stage does not include a full Dashboard, login, database, or multi-user system.
 
+## Quick Start
+
+If you are opening this project for the first time, use this path:
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Copy the example environment file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+3. Safe first run without a real API:
+
+```bash
+npm run report:mock
+```
+
+4. Start the local Ask UI when you want the interactive workspace:
+
+```bash
+npm run ask:ui
+```
+
+Useful scripts:
+
+- `npm run report:mock`: generate a full mock report without calling a real LLM API.
+- `npm run report`: generate a live report when `.env` is configured.
+- `npm run daily`: run the daily report + validation + feedback-file flow.
+- `npm run ask:ui`: start the local Ask UI.
+- `npm test`: run the local verification tests.
+
+## Top-Level Directory Guide
+
+| Directory | Purpose |
+|---|---|
+| `config/` | Source and runtime configuration used by the reporting workflow. |
+| `context/` | Core EricChan context and long-lived background inputs for analysis. |
+| `daily-command/` | Generated Daily Command outputs and related data. |
+| `data/` | Structured JSON outputs, raw snapshots, reviews, and opportunity data. |
+| `docs/` | Supporting documentation and project notes. |
+| `feedback/` | Human review feedback captured after daily reports. |
+| `opportunities/` | Opportunity Pool Markdown, review packages, and validation packs. |
+| `prompts/` | Prompt files used by Ask Mode and report generation. |
+| `proposals/` | Human-reviewable update proposals generated from reviews. |
+| `public/` | Static assets for the local Ask UI. |
+| `reports/` | Human-readable Markdown strategy reports. |
+| `reviews/` | Generated Daily Review Markdown files. |
+| `scripts/` | CLI scripts that drive reporting, Ask Mode, reviews, and opportunity workflows. |
+| `templates/` | Reusable Markdown templates such as feedback and review templates. |
+| `test/` | Test assets or local verification support files. |
+
 ## Install
 
 ```bash
