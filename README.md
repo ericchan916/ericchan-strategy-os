@@ -1,58 +1,70 @@
 # EricChan Strategy OS
 
-Stage 0.5 is a local daily strategy report generator for EricChan. It reads external AI trend signals, combines them with `context/context.md`, asks an OpenAI-compatible LLM for opportunity-aware analysis, and writes both Markdown and structured JSON.
+EricChan Strategy OS is a local-first AI strategy workspace for opportunity discovery, goal-aware decisions, and deliberate execution. It combines local context, an Opportunity Pool, optional web research, and an OpenAI-compatible LLM to help a solo builder decide what deserves attention today.
 
-It is not a generic AI news digest and not a legacy project optimizer. A useful report must identify monetizable new project opportunities, judge EricChan fit, define MVP validation paths, and use legacy projects only as learning material unless the user explicitly reactivates them.
+It is not a generic AI news digest, a legacy-project optimizer, or a project-management suite. Existing projects are learning material and capability samples by default. The system protects attention first, then recommends only the smallest useful next action.
 
-## Stage 0.5 Goal
+## Install and Run
 
-Prove this loop:
+### Windows: one-click project setup
 
-```text
-external AI trends + EricChan project context
--> LLM analysis
--> daily strategy report
--> Markdown + JSON
--> future Obsidian archive and Dashboard
-```
-
-This stage does not include a full Dashboard, login, database, or multi-user system.
-
-## Quick Start
-
-If you are opening this project for the first time, use this path:
-
-1. Install dependencies:
-
-```bash
-npm install
-```
-
-2. Copy the example environment file:
+1. Install [Node.js 18+ LTS](https://nodejs.org/) once.
+2. Clone or download this repository.
+3. Double-click `install.cmd`.
+4. Start the local workspace:
 
 ```powershell
-Copy-Item .env.example .env
-```
-
-3. Safe first run without a real API:
-
-```bash
-npm run report:mock
-```
-
-4. Start the local Ask UI when you want the interactive workspace:
-
-```bash
 npm run ask:ui
 ```
 
+Open [http://127.0.0.1:5177](http://127.0.0.1:5177). The server listens on loopback only and is not exposed to your local network.
+
+`install.cmd` installs the locked dependencies, creates `.env` from `.env.example` only when `.env` is missing, and runs `npm test`. It never overwrites an existing `.env`.
+
+### macOS and Linux
+
+```bash
+git clone https://github.com/ericchan916/ericchan-strategy-os.git
+cd ericchan-strategy-os
+sh install.sh
+npm run ask:ui
+```
+
+### Manual setup
+
+```bash
+npm ci
+```
+
+Copy `.env.example` to `.env` only when you need real LLM or search integrations. The product works in local fallback mode without API keys, and web search remains off by default.
+
+## What You Can Do
+
+- Ask a Chinese strategic question through the local Ask UI or `npm run ask`.
+- Set a lightweight current Goal to anchor decisions without creating an OKR system.
+- Save, review, and refine promising opportunities locally.
+- Generate a project checkup, kickoff package, or copy-ready task prompt for Codex or Claude Code.
+- Enable web search per question after configuring a supported provider.
+
 Useful scripts:
 
-- `npm run report:mock`: generate a full mock report without calling a real LLM API.
-- `npm run report`: generate a live report when `.env` is configured.
-- `npm run daily`: run the daily report + validation + feedback-file flow.
 - `npm run ask:ui`: start the local Ask UI.
-- `npm test`: run the local verification tests.
+- `npm run ask -- "今天适合做什么？"`: ask from the terminal.
+- `npm run report:mock`: generate a safe report without a real LLM API.
+- `npm run today`: run the daily local workflow.
+- `npm run llm:check`: inspect LLM configuration without revealing keys.
+- `npm run search:check`: inspect search configuration without revealing keys.
+- `npm test`: run the full verification suite.
+
+## Open Source and Safety
+
+- Licensed under [MIT](LICENSE).
+- The GitHub repository is public; `package.json` stays `private: true` to prevent accidental publication to npm.
+- `.env`, API keys, generated reports, opportunity data, and other user-generated artifacts are ignored by Git.
+- Search is opt-in per question. The app does not automatically browse the web.
+- Sensitive `sk-*` text is redacted before it reaches prompts, search queries, answers, history, or copy actions.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull-request guidance.
 
 ## Top-Level Directory Guide
 

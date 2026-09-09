@@ -1,8 +1,24 @@
 {
   "name": "ericchan-strategy-os",
-  "version": "0.1.0",
-  "description": "Stage 0.5 local daily strategy report generator for EricChan.",
+  "version": "0.7.2",
+  "description": "A local-first AI strategy workspace for opportunity discovery, goal-aware decisions, and on-demand research.",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericchan916/ericchan-strategy-os.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ericchan916/ericchan-strategy-os/issues"
+  },
+  "homepage": "https://github.com/ericchan916/ericchan-strategy-os#readme",
+  "keywords": [
+    "ai",
+    "strategy",
+    "opportunity-discovery",
+    "local-first",
+    "agent-workflow"
+  ],
   "scripts": {
     "report": "node scripts/generate-report.js",
     "report:mock": "node scripts/generate-report.js --mock",

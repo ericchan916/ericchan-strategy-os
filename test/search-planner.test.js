@@ -18,6 +18,7 @@ test("wide trend question is rewritten for EricChan AI opportunity search", () =
 
 test("planner classifies common search intents", () => {
   assert.equal(planSearchQueries("最近 Anthropic 有什么新闻？").intent, "news");
+  assert.equal(planSearchQueries("最近 AI Agent 有什么新机会？").intent, "ai-opportunity");
   assert.equal(planSearchQueries("这个 GitHub 项目值不值得做？").intent, "project-research");
   assert.equal(planSearchQueries("有没有类似产品？").intent, "competitor-research");
   assert.equal(planSearchQueries("API 文档怎么接？").intent, "technical-docs");

@@ -71,8 +71,8 @@ function classifySearchIntent(question) {
   if (/API 文档|SDK|当前版本|如何接入|怎么接入|接口文档/i.test(text)) return "technical-docs";
   if (/类似产品|竞品|市场上有没有人做|有没有人做|同类产品/i.test(text)) return "competitor-research";
   if (/我看到一个|帮我查这个项目|GitHub 项目|github 项目|值不值得做|这个产品/i.test(text)) return "project-research";
-  if (/news|新闻|发布了什么|这两天.*AI|最近.*(Anthropic|OpenAI|Google|Gemini|Claude|模型|AI)/i.test(text)) return "news";
   if (!isFinanceQuestion(text) && isBroadOpportunityQuestion(text)) return "ai-opportunity";
+  if (/news|新闻|发布了什么|这两天.*AI|最近.*(Anthropic|OpenAI|Google|Gemini|Claude|模型|AI)/i.test(text)) return "news";
   return "general";
 }
 
